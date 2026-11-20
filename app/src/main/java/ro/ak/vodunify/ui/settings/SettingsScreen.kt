@@ -129,6 +129,7 @@ fun SettingsScreen(
                 )
             }
         }
+        item { PlaybackSection() }
         item {
             Text("Conturi", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         }
@@ -201,7 +202,7 @@ private fun ConnectorRow(connector: Connector) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(connector.displayName, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 val status = when {
-                    connector.kind == ConnectorKind.PLAYER -> "Țintă redare · etapa 4"
+                    connector.kind == ConnectorKind.PLAYER -> "Țintă redare · vezi Redare"
                     connector.isConfigured -> "Chei prezente · conectare în etapa 5"
                     else -> "Lipsesc cheile API"
                 }
