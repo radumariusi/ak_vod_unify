@@ -35,6 +35,8 @@ class StatusActivity : Activity() {
     private lateinit var sent: TextView
     private lateinit var accessButton: Button
     private lateinit var batteryButton: Button
+    private lateinit var overlayButton: Button
+    private lateinit var dotButton: Button
 
     private val refresher = object : Runnable {
         override fun run() {
@@ -66,6 +68,13 @@ class StatusActivity : Activity() {
         column.addView(accessButton)
         batteryButton = button("Nu opri scrobblerul pentru economie de baterie") { askBatteryExemption() }
         column.addView(batteryButton)
+        overlayButton = button("Permite bulina din dreapta sus (peste alte aplicații)") { openOverlaySettings() }
+        column.addView(overlayButton)
+        dotButton = button("") {
+            Prefs.setDotEnabled(this, !Prefs.dotEnabled(this))
+            render()
+        }
+        column.addView(dotButton)
         column.addView(button("Deschide AK VOD Unify") { openMainApp() })
 
         adb = text("", 14f).also { it.setTextIsSelectable(true) }.also(column::addView)
@@ -81,6 +90,8 @@ class StatusActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // Din prim-plan pornirea serviciului e mereu permisă.
+        KeepAliveService.start(this)
         handler.post(refresher)
     }
 
@@ -96,19 +107,37 @@ class StatusActivity : Activity() {
         val main = Access.isMainAppInstalled(this)
         val battery = Access.isIgnoringBatteryOptimizations(this)
         val pending = Forwarder.get(this).pendingCount()
+        val overlay = Access.canDrawOverlays(this)
         status.text = buildString {
             append(if (enabled) "✅ Acces la sesiunile media: DA" else "❌ Acces la sesiunile media: NU (vezi mai jos)")
             if (enabled && !connected) append("\n⏳ Accesul e dat, aștept ca Android să pornească ascultătorul…")
             append(if (main) "\n✅ AK VOD Unify instalat" else "\n❌ AK VOD Unify nu e instalat (pachet ${BuildConfig.MAIN_APP_ID})")
             append(if (battery) "\n✅ Scutit de economia de baterie" else "\nℹ️ Nu e scutit de economia de baterie (opțional)")
+            append(if (ScrobblerState.keepAliveRunning) "\n✅ Rulează permanent (serviciu în prim-plan)" else "\n⚠️ Serviciul permanent nu rulează încă")
+            append(
+                when {
+                    !overlay -> "\nℹ️ Bulina nu are voie să apară peste aplicații"
+                    Prefs.dotEnabled(this@StatusActivity) -> "\n✅ Bulina e afișată (verde = activ, roșu = urmărește o redare)"
+                    else -> "\nℹ️ Bulina e ascunsă"
+                },
+            )
             if (pending > 0) append("\n⏳ $pending evenimente așteaptă să ajungă în AK VOD Unify")
         }
+        overlayButton.visibility = if (overlay) View.GONE else View.VISIBLE
+        dotButton.visibility = if (overlay) View.VISIBLE else View.GONE
+        dotButton.text = if (Prefs.dotEnabled(this)) "Ascunde bulina" else "Arată bulina"
         accessButton.visibility = if (enabled) View.GONE else View.VISIBLE
         batteryButton.visibility = if (battery) View.GONE else View.VISIBLE
-        adb.visibility = if (enabled) View.GONE else View.VISIBLE
-        adb.text = "Dacă televizorul nu are setarea „Acces la notificări”, accesul se dă o singură dată " +
-            "prin ADB (de pe telefon, cu o aplicație ADB prin Wi-Fi), cu comanda:\n\n${Access.adbCommand(this)}\n\n" +
-            "Accesul rămâne și după restart."
+        val listenerHelp = if (enabled) {
+            ""
+        } else {
+            "Dacă televizorul nu are setarea „Acces la notificări”, accesul se dă o singură dată " +
+                "prin ADB (de pe telefon, cu o aplicație ADB prin Wi-Fi), cu comanda:\n\n${Access.adbCommand(this)}\n\n" +
+                "Accesul rămâne și după restart.\n\n"
+        }
+        adb.text = listenerHelp + "Pe televizoarele care închid aplicațiile (ex. TCL), tot prin ADB, o singură dată:\n" +
+            "• bulina: ${Access.adbOverlayCommand(this)}\n" +
+            "• fără economie de baterie: ${Access.adbBatteryCommand(this)}"
 
         val sessions = ScrobblerState.live
         live.text = when {
@@ -164,6 +193,15 @@ class StatusActivity : Activity() {
         }
         adb.text = "Televizorul nu are ecranul „Acces la notificări”. Folosește comanda ADB:\n\n${Access.adbCommand(this)}"
         adb.requestFocus()
+    }
+
+    private fun openOverlaySettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+        } catch (_: Exception) {
+            adb.text = "Televizorul nu are ecranul pentru „peste alte aplicații”. Dă voie prin ADB:\n\n${Access.adbOverlayCommand(this)}"
+            adb.requestFocus()
+        }
     }
 
     @SuppressLint("BatteryLife")

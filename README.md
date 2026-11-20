@@ -128,7 +128,7 @@ Aplicație separată, foarte mică (`scrobbler/`, pachet `ro.ak.vodscrobbler`), 
    - pe TV: *Setări → Sistem → Despre* → apasă de 7 ori pe *Versiune build Android TV OS* → *Opțiuni dezvoltator* → pornește *Depanare USB* / *Depanare wireless*;
    - pe telefon, o aplicație ADB prin Wi-Fi (ex. „Bugjaeger” sau „Remote ADB Shell”) → conectare la IP-ul TV-ului (portul 5555, sau codul de asociere de la *Depanare wireless*);
    - comanda (o vezi și în AK Scrobbler): `adb shell cmd notification allow_listener ro.ak.vodscrobbler/ro.ak.vodscrobbler.MediaListenerService`
-4. Opțional: **Nu opri scrobblerul pentru economie de baterie**.
+4. Opțional, pe TV-urile care închid aplicațiile (ex. TCL): **Permite bulina** (sau `adb shell appops set ro.ak.vodscrobbler SYSTEM_ALERT_WINDOW allow`) și scutirea de baterie (`adb shell dumpsys deviceidle whitelist +ro.ak.vodscrobbler`). Scrobblerul rulează și ca serviciu în prim-plan; bulina din dreapta sus arată starea: verde = activ, roșu = urmărește o redare, gri = fără acces.
 5. Pornește ceva în Netflix, pune pauză și verifică în AK Scrobbler → „Ce văd acum” și în AK VOD Unify → Setări → AK Scrobbler.
 
 ## AK Import RO / US și CSV Netflix (etapa 9B + 9C)
@@ -154,6 +154,10 @@ Funcțiile din [AK VOD Calendar](https://github.com/radumariusi/ak_vod_calendar)
 - **Filtre**: „Doar aplicațiile mele” și „Arată și ce nu trece pragurile”, care arată estompat ce s-a filtrat și de ce.
 - **Notificări**: pornești din *Setări → Calendar* fie „Doar ce urmăresc”, fie „Ce urmăresc + rezumatul zilei”, și alegi ora. Canalul **„Azi apare”** de pe ecranul principal Android TV se reface la 3 ore.
 - **Setări → Calendar**: aplicațiile tale și țara fiecăreia (detectate automat la prima pornire), praguri, cheia OMDb, categorii, notificări, liste de urmărite / ascunse.
+
+## Actualizări
+
+*Setări → Aplicație*: „Verifică actualizări” pentru AK VOD Unify și „Verifică aplicațiile AK” pentru AK Scrobbler, AK Import RO și AK Import US. Acestea se instalează sau se actualizează din același release (AK VOD Unify descarcă APK-ul și sistemul cere confirmarea). Aplicațiile mici nu au propriul updater: AK Scrobbler nici nu are acces la internet.
 
 ## Semnare și release
 

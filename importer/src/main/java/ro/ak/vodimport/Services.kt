@@ -13,6 +13,8 @@ data class Service(
     val script: String?,
     val experimental: Boolean,
     val note: String,
+    /** Scriptul poate rula de pe orice pagină a serviciului (nu doar de pe pagina de istoric). */
+    val runAnywhere: Boolean = false,
 ) {
     val supported: Boolean get() = script != null
 }
@@ -28,6 +30,7 @@ object Services {
             script = Scripts.NETFLIX,
             experimental = false,
             note = "Tot istoricul profilului ales, cu minutul unde ai rămas. Alege profilul după conectare.",
+            runAnywhere = true,
         ),
         Service(
             id = "primevideo",

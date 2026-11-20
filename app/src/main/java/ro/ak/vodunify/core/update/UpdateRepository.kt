@@ -51,15 +51,60 @@ class UpdateRepository @Inject constructor(
         }
     }
 
-    suspend fun download(update: AvailableUpdate, onProgress: (Float) -> Unit): File = withContext(Dispatchers.IO) {
+    /**
+     * Aplicațiile însoțitoare (AK Scrobbler, AK Import RO/US): versiunea instalată și cea din
+     * ultimul release, ca să le poți instala / actualiza din AK VOD Unify.
+     */
+    suspend fun companions(): List<CompanionStatus> = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("https://api.github.com/repos/${BuildConfig.UPDATE_REPO}/releases/latest")
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "AKVodUnify-Updater")
+            .build()
+        val release = http.newCall(request).execute().use { resp ->
+            if (resp.code == 404) null
+            else if (!resp.isSuccessful) throw IOException("GitHub a răspuns ${resp.code}")
+            else json.decodeFromString(GhRelease.serializer(), resp.body!!.string())
+        }
+        CompanionApp.entries.map { c ->
+            val asset = release?.assets?.firstOrNull { it.name.startsWith(c.assetPrefix, ignoreCase = true) && it.name.endsWith(".apk") }
+            CompanionStatus(
+                companion = c,
+                installedCode = installedVersionCode(c.packageName),
+                remoteCode = asset?.let { Version.versionCodeFromAssetName(it.name) },
+                remoteName = release?.tagName?.removePrefix("v"),
+                apkUrl = asset?.downloadUrl,
+                apkName = asset?.name,
+                sizeBytes = asset?.size ?: 0,
+            )
+        }
+    }
+
+    fun installedVersionCode(pkg: String): Long? = try {
+        val info = context.packageManager.getPackageInfo(pkg, 0)
+        androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(info)
+    } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
+        null
+    }
+
+    suspend fun downloadCompanion(status: CompanionStatus, onProgress: (Float) -> Unit): File {
+        val url = requireNotNull(status.apkUrl) { "Release-ul nu conține ${status.companion.label}" }
+        return fetch(url, File(context.cacheDir, "companions").apply { mkdirs() }, "${status.companion.name}.apk", status.sizeBytes, onProgress)
+    }
+
+    suspend fun download(update: AvailableUpdate, onProgress: (Float) -> Unit): File {
         val dir = File(context.cacheDir, "updates").apply { mkdirs() }
         dir.listFiles()?.forEach { it.delete() }
-        val target = File(dir, "update.apk")
-        val request = Request.Builder().url(update.apkUrl).header("User-Agent", "AKVodUnify-Updater").build()
+        return fetch(update.apkUrl, dir, "update.apk", update.sizeBytes, onProgress)
+    }
+
+    private suspend fun fetch(url: String, dir: File, name: String, size: Long, onProgress: (Float) -> Unit): File = withContext(Dispatchers.IO) {
+        val target = File(dir, name)
+        val request = Request.Builder().url(url).header("User-Agent", "AKVodUnify-Updater").build()
         http.newCall(request).execute().use { resp ->
             if (!resp.isSuccessful) throw IOException("Descărcarea a eșuat (${resp.code})")
             val body = resp.body ?: throw IOException("Răspuns gol")
-            val total = body.contentLength().takeIf { it > 0 } ?: update.sizeBytes
+            val total = body.contentLength().takeIf { it > 0 } ?: size
             body.byteStream().use { input ->
                 target.outputStream().use { output ->
                     val buf = ByteArray(64 * 1024)

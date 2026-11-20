@@ -62,6 +62,7 @@ class MediaListenerService : NotificationListenerService() {
         handler.removeCallbacks(ticker)
         handler.postDelayed(ticker, TICK_CHECK_MS)
         Forwarder.get(this).flushPending()
+        KeepAliveService.start(this)
     }
 
     override fun onListenerDisconnected() {
