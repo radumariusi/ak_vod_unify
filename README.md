@@ -128,7 +128,7 @@ Aplicație separată, foarte mică (`scrobbler/`, pachet `ro.ak.vodscrobbler`), 
    - pe TV: *Setări → Sistem → Despre* → apasă de 7 ori pe *Versiune build Android TV OS* → *Opțiuni dezvoltator* → pornește *Depanare USB* / *Depanare wireless*;
    - pe telefon, o aplicație ADB prin Wi-Fi (ex. „Bugjaeger” sau „Remote ADB Shell”) → conectare la IP-ul TV-ului (portul 5555, sau codul de asociere de la *Depanare wireless*);
    - comanda (o vezi și în AK Scrobbler): `adb shell cmd notification allow_listener ro.ak.vodscrobbler/ro.ak.vodscrobbler.MediaListenerService`
-4. Opțional: **Nu opri scrobblerul pentru economie de baterie**.
+4. Opțional, pe TV-urile care închid aplicațiile (ex. TCL): **Permite bulina** (sau `adb shell appops set ro.ak.vodscrobbler SYSTEM_ALERT_WINDOW allow`) și scutirea de baterie (`adb shell dumpsys deviceidle whitelist +ro.ak.vodscrobbler`). Scrobblerul rulează și ca serviciu în prim-plan; bulina din dreapta sus arată starea: verde = activ, roșu = urmărește o redare, gri = fără acces.
 5. Pornește ceva în Netflix, pune pauză și verifică în AK Scrobbler → „Ce văd acum” și în AK VOD Unify → Setări → AK Scrobbler.
 
 ## AK Import RO / US și CSV Netflix (etapa 9B + 9C)

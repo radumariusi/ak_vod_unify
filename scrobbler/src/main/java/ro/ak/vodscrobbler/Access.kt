@@ -14,6 +14,13 @@ object Access {
     fun adbCommand(context: Context): String =
         "adb shell cmd notification allow_listener ${component(context).flattenToString()}"
 
+    fun canDrawOverlays(context: Context) = Settings.canDrawOverlays(context)
+
+    /** Comenzile ADB pentru televizoarele fără ecranele de setări (ex. TCL). */
+    fun adbOverlayCommand(context: Context) = "adb shell appops set ${context.packageName} SYSTEM_ALERT_WINDOW allow"
+
+    fun adbBatteryCommand(context: Context) = "adb shell dumpsys deviceidle whitelist +${context.packageName}"
+
     fun isListenerEnabled(context: Context): Boolean {
         val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners").orEmpty()
         val me = component(context)

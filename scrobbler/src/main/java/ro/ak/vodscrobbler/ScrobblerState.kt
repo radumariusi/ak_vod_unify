@@ -14,4 +14,6 @@ object ScrobblerState {
     @Volatile var listenerConnected: Boolean = false
 
     @Volatile var live: List<LiveSession> = emptyList()
+
+    @Volatile var keepAliveRunning: Boolean = false
 }
