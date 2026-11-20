@@ -107,4 +107,15 @@ class TitleParserTest {
         assertEquals(1, first.season)
         assertEquals(1, first.episode)
     }
+
+    @Test
+    fun countryQualifierInShowName() {
+        assertEquals("The Office" to "US", MatchRules.countryQualifier("The Office (U.S.)"))
+        assertEquals("The Office" to "GB", MatchRules.countryQualifier("The Office (UK)"))
+        assertEquals(null, MatchRules.countryQualifier("Dark (2017)"))
+        assertEquals(null, MatchRules.countryQualifier("Dark"))
+        val us = MatchRules.Candidate(2316, listOf("The Office"), 2005, listOf("US"))
+        val uk = MatchRules.Candidate(2996, listOf("The Office"), 2001, listOf("GB"))
+        assertEquals(2316L, MatchRules.pickExact("The Office", listOf(uk, us), country = "US")!!.id)
+    }
 }

@@ -19,14 +19,28 @@ data class ScrobbleMatch(val media: MediaRef, val runtimeMs: Long?)
 
 /** Alegerea candidatului (pură, testabilă): doar potriviri exacte de nume, fără ghicit. */
 object MatchRules {
-    data class Candidate(val id: Long, val names: List<String?>, val year: Int?)
+    data class Candidate(val id: Long, val names: List<String?>, val year: Int?, val countries: List<String> = emptyList())
 
-    fun pickExact(query: String, candidates: List<Candidate>, year: Int? = null): Candidate? {
+    fun pickExact(query: String, candidates: List<Candidate>, year: Int? = null, country: String? = null): Candidate? {
         val q = TitleParser.normalize(query)
         if (q.isEmpty()) return null
         val exact = candidates.filter { c -> c.names.any { it != null && TitleParser.normalize(it) == q } }
         if (year != null) exact.firstOrNull { it.year == year }?.let { return it }
+        if (country != null) exact.firstOrNull { country in it.countries }?.let { return it }
         return exact.firstOrNull()
+    }
+
+    private val QUALIFIER = Regex("""^(.*\S)\s*\(([^()]{1,12})\)$""")
+    private val COUNTRIES = mapOf("us" to "US", "usa" to "US", "u s" to "US", "u s a" to "US", "uk" to "GB", "u k" to "GB", "gb" to "GB")
+
+    /**
+     * „The Office (U.S.)” → („The Office”, „US”): Netflix pune țara în nume, TMDb nu.
+     * Anul („(2019)”) îl tratează deja TitleParser. null = fără calificativ de țară.
+     */
+    fun countryQualifier(name: String): Pair<String, String>? {
+        val m = QUALIFIER.find(name.trim()) ?: return null
+        val code = COUNTRIES[TitleParser.normalize(m.groupValues[2])] ?: return null
+        return m.groupValues[1] to code
     }
 
     fun sameName(a: String?, b: String?): Boolean =
@@ -77,11 +91,19 @@ class ScrobbleMatcher @Inject constructor(private val tmdb: TmdbClient) {
     }
 
     private suspend fun searchShow(name: String): TvShow? {
+        searchShowExact(name, null)?.let { return it }
+        // „The Office (U.S.)”: căutăm „The Office” și preferăm varianta din țara aceea.
+        val (base, country) = MatchRules.countryQualifier(name) ?: return null
+        return searchShowExact(base, country)
+    }
+
+    private suspend fun searchShowExact(name: String, country: String?): TvShow? {
         for (lang in LANGUAGES) {
             val page = tmdb.get("search/tv", mapOf("query" to name, "language" to lang), TmdbPage.serializer(TmdbListItem.serializer()))
             val pick = MatchRules.pickExact(
                 name,
-                page.results.map { MatchRules.Candidate(it.id, listOf(it.name, it.originalName), MatchRules.yearOf(it.firstAirDate)) },
+                page.results.map { MatchRules.Candidate(it.id, listOf(it.name, it.originalName), MatchRules.yearOf(it.firstAirDate), it.originCountry) },
+                country = country,
             ) ?: continue
             val details = tmdb.get("tv/${pick.id}", mapOf("language" to "en-US"), TmdbTitleDetails.serializer(), TmdbClient.LONG_TTL)
             return TvShow(details, page.results.first { it.id == pick.id })

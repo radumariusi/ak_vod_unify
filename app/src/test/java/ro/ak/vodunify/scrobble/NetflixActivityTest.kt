@@ -85,4 +85,20 @@ class NetflixActivityTest {
         val g = ro.ak.vodunify.core.scrobble.TitleParser.guesses(f).first()
         assertEquals(ro.ak.vodunify.core.scrobble.TitleGuess.NumberedEpisode("The Office (U.S.)", 1, 1, "Pilot"), g)
     }
+
+    @Test
+    fun structuredGuessesNeverTreatEpisodeAsMovie() {
+        val f = NetflixActivity.fields(NetflixViewedItem(series = "The Office (U.S.)", episode = "Pilot", title = "x", watchedAt = now))
+        assertEquals(
+            listOf(ro.ak.vodunify.core.scrobble.TitleGuess.SeasonNamedEpisode("The Office (U.S.)", null, "Pilot")),
+            ro.ak.vodunify.core.scrobble.TitleParser.guesses(f, "Netflix"),
+        )
+        val g = NetflixActivity.fields(NetflixViewedItem(series = "Dark", season = "Season 2", episode = "Episode 3", title = "x"))
+        assertEquals(
+            listOf(ro.ak.vodunify.core.scrobble.TitleGuess.NumberedEpisode("Dark", 2, 3, null)),
+            ro.ak.vodunify.core.scrobble.TitleParser.guesses(g, "Netflix"),
+        )
+        val movie = NetflixActivity.fields(NetflixViewedItem(title = "Pilot"))
+        assertEquals(listOf(ro.ak.vodunify.core.scrobble.TitleGuess.Movie("Pilot", null)), ro.ak.vodunify.core.scrobble.TitleParser.guesses(movie, "Netflix"))
+    }
 }

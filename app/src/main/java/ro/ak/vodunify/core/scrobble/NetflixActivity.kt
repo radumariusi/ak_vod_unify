@@ -44,7 +44,7 @@ object NetflixActivity {
     private val AFTER_MS = TimeUnit.MINUTES.toMillis(15)
     private val BEFORE_MS = TimeUnit.HOURS.toMillis(4)
     private val AMBIGUOUS_MS = TimeUnit.MINUTES.toMillis(2)
-    private val NUMBERED = Regex("""(?i)^(episode|episodul|episod|ep\.?)\s*\d{1,3}$""")
+    private val NUMBERED = Regex("""(?i)^(episode|episodul|episod|ep\.?)\s*(\d{1,3})$""")
 
     fun isNetflix(pkg: String) = pkg in PACKAGES
 
@@ -100,8 +100,13 @@ object NetflixActivity {
         out["title"] = series
         val episode = item.episode?.takeIf { it.isNotBlank() }
         val season = item.season?.takeIf { it.isNotBlank() }
-        val sn = item.seasonNumber
+        val sn = item.seasonNumber ?: season?.let { SEASON_NUMBER.find(it)?.groupValues?.get(1)?.toIntOrNull() }
         val en = item.episodeNumber
+        // Structura exactă, pentru [guesses] (TitleParser nu le citește ca texte).
+        out[NF_SERIES] = series
+        episode?.let { out[NF_EPISODE] = it }
+        sn?.let { out[NF_SEASON] = it.toString() }
+        en?.let { out[NF_EPISODE_NUMBER] = it.toString() }
         when {
             // Numerele exacte, cu numele episodului după ele (le înțelege TitleParser).
             sn != null && en != null -> out["display_subtitle"] = "Season $sn Episode $en" + (episode?.let { " $it" } ?: "")
@@ -112,6 +117,31 @@ object NetflixActivity {
         }
         return out
     }
+
+    /**
+     * Ipotezele pentru un episod citit din Netflix: știm sigur care e serialul și care e episodul,
+     * deci nu încercăm combinațiile generice (care ar putea lua numele episodului drept film,
+     * ex. „Pilot”). null = nu e un episod Netflix structurat; se folosește TitleParser obișnuit.
+     */
+    fun guesses(fields: Map<String, String>): List<TitleGuess>? {
+        if (fields["title_source"] != "netflix_activity") return null
+        val series = fields[NF_SERIES]?.takeIf { it.isNotBlank() } ?: return null
+        val episode = fields[NF_EPISODE]?.takeIf { it.isNotBlank() }
+        val season = fields[NF_SEASON]?.toIntOrNull()
+        val number = fields[NF_EPISODE_NUMBER]?.toIntOrNull()
+            ?: episode?.let { NUMBERED.matchEntire(it.trim())?.groupValues?.get(2)?.toIntOrNull() }
+        val out = mutableListOf<TitleGuess>()
+        if (number != null && season != null) out += TitleGuess.NumberedEpisode(series, season, number, episode?.takeUnless { NUMBERED.matches(it.trim()) })
+        if (episode != null && !NUMBERED.matches(episode.trim())) out += TitleGuess.SeasonNamedEpisode(series, season, episode)
+        if (number != null && season == null) out += TitleGuess.NumberedEpisode(series, null, number, null)
+        return out.distinct().ifEmpty { null }
+    }
+
+    const val NF_SERIES = "nf_series"
+    const val NF_EPISODE = "nf_episode"
+    const val NF_SEASON = "nf_season"
+    const val NF_EPISODE_NUMBER = "nf_episode_number"
+    private val SEASON_NUMBER = Regex("""(?i)(?:season|sezonul|sezon|series|part|partea)\s*(\d{1,2})""")
 
     private fun NetflixViewedItem.key() = id.ifBlank { title }
 }
