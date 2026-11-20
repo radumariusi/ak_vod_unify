@@ -88,6 +88,15 @@ jobs:
           SOUT="ak-scrobbler-${VERSION_NAME}-vc${VERSION_CODE}.apk"
           cp "$SCR" "$SOUT"
           echo "scrobbler=$SOUT" >> "$GITHUB_OUTPUT"
+          for R in ro us; do
+            SRC_I=importer/build/outputs/apk/$R/release/importer-$R-release.apk
+            if [ ! -f "$SRC_I" ]; then
+              echo "::error::APK-ul AK Import $R nu a fost generat."; ls -laR importer/build/outputs/apk; exit 1
+            fi
+            OUT_I="ak-import-$R-${VERSION_NAME}-vc${VERSION_CODE}.apk"
+            cp "$SRC_I" "$OUT_I"
+            echo "import_$R=$OUT_I" >> "$GITHUB_OUTPUT"
+          done
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -101,3 +110,5 @@ jobs:
           files: |
             ${{ steps.apk.outputs.file }}
             ${{ steps.apk.outputs.scrobbler }}
+            ${{ steps.apk.outputs.import_ro }}
+            ${{ steps.apk.outputs.import_us }}

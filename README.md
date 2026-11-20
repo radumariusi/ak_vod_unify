@@ -14,7 +14,7 @@ Hub VOD pentru **Android TV** (funcționează și pe telefon, cu touch): adună 
 | 6 | Publicare progres înapoi în surse (profiluri: automat / la cerere / doar vizualizare) + Diagnostic rute | ✅ |
 | 7 | Opțional: backend, Younify, import CSV | amânat |
 | 8 | Integrare AK VOD Calendar: tab Calendar (seriale + filme), notificări, canalul „Azi apare” | ✅ |
-| 9 | Istoric direct din servicii: **AK Scrobbler** (ce redă TV-ul, din orice aplicație), apoi login în servicii (AK Import) și import CSV | în lucru (A ✅) |
+| 9 | Istoric direct din servicii: **AK Scrobbler** (ce redă TV-ul, din orice aplicație), apoi login în servicii (AK Import) și import CSV | ✅ (A Scrobbler, B AK Import RO/US, C CSV) |
 
 ## Arhitectură
 
@@ -22,6 +22,7 @@ Hub VOD pentru **Android TV** (funcționează și pe telefon, cu touch): adună 
 app/src/main/java/ro/ak/vodunify/
 ├── core/connector   Connector, DeviceAuthConnector + Capability (istoric, progres, watchlist, următorul episod, deep link), ConnectorRegistry
 ├── core/trakt       Client Trakt API v2 (device code + PKCE, refresh token), DTO-uri, mapări, TraktConnector
+├── core/imports    Istoric importat (AK Import RO/US, CSV Netflix): coadă pe disc, potrivire TMDb în fundal, scriere ca sursă proprie
 ├── core/scrobble   Primește ce redă TV-ul de la AK Scrobbler (ContentProvider protejat), recunoaște titlul (TitleParser) și îl găsește în TMDb (ScrobbleMatcher)
 ├── core/publish    Publicare progres: profiluri, reguli (PublishPlanner), scriere + citire înapoi, Diagnostic rute
 ├── core/tracking    TrackingRepository: sincronizare din toți trackerii conectați în Room + acțiuni (văzut, De văzut)
@@ -130,6 +131,17 @@ Aplicație separată, foarte mică (`scrobbler/`, pachet `ro.ak.vodscrobbler`), 
 4. Opțional: **Nu opri scrobblerul pentru economie de baterie**.
 5. Pornește ceva în Netflix, pune pauză și verifică în AK Scrobbler → „Ce văd acum” și în AK VOD Unify → Setări → AK Scrobbler.
 
+## AK Import RO / US și CSV Netflix (etapa 9B + 9C)
+
+Modulul `importer/` produce **două aplicații** cu același cod: **AK Import RO** (`ro.ak.vodimport.ro`) și **AK Import US** (`ro.ak.vodimport.us`). Te conectezi în contul serviciului într-un browser din aplicație (parola o introduci doar pe site-ul serviciului), apoi „Importă istoricul” citește istoricul cu sesiunea ta, ca o extensie de browser, și îl trimite în AK VOD Unify (`/history` pe același ContentProvider protejat).
+
+- **VPN cu tunel pe aplicații**: pui **doar AK Import US** în tunelul US, o singură dată. AK Import RO, AK VOD Unify și AK Scrobbler merg direct. Fiecare AK Import îți arată de unde iese pe internet (țara IP-ului), ca să verifici tunelul.
+- **Netflix**: tot istoricul profilului ales (API-ul intern al paginii *Activitate de vizionare*), cu **minutul** unde ai rămas: sub 90% devine punct de reluare, restul istoric.
+- **Prime Video** (experimental): pagina *Istoric vizionări* (primevideo.com pe RO, amazon.com pe US); filmele, fără minut.
+- **Disney+, HBO Max, SkyShowtime, Peacock**: site-urile nu au o pagină de istoric de citit; ce vezi de acum încolo prinde AK Scrobbler.
+- **CSV Netflix** (*Setări → Istoric din servicii → Importă CSV Netflix*): `NetflixViewingHistory.csv` (Title, Date) sau `ViewingActivity.csv` din exportul de date (cu poziție și profiluri; alegi profilul).
+- În AK VOD Unify istoricul importat e o sursă proprie (`netflix`, `primevideo`): apare în Bibliotecă și în „Continuă vizionarea”; potrivirea în TMDb se face în fundal (WorkManager), doar cu nume exacte. Reimportul nu face dubluri. Din Setări vezi câte s-au găsit / negăsit și poți șterge istoricul importat.
+
 ## Calendar (etapa 8)
 
 Funcțiile din [AK VOD Calendar](https://github.com/radumariusi/ak_vod_calendar), mutate în tabul **Calendar**. Folosesc clientul TMDb al aplicației (aceeași cheie și același cache), conturile Trakt / SIMKL deja conectate și „Alege unde vezi”.
@@ -145,7 +157,7 @@ Funcțiile din [AK VOD Calendar](https://github.com/radumariusi/ak_vod_calendar)
 
 ## Semnare și release
 
-Release-ul se face **doar manual**: *Actions → Release APK → Run workflow*, cu versiunea (ex. `0.1.0`). Workflow-ul construiește APK-urile semnate `ak-vod-unify-<versiune>-vc<cod>.apk` și `ak-scrobbler-<versiune>-vc<cod>.apk` și publică un GitHub Release `v<versiune>`. Aplicația verifică acest release din *Setări → Verifică actualizări*.
+Release-ul se face **doar manual**: *Actions → Release APK → Run workflow*, cu versiunea (ex. `0.1.0`). Workflow-ul construiește APK-urile semnate `ak-vod-unify-<versiune>-vc<cod>.apk` `ak-scrobbler-…`, `ak-import-ro-…` și `ak-import-us-<versiune>-vc<cod>.apk` și publică un GitHub Release `v<versiune>`. Aplicația verifică acest release din *Setări → Verifică actualizări*.
 
 ### Varianta A (recomandată, merge doar de pe telefon)
 

@@ -47,7 +47,7 @@ class LibraryViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val filter = MutableStateFlow(LibraryFilter())
-    private val names = tracking.trackers.associate { it.id to it.displayName }
+    private val names = tracking.trackers.associate { it.id to it.displayName } + ro.ak.vodunify.core.imports.ImportSources.labels
 
     val state: StateFlow<LibraryUiState> = combine(
         tracking.library,
@@ -81,7 +81,8 @@ class LibraryViewModel @Inject constructor(
                 loading = false,
                 connected = input.connected,
                 filter = input.filter,
-                sources = tracking.trackers.filter { it.id in present }.map { SourceOption(it.id, it.displayName) },
+                sources = tracking.trackers.filter { it.id in present }.map { SourceOption(it.id, it.displayName) } +
+                    ro.ak.vodunify.core.imports.ImportSources.labels.filterKeys { it in present }.map { (id, label) -> SourceOption(id, label) },
                 counts = LibraryLogic.countsBySource(input.entries, input.filter.tab),
                 items = items,
                 total = filtered.size,

@@ -11,6 +11,9 @@ sealed interface TitleGuess {
     data class NamedEpisode(val show: String, val episodeTitle: String) : TitleGuess
 
     data class Movie(val title: String, val year: Int?) : TitleGuess
+
+    /** Serial + (eventual) sezonul + numele episodului, ca în istoricul Netflix. */
+    data class SeasonNamedEpisode(val show: String, val season: Int?, val episodeTitle: String) : TitleGuess
 }
 
 /**
