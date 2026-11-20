@@ -33,6 +33,8 @@ class Forwarder private constructor(private val context: Context) {
             put("position_ms", o.positionMs)
             put("duration_ms", o.media.durationMs ?: -1L)
             put("at", wallClock)
+            put("play_id", o.playId)
+            put("estimated", o.estimated)
             put("fields", JSONObject(o.media.fields as Map<*, *>))
         }
         executor.execute {
@@ -40,6 +42,7 @@ class Forwarder private constructor(private val context: Context) {
             val result = deliver(payload)
             if (result == null) enqueue(payload)
             log(payload, result ?: "în așteptare (AK VOD Unify n-a răspuns)")
+            DiagLog.add("${payload.optString("app")}: răspuns AK VOD Unify → ${result ?: "niciun răspuns, rămâne în coadă (${pendingCount()})"}")
         }
     }
 
@@ -71,6 +74,7 @@ class Forwarder private constructor(private val context: Context) {
     } catch (e: Exception) {
         // IllegalArgumentException = aplicația principală nu e instalată; SecurityException = altă semnătură.
         Log.w(TAG, "Nu pot trimite către AK VOD Unify: ${e.message}")
+        DiagLog.add("EROARE la trimitere către AK VOD Unify: ${e.javaClass.simpleName}: ${e.message}")
         null
     }
 

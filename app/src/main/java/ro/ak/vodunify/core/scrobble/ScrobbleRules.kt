@@ -4,8 +4,11 @@ import java.util.concurrent.TimeUnit
 
 /** Reguli pure pentru evenimentele din AK Scrobbler. */
 object ScrobbleRules {
-    /** Peste 90% la pauză/oprire = vizionare terminată (genericul de final). */
+    /** Implicit: peste 90% = vizionare terminată (genericul de final). Se schimbă din Setări. */
     const val WATCHED_AT = 0.90f
+
+    /** Pragurile „văzut” din care alegi în Setări (procente). */
+    val WATCHED_CHOICES = listOf(80, 85, 90, 95)
 
     /** Sub 10 minute nu e film sau episod (muzică, trailere, clipuri). */
     val MIN_DURATION_MS: Long = TimeUnit.MINUTES.toMillis(10)
@@ -25,7 +28,11 @@ object ScrobbleRules {
     fun progress(positionMs: Long, durationMs: Long?): Float? =
         durationMs?.takeIf { it > 0 }?.let { (positionMs.toFloat() / it).coerceIn(0f, 1f) }
 
-    fun isFinished(progress: Float?, isTick: Boolean) = !isTick && progress != null && progress >= WATCHED_AT
+    /** Trecut de prag = văzut, inclusiv în timpul redării (episodul următor pornește singur, fără pauză). */
+    fun isFinished(progress: Float?, threshold: Float = WATCHED_AT) = progress != null && progress >= threshold
+
+    /** Minut „estimat” (numărat de scrobbler de la pornire): nu coborâm sub minutul deja știut. */
+    fun mergeEstimated(estimatedMs: Long, knownMs: Long?): Long = maxOf(estimatedMs, knownMs ?: 0L)
 
     /** Textul brut (pentru jurnal), în ordinea în care îl citim. */
     fun rawLabel(fields: Map<String, String>): String =

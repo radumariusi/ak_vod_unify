@@ -27,6 +27,31 @@ object Access {
         return flat.split(':').mapNotNull { ComponentName.unflattenFromString(it) }.any { it == me }
     }
 
+    fun screenReaderComponent(context: Context) = ComponentName(context, ScreenReaderService::class.java)
+
+    /** Serviciul de accesibilitate (citirea titlului de pe ecran) e pornit în setări. */
+    fun isScreenReaderEnabled(context: Context): Boolean {
+        val flat = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
+        val me = screenReaderComponent(context)
+        return flat.split(':').mapNotNull { ComponentName.unflattenFromString(it) }.any { it == me }
+    }
+
+    /**
+     * Comenzile ADB care pornesc citirea ecranului. Păstrează celelalte servicii de accesibilitate
+     * deja pornite (le adăugăm pe al nostru la listă).
+     */
+    fun adbScreenReaderCommands(context: Context): List<String> {
+        val me = screenReaderComponent(context).flattenToString()
+        val existing = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
+            .split(':').filter { it.isNotBlank() && it != me }
+        val value = (existing + me).joinToString(":")
+        return listOf(
+            "adb shell appops set ${context.packageName} ACCESS_RESTRICTED_SETTINGS allow",
+            "adb shell settings put secure enabled_accessibility_services $value",
+            "adb shell settings put secure accessibility_enabled 1",
+        )
+    }
+
     fun isMainAppInstalled(context: Context): Boolean = try {
         context.packageManager.getPackageInfo(BuildConfig.MAIN_APP_ID, 0)
         true

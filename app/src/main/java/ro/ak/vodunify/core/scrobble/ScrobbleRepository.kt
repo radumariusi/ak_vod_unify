@@ -6,6 +6,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.builtins.ListSerializer
@@ -28,8 +29,9 @@ import javax.inject.Singleton
  * poziție locală — aceeași sursă ca „Setează minutul”, deci apare în „Continuă vizionarea”,
  * în „Alege unde vezi” (cu minutul exact) și, după profilul de publicare, ajunge în Trakt/SIMKL.
  *
- * Peste 90% la pauză/oprire îl trece ca văzut, doar local (în trackere „văzut” se marchează
- * numai explicit, ca la Etapa 6).
+ * Peste pragul „văzut” (implicit 90%, se schimbă din Setări) îl trece ca văzut și în istoric,
+ * local. Vizionările pe care nu le putem recunoaște încă nu se pierd: le păstrăm și le completăm
+ * automat (alt eveniment al aceleiași vizionări sau o reîncercare).
  */
 @Singleton
 class ScrobbleRepository @Inject constructor(
@@ -69,43 +71,128 @@ class ScrobbleRepository @Inject constructor(
         _log.value = emptyList()
     }
 
+    private val eventsSerializer = ListSerializer(ScrobbleEvent.serializer())
+
+    private val _watchedPercent = MutableStateFlow(prefs.getInt(KEY_WATCHED_PCT, (ScrobbleRules.WATCHED_AT * 100).toInt()))
+
+    /** De la ce procent un film / episod e trecut automat ca văzut. */
+    val watchedPercent: StateFlow<Int> = _watchedPercent.asStateFlow()
+
+    fun setWatchedPercent(value: Int) {
+        val v = value.coerceIn(50, 99)
+        prefs.edit().putInt(KEY_WATCHED_PCT, v).apply()
+        _watchedPercent.value = v
+    }
+
+    /** Vizionările deja recunoscute (după play_id): evenimentele lor fără titlu merg tot acolo. */
+    private val byPlay = object : LinkedHashMap<String, ScrobbleMatch>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ScrobbleMatch>?) = size > 200
+    }
+
+    /** Câte vizionări neidentificate încă păstrăm (le reîncercăm automat). */
+    fun unresolvedCount(): Int = readUnresolved().size
+
     /**
      * Procesează un eveniment. Aruncă excepție doar pentru erori trecătoare (rețea), ca
      * scrobblerul să-l retrimită mai târziu.
      */
     suspend fun handle(event: ScrobbleEvent): ScrobbleResult = mutex.withLock {
+        val result = process(event, fromQueue = false)
+        runCatching { retryUnresolvedIfDue(event.at) }
+        result
+    }
+
+    private suspend fun process(event: ScrobbleEvent, fromQueue: Boolean): ScrobbleResult {
         val raw = ScrobbleRules.rawLabel(event.fields)
-        fun done(result: ScrobbleResult, media: MediaRef? = null, duration: Long? = event.duration): ScrobbleResult {
-            if (!(event.isTick && result == ScrobbleResult.SAVED)) {
-                // Punctele intermediare reușite nu umplu jurnalul; pauzele, opririle și problemele da.
-                appendLog(event, raw, media, duration, result)
-            } else {
-                replaceLastTick(event, raw, media, duration, result)
-            }
+        fun done(result: ScrobbleResult, media: MediaRef? = null, duration: Long? = event.duration, position: Long = event.positionMs): ScrobbleResult {
+            val e = entry(event, raw, media, duration, result, position, fromQueue)
+            // În timpul redării păstrăm o singură linie pe titlu; pauzele, opririle și problemele se adaugă.
+            if (event.isTick && !fromQueue) replaceLastTick(e) else appendLog(e)
             return result
         }
 
-        if (!_enabled.value) return@withLock done(ScrobbleResult.DISABLED)
-        if (ScrobbleRules.isIgnoredPackage(event.pkg)) return@withLock done(ScrobbleResult.IGNORED)
+        if (!_enabled.value) return done(ScrobbleResult.DISABLED)
+        if (ScrobbleRules.isIgnoredPackage(event.pkg)) return done(ScrobbleResult.IGNORED)
         val reportedDuration = event.duration
         if (reportedDuration != null && reportedDuration < ScrobbleRules.MIN_DURATION_MS) {
-            return@withLock done(ScrobbleResult.TOO_SHORT)
+            return done(ScrobbleResult.TOO_SHORT)
         }
         val guesses = TitleParser.guesses(event.fields, event.app)
-        if (guesses.isEmpty() || !matcher.isConfigured) return@withLock done(ScrobbleResult.UNMATCHED)
-
-        val match = matcher.match(guesses, reportedDuration) ?: return@withLock done(ScrobbleResult.UNMATCHED)
+        var match = if (guesses.isNotEmpty() && matcher.isConfigured) matcher.match(guesses, reportedDuration) else null
+        if (match == null && event.playId.isNotEmpty()) match = byPlay[event.playId]
+        if (match == null) {
+            // Nu aruncăm nimic: păstrăm vizionarea și o completăm când aflăm titlul (alt eveniment
+            // al aceleiași vizionări) sau la o reîncercare.
+            if (!fromQueue) keepUnresolved(event)
+            return done(if (guesses.isEmpty()) ScrobbleResult.PENDING else ScrobbleResult.UNMATCHED)
+        }
+        if (event.playId.isNotEmpty()) {
+            byPlay[event.playId] = match
+            resolveSiblings(event.playId)
+        }
         val media = match.media
         val duration = reportedDuration ?: match.runtimeMs
-        val progress = ScrobbleRules.progress(event.positionMs, duration)
+        val position = if (event.estimated) ScrobbleRules.mergeEstimated(event.positionMs, knownPosition(media)) else event.positionMs
+        val progress = ScrobbleRules.progress(position, duration)
 
-        if (ScrobbleRules.isFinished(progress, event.isTick)) {
+        if (ScrobbleRules.isFinished(progress, _watchedPercent.value / 100f)) {
             markWatchedLocally(media, event.at)
-            return@withLock done(ScrobbleResult.WATCHED, media, duration)
+            return done(ScrobbleResult.WATCHED, media, duration, position)
         }
         // Pauza / oprirea se publică (în modul automat); punctele intermediare doar se salvează.
-        publisher.setManualPosition(media, event.positionMs, duration, publish = !event.isTick)
-        done(ScrobbleResult.SAVED, media, duration)
+        publisher.setManualPosition(media, position, duration, publish = !event.isTick)
+        return done(ScrobbleResult.SAVED, media, duration, position)
+    }
+
+    private suspend fun knownPosition(media: MediaRef): Long? =
+        trackingDao.allResume().first().firstOrNull { it.id == "$LOCAL_SOURCE|${media.itemKey}" }?.positionMs
+
+    // ---------- Vizionări neidentificate încă ----------
+
+    private fun readUnresolved(): List<ScrobbleEvent> = runCatching {
+        prefs.getString(KEY_UNRESOLVED, null)?.let { json.decodeFromString(eventsSerializer, it) }
+    }.getOrNull().orEmpty()
+
+    private fun writeUnresolved(list: List<ScrobbleEvent>) {
+        prefs.edit().putString(KEY_UNRESOLVED, json.encodeToString(eventsSerializer, list)).apply()
+    }
+
+    private fun unresolvedKey(e: ScrobbleEvent) = e.playId.ifEmpty { "${e.pkg}|${ScrobbleRules.rawLabel(e.fields)}" }
+
+    /** Păstrăm ultimul eveniment al fiecărei vizionări neidentificate (cu minutul cel mai nou). */
+    private fun keepUnresolved(event: ScrobbleEvent) {
+        val key = unresolvedKey(event)
+        val list = readUnresolved().filterNot { unresolvedKey(it) == key } + event
+        val cutoff = event.at - TimeUnit.DAYS.toMillis(UNRESOLVED_DAYS)
+        writeUnresolved(list.filter { it.at >= cutoff }.takeLast(MAX_UNRESOLVED))
+    }
+
+    /** Vizionarea a fost recunoscută: evenimentul ei păstrat nu mai e nevoie. */
+    private fun resolveSiblings(playId: String) {
+        val list = readUnresolved()
+        val left = list.filterNot { it.playId == playId }
+        if (left.size != list.size) writeUnresolved(left)
+    }
+
+    /**
+     * Reîncercăm, cel mult o dată la 30 de minute, vizionările păstrate care au un text de titlu
+     * (TMDb poate fi fost indisponibil). Cele fără niciun titlu așteaptă alt eveniment al vizionării.
+     */
+    private suspend fun retryUnresolvedIfDue(now: Long) {
+        val last = prefs.getLong(KEY_LAST_RETRY, 0L)
+        if (now - last < TimeUnit.MINUTES.toMillis(30)) return
+        prefs.edit().putLong(KEY_LAST_RETRY, now).apply()
+        if (!matcher.isConfigured) return
+        val list = readUnresolved()
+        val solved = mutableSetOf<String>()
+        for (e in list) {
+            if (TitleParser.guesses(e.fields, e.app).isEmpty()) continue
+            val r = process(e, fromQueue = true)
+            if (r == ScrobbleResult.SAVED || r == ScrobbleResult.WATCHED || r == ScrobbleResult.IGNORED || r == ScrobbleResult.TOO_SHORT) {
+                solved += unresolvedKey(e)
+            }
+        }
+        if (solved.isNotEmpty()) writeUnresolved(readUnresolved().filterNot { unresolvedKey(it) in solved })
     }
 
     private suspend fun markWatchedLocally(media: MediaRef, at: Long) {
@@ -127,28 +214,36 @@ class ScrobbleRepository @Inject constructor(
         }
     }
 
-    private fun entry(event: ScrobbleEvent, raw: String, media: MediaRef?, duration: Long?, result: ScrobbleResult) = ScrobbleLogEntry(
+    private fun entry(
+        event: ScrobbleEvent,
+        raw: String,
+        media: MediaRef?,
+        duration: Long?,
+        result: ScrobbleResult,
+        position: Long,
+        fromQueue: Boolean,
+    ) = ScrobbleLogEntry(
         at = event.at,
         app = event.app,
         pkg = event.pkg,
-        reason = event.reason,
-        raw = raw,
+        reason = if (fromQueue) "${event.reason} (reîncercat)" else event.reason,
+        raw = raw + if (event.estimated) " [minut estimat]" else "",
         matched = label(media),
-        positionMs = event.positionMs,
+        positionMs = position,
         durationMs = duration,
         result = result.wire,
     )
 
-    private fun appendLog(event: ScrobbleEvent, raw: String, media: MediaRef?, duration: Long?, result: ScrobbleResult) {
-        writeLog((listOf(entry(event, raw, media, duration, result)) + _log.value).take(MAX_LOG))
+    private fun appendLog(e: ScrobbleLogEntry) {
+        writeLog((listOf(e) + _log.value).take(MAX_LOG))
     }
 
     /** În timpul redării păstrăm o singură linie „în redare” pentru titlul curent, actualizată. */
-    private fun replaceLastTick(event: ScrobbleEvent, raw: String, media: MediaRef?, duration: Long?, result: ScrobbleResult) {
+    private fun replaceLastTick(e: ScrobbleLogEntry) {
         val current = _log.value
         val first = current.firstOrNull()
-        val rest = if (first != null && first.reason == "tick" && first.pkg == event.pkg && first.raw == raw) current.drop(1) else current
-        writeLog((listOf(entry(event, raw, media, duration, result)) + rest).take(MAX_LOG))
+        val rest = if (first != null && first.reason == "tick" && first.pkg == e.pkg && first.raw == e.raw) current.drop(1) else current
+        writeLog((listOf(e) + rest).take(MAX_LOG))
     }
 
     private fun writeLog(list: List<ScrobbleLogEntry>) {
@@ -163,6 +258,11 @@ class ScrobbleRepository @Inject constructor(
     private companion object {
         const val KEY_ENABLED = "enabled"
         const val KEY_LOG = "log"
+        const val KEY_WATCHED_PCT = "watched_percent"
+        const val KEY_UNRESOLVED = "unresolved"
+        const val KEY_LAST_RETRY = "unresolved_last_retry"
+        const val MAX_UNRESOLVED = 100
+        const val UNRESOLVED_DAYS = 30L
         const val MAX_LOG = 50
     }
 }

@@ -33,6 +33,8 @@ class StatusActivity : Activity() {
     private lateinit var adb: TextView
     private lateinit var live: TextView
     private lateinit var sent: TextView
+    private lateinit var diag: TextView
+    private lateinit var screenButton: Button
     private lateinit var accessButton: Button
     private lateinit var batteryButton: Button
     private lateinit var overlayButton: Button
@@ -66,6 +68,8 @@ class StatusActivity : Activity() {
 
         accessButton = button("Dă acces (setarea „Acces la notificări”)") { openListenerSettings() }
         column.addView(accessButton)
+        screenButton = button("Pornește citirea titlului de pe ecran (Setări → Accesibilitate)") { openAccessibilitySettings() }
+        column.addView(screenButton)
         batteryButton = button("Nu opri scrobblerul pentru economie de baterie") { askBatteryExemption() }
         column.addView(batteryButton)
         overlayButton = button("Permite bulina din dreapta sus (peste alte aplicații)") { openOverlaySettings() }
@@ -83,6 +87,22 @@ class StatusActivity : Activity() {
         live = focusableText().also(column::addView)
         column.addView(text("Trimise recent către AK VOD Unify", 20f, bold = true).also { it.setPadding(0, dp(16), 0, 0) })
         sent = focusableText().also(column::addView)
+
+        column.addView(text("Jurnal de diagnostic (cel mai nou sus)", 20f, bold = true).also { it.setPadding(0, dp(16), 0, 0) })
+        column.addView(
+            text(
+                "Tot ce vede scrobblerul: sesiuni, texte de pe ecran, ce trimite și de ce NU trimite. " +
+                    "După un test, apasă „Salvează jurnalul” și trimite-mi fișierul (sau fă poze).",
+                14f,
+            ),
+        )
+        column.addView(button("Salvează jurnalul în Download") { saveLog() })
+        column.addView(button("Trimite jurnalul (alege aplicația)") { shareLog() })
+        column.addView(button("Șterge jurnalul") {
+            DiagLog.clear()
+            render()
+        })
+        diag = focusableText().also { it.textSize = 12f }.also(column::addView)
 
         setContentView(ScrollView(this).apply { addView(column) })
         accessButton.requestFocus()
@@ -108,9 +128,17 @@ class StatusActivity : Activity() {
         val battery = Access.isIgnoringBatteryOptimizations(this)
         val pending = Forwarder.get(this).pendingCount()
         val overlay = Access.canDrawOverlays(this)
+        val screenOn = Access.isScreenReaderEnabled(this)
         status.text = buildString {
             append(if (enabled) "✅ Acces la sesiunile media: DA" else "❌ Acces la sesiunile media: NU (vezi mai jos)")
             if (enabled && !connected) append("\n⏳ Accesul e dat, aștept ca Android să pornească ascultătorul…")
+            append(
+                when {
+                    screenOn && ScreenState.serviceConnected -> "\n✅ Citește titlul și minutul de pe ecran (accesibilitate)"
+                    screenOn -> "\n⏳ Citirea ecranului e pornită, aștept ca Android s-o lege…"
+                    else -> "\n❌ Citirea titlului de pe ecran: OPRITĂ (Netflix, Apple TV nu trimit titlul altfel)"
+                },
+            )
             append(if (main) "\n✅ AK VOD Unify instalat" else "\n❌ AK VOD Unify nu e instalat (pachet ${BuildConfig.MAIN_APP_ID})")
             append(if (battery) "\n✅ Scutit de economia de baterie" else "\nℹ️ Nu e scutit de economia de baterie (opțional)")
             append(if (ScrobblerState.keepAliveRunning) "\n✅ Rulează permanent (serviciu în prim-plan)" else "\n⚠️ Serviciul permanent nu rulează încă")
@@ -127,6 +155,7 @@ class StatusActivity : Activity() {
         dotButton.visibility = if (overlay) View.VISIBLE else View.GONE
         dotButton.text = if (Prefs.dotEnabled(this)) "Ascunde bulina" else "Arată bulina"
         accessButton.visibility = if (enabled) View.GONE else View.VISIBLE
+        screenButton.visibility = if (screenOn) View.GONE else View.VISIBLE
         batteryButton.visibility = if (battery) View.GONE else View.VISIBLE
         val listenerHelp = if (enabled) {
             ""
@@ -135,7 +164,14 @@ class StatusActivity : Activity() {
                 "prin ADB (de pe telefon, cu o aplicație ADB prin Wi-Fi), cu comanda:\n\n${Access.adbCommand(this)}\n\n" +
                 "Accesul rămâne și după restart.\n\n"
         }
-        adb.text = listenerHelp + "Pe televizoarele care închid aplicațiile (ex. TCL), tot prin ADB, o singură dată:\n" +
+        val screenHelp = if (screenOn) {
+            ""
+        } else {
+            "Citirea titlului de pe ecran se pornește din Setări → Accesibilitate → AK Scrobbler. " +
+                "Dacă televizorul nu are setarea sau o blochează, prin ADB (o singură dată, rămâne după restart):\n\n" +
+                Access.adbScreenReaderCommands(this).joinToString("\n") + "\n\n"
+        }
+        adb.text = listenerHelp + screenHelp + "Pe televizoarele care închid aplicațiile (ex. TCL), tot prin ADB, o singură dată:\n" +
             "• bulina: ${Access.adbOverlayCommand(this)}\n" +
             "• fără economie de baterie: ${Access.adbBatteryCommand(this)}"
 
@@ -147,17 +183,30 @@ class StatusActivity : Activity() {
                 buildString {
                     append("▶ ${s.appLabel} (${s.packageName})\n")
                     append("Stare: ${s.state.label()}")
-                    append(" · Poziție: ${s.positionMs?.let(::clock) ?: "necunoscută"}")
+                    append(
+                        " · Poziție: " + (
+                            s.positionMs?.let(::clock)
+                                ?: if (s.playedMs > 0) "necunoscută (redat de noi: ${clock(s.playedMs)})" else "necunoscută"
+                            ),
+                    )
                     append(" / ${s.media?.durationMs?.let(::clock) ?: "durată necunoscută"}\n")
                     val fields = s.media?.fields.orEmpty()
                     if (fields.isEmpty()) {
-                        append("Aplicația nu trimite titlul.")
+                        append(
+                            if (screenOn) {
+                                "Aplicația nu trimite titlul; îl caut pe ecran (pune pauză o clipă ca să apară)."
+                            } else {
+                                "Aplicația nu trimite titlul. Pornește citirea de pe ecran (mai sus)."
+                            },
+                        )
                     } else {
                         fields.forEach { (k, v) -> append("  $k: $v\n") }
                     }
                 }.trimEnd()
             }
         }
+
+        diag.text = DiagLog.newestFirst(DIAG_LINES).joinToString("\n").ifEmpty { "Gol." }
 
         val log = Forwarder.get(this).recent()
         val fmt = SimpleDateFormat("dd.MM HH:mm", Locale.getDefault())
@@ -193,6 +242,36 @@ class StatusActivity : Activity() {
         }
         adb.text = "Televizorul nu are ecranul „Acces la notificări”. Folosește comanda ADB:\n\n${Access.adbCommand(this)}"
         adb.requestFocus()
+    }
+
+    private fun openAccessibilitySettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        } catch (_: Exception) {
+            adb.text = "Televizorul nu are ecranul de accesibilitate. Pornește citirea prin ADB:\n\n" +
+                Access.adbScreenReaderCommands(this).joinToString("\n")
+            adb.requestFocus()
+        }
+    }
+
+    private fun saveLog() {
+        val msg = try {
+            "✅ Jurnal salvat: ${LogExport.saveToDownloads(this)}\n(de pe telefon, cu ADB: adb pull <calea de mai sus>)"
+        } catch (e: Exception) {
+            "❌ Nu am putut salva jurnalul: ${e.message}. Folosește „Trimite jurnalul” sau fă poze."
+        }
+        DiagLog.add(msg.lines().first())
+        render()
+        diag.requestFocus()
+    }
+
+    private fun shareLog() {
+        try {
+            startActivity(LogExport.shareIntent(this))
+        } catch (_: Exception) {
+            DiagLog.add("Nicio aplicație de pe TV nu poate primi jurnalul; folosește „Salvează jurnalul în Download”.")
+            render()
+        }
     }
 
     private fun openOverlaySettings() {
@@ -264,7 +343,8 @@ class StatusActivity : Activity() {
     private fun String.resultLabel() = when (this) {
         "saved" -> "salvat minutul"
         "watched" -> "marcat văzut"
-        "unmatched" -> "titlu negăsit în TMDb"
+        "unmatched" -> "titlu negăsit încă (păstrat, se reîncearcă)"
+        "pending" -> "neidentificat încă (păstrat, se completează automat)"
         "ignored" -> "ignorat (nu e film/serial)"
         "disabled" -> "oprit din AK VOD Unify"
         "too_short" -> "prea scurt"
@@ -272,6 +352,8 @@ class StatusActivity : Activity() {
     }
 
     companion object {
+        private const val DIAG_LINES = 120
+
         fun clock(ms: Long): String {
             val total = ms / 1000
             val h = total / 3600

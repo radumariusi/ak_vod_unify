@@ -19,12 +19,19 @@ class ScrobblerSettingsViewModel @Inject constructor(
 ) : ViewModel() {
     val log: StateFlow<List<ScrobbleLogEntry>> = repository.log
     val enabled: StateFlow<Boolean> = repository.enabled
+    val watchedPercent: StateFlow<Int> = repository.watchedPercent
+
+    private val _unresolved = MutableStateFlow(repository.unresolvedCount())
+    val unresolved: StateFlow<Int> = _unresolved.asStateFlow()
+
+    fun setWatchedPercent(value: Int) = repository.setWatchedPercent(value)
 
     private val _installed = MutableStateFlow(repository.isScrobblerInstalled())
     val installed: StateFlow<Boolean> = _installed.asStateFlow()
 
     fun refresh() {
         _installed.value = repository.isScrobblerInstalled()
+        _unresolved.value = repository.unresolvedCount()
     }
 
     fun setEnabled(value: Boolean) = repository.setEnabled(value)

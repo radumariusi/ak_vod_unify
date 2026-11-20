@@ -68,6 +68,24 @@
             </intent-filter>
         </service>
 
+        <!--
+            Serviciul de accesibilitate: citește titlul și minutul afișate de player, pentru aplicațiile
+            care nu le pun în sesiunea media (Netflix, Apple TV…). Pe TV se pornește din
+            Setări → Accesibilitate sau prin ADB (vezi ecranul aplicației).
+        -->
+        <service
+            android:name=".ScreenReaderService"
+            android:exported="true"
+            android:label="@string/screen_reader_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/screen_reader" />
+        </service>
+
         <service
             android:name=".KeepAliveService"
             android:exported="false"
