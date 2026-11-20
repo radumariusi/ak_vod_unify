@@ -46,4 +46,43 @@ class NetflixActivityTest {
         val movie = NetflixActivity.fields(NetflixViewedItem(title = "The Irishman"))
         assertEquals("The Irishman", movie["title"])
     }
+
+    private val min = 60_000L
+
+    @Test
+    fun matchesByWatchedTimeNearest() {
+        val items = listOf(
+            NetflixViewedItem(series = "The Office (U.S.)", season = "Season 1", episode = "Pilot", title = "The Office (U.S.): Season 1: Pilot", watchedAt = now - 2 * min, seasonNumber = 1, episodeNumber = 1, id = "70105212"),
+            NetflixViewedItem(title = "Movie", watchedAt = now - 6 * 60 * min, id = "2"),
+        )
+        assertEquals("70105212", NetflixActivity.match(event(0), items)!!.id)
+    }
+
+    @Test
+    fun backToBackEpisodesPickTheCloserOne() {
+        val items = listOf(
+            NetflixViewedItem(title = "S: Ep2", watchedAt = now + 1 * min, id = "2"),
+            NetflixViewedItem(title = "S: Ep1", watchedAt = now - 30 * min, id = "1"),
+        )
+        assertEquals("2", NetflixActivity.match(event(1_000), items)!!.id)
+    }
+
+    @Test
+    fun watchedTimeTooFarOrAmbiguousIsSkipped() {
+        assertNull(NetflixActivity.match(event(1_000), listOf(NetflixViewedItem(title = "Later", watchedAt = now + 40 * min, id = "1"))))
+        assertNull(NetflixActivity.match(event(1_000), listOf(NetflixViewedItem(title = "Old", watchedAt = now - 5 * 60 * min, id = "1"))))
+        val close = listOf(
+            NetflixViewedItem(title = "A", watchedAt = now - 1 * min, id = "1"),
+            NetflixViewedItem(title = "B", watchedAt = now + 1 * min, id = "2"),
+        )
+        assertNull(NetflixActivity.match(event(1_000), close))
+    }
+
+    @Test
+    fun numberedEpisodeFieldsParse() {
+        val f = NetflixActivity.fields(NetflixViewedItem(series = "The Office (U.S.)", season = "Season 1", episode = "Pilot", title = "x", seasonNumber = 1, episodeNumber = 1))
+        assertEquals("Season 1 Episode 1 Pilot", f["display_subtitle"])
+        val g = ro.ak.vodunify.core.scrobble.TitleParser.guesses(f).first()
+        assertEquals(ro.ak.vodunify.core.scrobble.TitleGuess.NumberedEpisode("The Office (U.S.)", 1, 1, "Pilot"), g)
+    }
 }
