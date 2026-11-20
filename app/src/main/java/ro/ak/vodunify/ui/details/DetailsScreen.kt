@@ -23,6 +23,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -57,6 +59,9 @@ import ro.ak.vodunify.core.catalog.Season
 import ro.ak.vodunify.core.catalog.StudioRef
 import ro.ak.vodunify.core.catalog.TitleDetails
 import ro.ak.vodunify.core.catalog.TitleKind
+import ro.ak.vodunify.core.connector.EpisodeNumber
+import ro.ak.vodunify.core.connector.ShowProgress
+import ro.ak.vodunify.core.tracking.TitleTrackState
 import ro.ak.vodunify.ui.components.AttributionNote
 import ro.ak.vodunify.ui.components.ErrorPanel
 import ro.ak.vodunify.ui.components.FocusCard
@@ -81,7 +86,6 @@ fun DetailsScreen(viewModel: DetailsViewModel = hiltViewModel()) {
     }
 }
 
-private const val AVAILABILITY_INDEX = 1
 
 @Composable
 private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel) {
@@ -91,6 +95,13 @@ private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel) {
     val primaryFocus = remember { FocusRequester() }
     val selectedSeason by viewModel.season.collectAsStateWithLifecycle()
     val episodes by viewModel.episodes.collectAsStateWithLifecycle()
+    val connected by viewModel.trackerConnected.collectAsStateWithLifecycle()
+    val track by viewModel.trackState.collectAsStateWithLifecycle()
+    val progress by viewModel.showProgress.collectAsStateWithLifecycle()
+    val busy by viewModel.busy.collectAsStateWithLifecycle()
+    val message by viewModel.message.collectAsStateWithLifecycle()
+    val availabilityIndex = if (connected) 2 else 1
+    val watchedEpisodes = if (connected) progress?.watched.orEmpty() else emptySet()
 
     if (spec.isTv) {
         LaunchedEffect(details.item.mediaKey) { runCatching { primaryFocus.requestFocus() } }
@@ -100,6 +111,9 @@ private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel) {
             details.seasons.firstOrNull()?.let { viewModel.selectSeason(it.number) }
         }
     }
+    LaunchedEffect(details.item.mediaKey, connected) {
+        if (connected) viewModel.loadShowProgress(details)
+    }
 
     LazyColumn(
         state = listState,
@@ -108,7 +122,20 @@ private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item(key = "header") {
-            Header(details, primaryFocus) { scope.launch { listState.animateScrollToItem(AVAILABILITY_INDEX) } }
+            Header(details, primaryFocus) { scope.launch { listState.animateScrollToItem(availabilityIndex) } }
+        }
+        if (connected) {
+            item(key = "track") {
+                TrackPanel(
+                    details = details,
+                    state = track,
+                    progress = progress,
+                    busy = busy,
+                    message = message,
+                    onToggleWatchlist = { viewModel.toggleWatchlist(details) },
+                    onToggleWatched = { viewModel.toggleWatched(details) },
+                )
+            }
         }
         item(key = "availability") { AvailabilitySection(details.availability) }
         if (details.item.kind == TitleKind.TV && details.seasons.isNotEmpty()) {
@@ -118,7 +145,12 @@ private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel) {
             when (val e = episodes) {
                 null, LoadState.Loading -> item(key = "episodes_loading") { LoadingPanel() }
                 is LoadState.Failed -> item(key = "episodes_error") { ErrorPanel(e.error, onRetry = null) }
-                is LoadState.Data -> episodeItems(e.value)
+                is LoadState.Data -> episodeItems(
+                    e.value,
+                    watched = watchedEpisodes,
+                    canMark = connected,
+                    onToggle = { ep -> viewModel.toggleEpisode(details, ep) },
+                )
             }
         }
         item(key = "cast") { PersonRow("Distribuție", details.cast) }
@@ -129,7 +161,12 @@ private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel) {
     }
 }
 
-private fun androidx.compose.foundation.lazy.LazyListScope.episodeItems(season: Season) {
+private fun androidx.compose.foundation.lazy.LazyListScope.episodeItems(
+    season: Season,
+    watched: Set<EpisodeNumber>,
+    canMark: Boolean,
+    onToggle: (Episode) -> Unit,
+) {
     if (season.episodes.isEmpty()) {
         item(key = "episodes_empty") {
             Text(
@@ -140,7 +177,14 @@ private fun androidx.compose.foundation.lazy.LazyListScope.episodeItems(season: 
         }
         return
     }
-    items(season.episodes, key = { "ep_${it.season}_${it.number}" }) { EpisodeCard(it) }
+    items(season.episodes, key = { "ep_${it.season}_${it.number}" }) { ep ->
+        EpisodeCard(
+            episode = ep,
+            watched = EpisodeNumber(ep.season, ep.number) in watched,
+            canMark = canMark,
+            onToggle = { onToggle(ep) },
+        )
+    }
 }
 
 @Composable
@@ -244,6 +288,66 @@ private fun metaLine(d: TitleDetails): String = listOfNotNull(
     formatRating(d.item.rating)?.let { r -> d.voteCount?.let { "$r ($it voturi)" } ?: r },
 ).joinToString(" · ")
 
+// ---------- Trakt: De văzut / Văzut / progres ----------
+
+@Composable
+private fun TrackPanel(
+    details: TitleDetails,
+    state: TitleTrackState?,
+    progress: ShowProgress?,
+    busy: Boolean,
+    message: String?,
+    onToggleWatchlist: () -> Unit,
+    onToggleWatched: () -> Unit,
+) {
+    val spec = layoutSpec()
+    val isMovie = details.item.kind == TitleKind.MOVIE
+    Column(
+        Modifier.padding(horizontal = spec.screenPadding),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            val inList = state?.inWatchlist == true
+            if (inList) {
+                FilledTonalButton(onClick = onToggleWatchlist, enabled = !busy) { Text("✓ În „De văzut”") }
+            } else {
+                OutlinedButton(onClick = onToggleWatchlist, enabled = !busy) { Text("+ De văzut") }
+            }
+            if (isMovie) {
+                if (state?.watched == true) {
+                    FilledTonalButton(onClick = onToggleWatched, enabled = !busy) { Text("✓ Văzut") }
+                } else {
+                    OutlinedButton(onClick = onToggleWatched, enabled = !busy) { Text("Marchează văzut") }
+                }
+            }
+            if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        }
+        trackSummary(isMovie, state, progress)?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+        }
+        message?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+private fun trackSummary(isMovie: Boolean, state: TitleTrackState?, progress: ShowProgress?): String? {
+    val parts = mutableListOf<String>()
+    state?.resume?.let { r ->
+        val where = if (r.ref.type == "EPISODE" && r.ref.season != null && r.ref.episode != null) {
+            "S${r.ref.season}E${r.ref.episode} "
+        } else {
+            ""
+        }
+        parts += "Început: $where" + (r.progress?.let { "${(it * 100).toInt()}%" } ?: "poziție necunoscută")
+    }
+    if (!isMovie && progress != null && progress.aired > 0) {
+        parts += "Văzute ${progress.completed} din ${progress.aired} episoade"
+        progress.next?.let { n -> parts += "Urmează S${n.season}E${n.episode}" + (n.episodeTitle?.let { " · $it" } ?: "") }
+    }
+    return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
+}
+
 // ---------- Disponibilitate (TMDb Watch Providers, date JustWatch) ----------
 
 @Composable
@@ -337,7 +441,7 @@ private fun SeasonPicker(details: TitleDetails, selected: Int?, onSelect: (Int) 
 }
 
 @Composable
-private fun EpisodeCard(episode: Episode) {
+private fun EpisodeCard(episode: Episode, watched: Boolean, canMark: Boolean, onToggle: () -> Unit) {
     val spec = layoutSpec()
     var expanded by rememberSaveable(episode.season, episode.number) { mutableStateOf(false) }
     FocusCard(
@@ -356,7 +460,13 @@ private fun EpisodeCard(episode: Episode) {
                 contentScale = ContentScale.Crop,
             )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("${episode.number}. ${episode.name}", fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(
+                    (if (watched) "✓ " else "") + "${episode.number}. ${episode.name}",
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    color = if (watched) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                )
                 Text(
                     listOfNotNull(episode.airDate, episode.runtimeMinutes?.let { "${it}m" }).joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall,
@@ -370,6 +480,11 @@ private fun EpisodeCard(episode: Episode) {
                         maxLines = if (expanded) Int.MAX_VALUE else 2,
                         overflow = TextOverflow.Ellipsis,
                     )
+                }
+            }
+            if (canMark) {
+                OutlinedButton(onClick = onToggle, modifier = Modifier.align(Alignment.CenterVertically)) {
+                    Text(if (watched) "Nevăzut" else "Văzut")
                 }
             }
         }

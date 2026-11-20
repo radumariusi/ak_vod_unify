@@ -8,7 +8,7 @@ Hub VOD pentru **Android TV** (funcționează și pe telefon, cu touch): adună 
 |---|---|---|
 | 1 | Fundație: proiect Kotlin + Compose, arhitectură modulară, Room, Hilt, CI, release manual, self-update | ✅ |
 | 2 | Catalog TMDb: Acasă (hero + rânduri), detalii filme/seriale (sezoane, episoade), persoane, studiouri/rețele, căutare cu filtre, limbă RO/original, disponibilitate US/RO (JustWatch), cache Room | ✅ |
-| 3 | Trakt (autentificare device code, istoric, progres) | ⏳ |
+| 3 | Trakt: login cu cod (device code + PKCE), istoric, „Continuă vizionarea”, „Următorul episod”, „De văzut”, marcare văzut | ✅ |
 | 4 | „Alege unde vezi” + deep links (Netflix, Nuvio, Stremio, DebridStream) | ⏳ |
 | 5 | SIMKL + WeTrakr + reconciliere între surse | ⏳ |
 | 6 | Publicare progres înapoi în surse + ecran diagnostic | ⏳ |
@@ -18,8 +18,10 @@ Hub VOD pentru **Android TV** (funcționează și pe telefon, cu touch): adună 
 
 ```
 app/src/main/java/ro/ak/vodunify/
-├── core/connector   Connector + Capability (HISTORY_READ, RESUME_READ, RESUME_WRITE, DEEP_LINK), ConnectorRegistry
-├── core/db          Room: media, watch_events, resume_points, tmdb_cache, availability
+├── core/connector   Connector, DeviceAuthConnector + Capability (istoric, progres, watchlist, următorul episod, deep link), ConnectorRegistry
+├── core/trakt       Client Trakt API v2 (device code + PKCE, refresh token), DTO-uri, mapări, TraktConnector
+├── core/tracking    TrackingRepository: sincronizare din toți trackerii conectați în Room + acțiuni (văzut, De văzut)
+├── core/db          Room: media, watch_events, resume_points, watchlist, up_next, watched_titles, sync_state, tmdb_cache, availability
 ├── core/tmdb        Client TMDb v3 (Bearer v4 sau api_key v3), DTO-uri, imagini, cache cu TTL + mod offline
 ├── core/catalog     CatalogRepository + modele de domeniu (titluri, persoane, studiouri, disponibilitate)
 ├── core/prefs       Setări catalog (DataStore): limbă RO/Original, piață RO/US
@@ -40,7 +42,7 @@ Nu se commit-uiesc niciodată. Local se pun în `local.properties` (ignorat de g
 | Nume | La ce folosește | Necesar din |
 |---|---|---|
 | `TMDB_API_KEY` | Catalog TMDb | etapa 2 |
-| `TRAKT_CLIENT_ID`, `TRAKT_CLIENT_SECRET` | Trakt | etapa 3 |
+| `TRAKT_CLIENT_ID` (`TRAKT_CLIENT_SECRET` doar pentru aplicații Trakt vechi, opțional) | Trakt | etapa 3 |
 | `SIMKL_CLIENT_ID`, `SIMKL_CLIENT_SECRET` | SIMKL | etapa 5 |
 | `WETRAKR_API_KEY` | WeTrakr | etapa 5 |
 
@@ -71,6 +73,15 @@ TRAKT_CLIENT_SECRET=...
 - **Căutare**: titlu sau persoană, filtre tip/gen/an; fără text, filtrele răsfoiesc catalogul (`/discover`).
 - **Setări → Catalog**: limbă (Română / Original), piață (RO / US), golire cache.
 - Cache: răspunsurile TMDb se salvează în Room cu cheie = cale + limbă + piață (6 h listele, 7 zile listele de genuri/servicii); fără internet se folosesc datele salvate. Titlurile deschise se salvează în `media`, iar disponibilitatea în `availability` (pe titlu și piață).
+
+## Trakt (etapa 3)
+
+Configurare (o singură dată): pe [trakt.tv/oauth/applications](https://trakt.tv/oauth/applications) → *New Application*, Redirect uri `urn:ietf:wg:oauth:2.0:oob`, apoi secretul GitHub `TRAKT_CLIENT_ID` = Client ID. Aplicațiile Trakt noi nu mai au Client Secret (PKCE) și nici nu e nevoie de el.
+
+- **Conectare**: *Setări → Conturi → Trakt → Conectează*. Apare un cod (și un QR pe TV); îl introduci pe trakt.tv/activate de pe orice dispozitiv. Tokenurile stau în spațiul privat al aplicației, fără backup, și se reîmprospătează automat.
+- **Acasă**: „Continuă vizionarea” (din Trakt playback, separat de istoric; dacă poziția lipsește, apare „Poziție necunoscută”, nu 0%), „Următorul episod” (progresul pe seriale), „De văzut” (watchlist).
+- **Detalii**: „+ De văzut”, „Marchează văzut” pentru filme, „Văzut / Nevăzut” pe fiecare episod; progresul pe serial.
+- Sincronizarea rulează la deschiderea aplicației (dacă au trecut 15 minute) și din *Setări → Sincronizează acum*. Istoricul se descarcă incremental.
 
 ## Semnare și release
 
