@@ -33,6 +33,10 @@ class WebLoginActivity : Activity() {
     private lateinit var status: TextView
     private var pendingImport = false
 
+    /** Test Netflix: ascultăm ce primește pagina „Activitate de vizionare”. */
+    private var captureMode = false
+    private var captureToken = 0
+
     /** Adresa curentă, ca puntea să răspundă doar paginilor serviciului. */
     @Volatile private var currentUrl: String? = null
 
@@ -88,8 +92,17 @@ class WebLoginActivity : Activity() {
                 currentUrl = url
             }
 
+            override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                if (captureMode && isTrusted(url)) view.evaluateJavascript(Scripts.NETFLIX_CAPTURE_HOOK, null)
+            }
+
             override fun onPageFinished(view: WebView, url: String) {
                 currentUrl = url
+                if (captureMode && isTrusted(url) && !isLoginPage(url)) {
+                    view.evaluateJavascript(Scripts.NETFLIX_CAPTURE_HOOK, null)
+                    scheduleCaptureReport()
+                    return
+                }
                 if (pendingImport && isHistoryPage(url)) {
                     runScript()
                 } else if (pendingImport && isLoginPage(url)) {
@@ -120,7 +133,46 @@ class WebLoginActivity : Activity() {
         super.onDestroy()
     }
 
+    /** Test Netflix: deschidem „Activitate de vizionare” cu ascultarea pornită, apoi raportăm. */
+    private fun startNetflixCapture() {
+        captureMode = true
+        captureToken++
+        status.text = "TEST Netflix: deschid „Activitate de vizionare” și ascult ce primește pagina (~15 s)…"
+        web.loadUrl("https://www.netflix.com/viewingactivity")
+    }
+
+    private fun scheduleCaptureReport() {
+        val token = ++captureToken
+        handler.postDelayed({
+            if (token == captureToken && captureMode) web.evaluateJavascript(Scripts.NETFLIX_SHOW_MORE, null)
+        }, 6_000L)
+        handler.postDelayed({
+            if (token != captureToken || !captureMode) return@postDelayed
+            web.evaluateJavascript(Scripts.NETFLIX_CAPTURE_REPORT) { raw ->
+                captureMode = false
+                status.text = "TEST2 Netflix · " + describeCapture(raw)
+            }
+        }, 12_000L)
+    }
+
+    private fun describeCapture(raw: String?): String = runCatching {
+        val json = JSONObject(org.json.JSONTokener(raw).nextValue() as String)
+        val cap = json.optJSONArray("cap") ?: org.json.JSONArray()
+        val reqs = (0 until cap.length()).joinToString(" | ") { i ->
+            val c = cap.getJSONObject(i)
+            "${c.optString("u")} ${c.optInt("s")} ${c.optInt("n") / 1024}KB chei:${c.optString("k").replace("\"", "")} ⟨${c.optString("x").take(120)}⟩"
+        }
+        val rows = json.optJSONArray("rows")
+        val sample = (0 until (rows?.length() ?: 0)).joinToString(" | ") { rows!!.getString(it).take(70) }
+        "pagina ${json.optString("url")} · ascultare: ${json.optBoolean("hook")} · cereri prinse: ${cap.length()} " +
+            (if (reqs.isNotEmpty()) "[$reqs] " else "") + "· rânduri cu dată: ${json.optInt("total")}" + (if (sample.isNotEmpty()) " · ex: $sample" else "")
+    }.getOrElse { "răspuns neașteptat: ${raw?.take(200)}" }
+
     private fun startImport() {
+        if (service.id == "netflix") {
+            startNetflixCapture()
+            return
+        }
         pendingImport = true
         // Netflix: scriptul merge de pe orice pagină netflix.com pe care ești conectat, deci nu
         // mai depindem de adresa paginii de istoric (Netflix a mutat-o la /settings/viewed/…).
