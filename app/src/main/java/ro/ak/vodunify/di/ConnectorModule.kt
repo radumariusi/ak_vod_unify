@@ -1,0 +1,29 @@
+package ro.ak.vodunify.di
+
+import dagger.Module
+import dagger.Provides
+import dagger.hilt.InstallIn
+import dagger.hilt.components.SingletonComponent
+import dagger.multibindings.IntoSet
+import ro.ak.vodunify.core.connector.Connector
+import ro.ak.vodunify.core.connector.PlayerTargetConnector
+import ro.ak.vodunify.core.connector.SimklConnector
+import ro.ak.vodunify.core.connector.TraktConnector
+import ro.ak.vodunify.core.connector.WeTrakrConnector
+
+/**
+ * Adaugi un conector nou = încă un @Provides @IntoSet aici.
+ * Pachetele aplicațiilor-țintă sunt provizorii și se verifică în etapa 4 (deep links).
+ */
+@Module
+@InstallIn(SingletonComponent::class)
+object ConnectorModule {
+    @Provides @IntoSet fun trakt(): Connector = TraktConnector()
+    @Provides @IntoSet fun simkl(): Connector = SimklConnector()
+    @Provides @IntoSet fun wetrakr(): Connector = WeTrakrConnector()
+
+    @Provides @IntoSet fun netflix(): Connector = PlayerTargetConnector("netflix", "Netflix", "com.netflix.ninja")
+    @Provides @IntoSet fun nuvio(): Connector = PlayerTargetConnector("nuvio", "Nuvio", "com.nuvio.app")
+    @Provides @IntoSet fun stremio(): Connector = PlayerTargetConnector("stremio", "Stremio", "com.stremio.one")
+    @Provides @IntoSet fun debridStream(): Connector = PlayerTargetConnector("debridstream", "DebridStream", "com.debridstream.tv")
+}
