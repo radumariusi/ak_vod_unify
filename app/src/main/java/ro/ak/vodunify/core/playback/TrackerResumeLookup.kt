@@ -1,27 +1,27 @@
 package ro.ak.vodunify.core.playback
 
 import kotlinx.coroutines.flow.first
-import ro.ak.vodunify.core.db.TrackingDao
 import ro.ak.vodunify.core.tracking.SyncStatus
 import ro.ak.vodunify.core.tracking.TrackingRepository
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Pozițiile de reluare din trackerele conectate (Trakt acum, SIMKL/WeTrakr în etapa 5),
- * citite din tabela locală `resume_points`. Trackerele dau doar procentul, deci poziția e
+ * Pozițiile de reluare din trackerele conectate (Trakt, SIMKL), reconciliate între surse. Trackerele dau doar procentul, deci poziția e
  * estimată din durată; în timpul unei sincronizări e „În așteptare”.
  */
 @Singleton
 class TrackerResumeLookup @Inject constructor(
-    private val dao: TrackingDao,
     private val tracking: TrackingRepository,
 ) : ResumeLookup {
 
     override suspend fun current(request: PlaybackRequest): ResumeInfo {
         if (request.type == PlaybackRequest.Type.SHOW) return ResumeInfo.Manual
         val titleKey = if (request.type == PlaybackRequest.Type.MOVIE) "movie:tmdb:${request.tmdbId}" else "tv:tmdb:${request.tmdbId}"
-        val point = dao.resumeFor(titleKey).first()
+        // Punctul reconciliat: cel mai recent din toate sursele, fără cele terminate între timp.
+        val point = tracking.reconciled.first().resume
+            .filter { it.titleKey == titleKey }
+            .map { it.winner }
             .filter { request.type != PlaybackRequest.Type.EPISODE || (it.ref.season == request.season && it.ref.episode == request.episode) }
             .maxByOrNull { it.updatedAt }
             ?: return ResumeInfo.Manual
