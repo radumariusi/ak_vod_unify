@@ -53,6 +53,9 @@ class MediaListenerService : NotificationListenerService() {
         var screenGuess: ScreenGuess? = null
         var startedAt: Long = SystemClock.elapsedRealtime()
         var everPlayed = false
+
+        /** Coduri găsite în jurnalul sistemului (netflix_id…). */
+        val extraFields = linkedMapOf<String, String>()
         var lastStateLogged: Int? = null
         var lastPositionKnown: Boolean? = null
         var lastStateLogAt: Long = 0L
@@ -153,7 +156,7 @@ class MediaListenerService : NotificationListenerService() {
         )
         // Sesiunile acestei aplicații fără titlu îl pot lua acum din notificare.
         val now = SystemClock.elapsedRealtime()
-        tracked.values.filter { it.tracker.packageName == sbn.packageName && it.nativeInfo?.hasTitle != true }.forEach { t ->
+        tracked.values.filter { it.tracker.packageName == sbn.packageName && !hasTextTitle(it) }.forEach { t ->
             val hadTitle = t.tracker.media?.hasTitle == true
             dispatch(t.tracker.onMetadata(merged(t), now, correction = hadTitle))
         }
@@ -256,8 +259,37 @@ class MediaListenerService : NotificationListenerService() {
         if (s == PlayState.PLAYING && !t.everPlayed) {
             t.everPlayed = true
             onPlaybackStarted(t, now)
+            // Jurnalul sistemului: după câteva secunde, când aplicația a scris deja ce a pornit.
+            handler.postDelayed({ probeLogcat(t) }, LOGCAT_DELAY_MS)
         }
+        if (s == PlayState.PAUSED && t.tracker.state == PlayState.PLAYING) probeLogcat(t)
         dispatch(t.tracker.onPlaybackState(s, position, state?.lastPositionUpdateTime ?: 0L, state?.playbackSpeed ?: 1f, now))
+    }
+
+    private fun hasTextTitle(t: Tracked) = t.nativeInfo?.fields?.keys?.any { it in TEXT_TITLE_KEYS } == true
+
+    private val loggedLogcat = LinkedHashSet<String>()
+
+    /** Caută codul titlului în logcat pentru sesiunile fără titlu (Netflix). */
+    private fun probeLogcat(t: Tracked) {
+        if (hasTextTitle(t)) return
+        if (!tracked.values.contains(t)) return
+        LogcatProbe.probe(this, t.tracker.packageName) { r ->
+            handler.post {
+                val fresh = r.lines.filter { loggedLogcat.add(it) }
+                while (loggedLogcat.size > 2000) loggedLogcat.remove(loggedLogcat.first())
+                if (fresh.isNotEmpty()) DiagLog.add("LOGCAT ${t.tag} (${fresh.size} linii noi):\n" + fresh.joinToString("\n") { "  " + it.take(220) })
+                if (r.ids.isEmpty()) {
+                    DiagLog.add("${t.tag}: niciun cod de titlu în logcat")
+                    return@post
+                }
+                if (r.ids.all { (k, v) -> t.extraFields[k] == v }) return@post
+                t.extraFields.putAll(r.ids)
+                DiagLog.add("${t.tag}: cod titlu din logcat: ${r.ids}")
+                dispatch(t.tracker.onMetadata(merged(t), SystemClock.elapsedRealtime()))
+                publishLive()
+            }
+        }
     }
 
     /**
@@ -265,7 +297,7 @@ class MediaListenerService : NotificationListenerService() {
      * înainte (cea cu butonul „Redă”), sau de pe ecranul playerului dacă l-am citit deja.
      */
     private fun onPlaybackStarted(t: Tracked, now: Long) {
-        if (t.nativeInfo?.hasTitle == true || t.screenGuess != null) return
+        if (hasTextTitle(t) || t.screenGuess != null) return
         val pkg = t.tracker.packageName
         val latest = ScreenState.latest(pkg)?.takeIf { it.guess != null && now - it.at < 15_000 && (!it.times.isEmpty || it.guess.subtitle != null) }
         val details = ScreenState.lastDetails(pkg)?.takeIf { now - it.at < DETAILS_MAX_AGE_MS }
@@ -290,7 +322,7 @@ class MediaListenerService : NotificationListenerService() {
             val duration = t.tracker.media?.durationMs ?: sessions.firstNotNullOfOrNull { it.tracker.media?.durationMs }
             if (!snap.times.isEmpty) t.tracker.onScreenTimes(snap.times.position(duration), snap.times.durationMs, now)
             val g = snap.guess ?: continue
-            if (t.nativeInfo?.hasTitle == true || g == t.screenGuess) continue
+            if (hasTextTitle(t) || g == t.screenGuess) continue
             val hadScreenTitle = t.screenGuess != null
             t.screenGuess = g
             DiagLog.add("${t.tag}: titlu de pe ecran: ${g.title} · ${g.subtitle ?: "-"}")
@@ -305,8 +337,11 @@ class MediaListenerService : NotificationListenerService() {
      */
     private fun merged(t: Tracked): MediaInfo? {
         val native = t.nativeInfo
-        if (native?.hasTitle == true) return native
+        val nativeHasText = native?.fields?.keys?.any { it in TEXT_TITLE_KEYS } == true
+        if (nativeHasText && t.extraFields.isEmpty()) return native
         val fields = LinkedHashMap(native?.fields.orEmpty())
+        fields.putAll(t.extraFields)
+        if (nativeHasText) return MediaInfo(fields, native?.durationMs)
         val n = mediaNotifications[t.tracker.packageName]
         val notifTitle = n?.title?.takeIf { !it.equals(t.tracker.appLabel, ignoreCase = true) }
         val g = t.screenGuess
@@ -321,7 +356,7 @@ class MediaListenerService : NotificationListenerService() {
                 g.subtitle?.let { fields["display_subtitle"] = it }
                 fields["title_source"] = "screen"
             }
-            else -> if (native == null) return null
+            else -> if (native == null && t.extraFields.isEmpty()) return null
         }
         return MediaInfo(fields, native?.durationMs)
     }
@@ -411,6 +446,10 @@ class MediaListenerService : NotificationListenerService() {
 
         /** Pagina titlului (cu „Redă”) contează doar dacă redarea a pornit la scurt timp după. */
         private const val DETAILS_MAX_AGE_MS = 3 * 60_000L
+        private const val LOGCAT_DELAY_MS = 8_000L
+
+        /** Câmpurile care conțin cu adevărat un titlu (nu doar coduri). */
+        private val TEXT_TITLE_KEYS = setOf("title", "display_title", "display_subtitle", "artist", "album", "album_artist")
         private const val PREFIX = "android.media.metadata."
 
         /** Toate câmpurile text din metadate (fără imagini), cu nume scurte: "title", "artist"… */

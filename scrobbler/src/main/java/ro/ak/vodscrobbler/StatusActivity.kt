@@ -139,6 +139,13 @@ class StatusActivity : Activity() {
                     else -> "\n❌ Citirea titlului de pe ecran: OPRITĂ (Netflix, Apple TV nu trimit titlul altfel)"
                 },
             )
+            append(
+                if (LogcatProbe.isAllowed(this@StatusActivity)) {
+                    "\n✅ Citește codul titlului din jurnalul sistemului (pentru Netflix)"
+                } else {
+                    "\n❌ Codul titlului din jurnalul sistemului (Netflix): fără acces, vezi comanda ADB de mai jos"
+                },
+            )
             append(if (main) "\n✅ AK VOD Unify instalat" else "\n❌ AK VOD Unify nu e instalat (pachet ${BuildConfig.MAIN_APP_ID})")
             append(if (battery) "\n✅ Scutit de economia de baterie" else "\nℹ️ Nu e scutit de economia de baterie (opțional)")
             append(if (ScrobblerState.keepAliveRunning) "\n✅ Rulează permanent (serviciu în prim-plan)" else "\n⚠️ Serviciul permanent nu rulează încă")
@@ -171,7 +178,14 @@ class StatusActivity : Activity() {
                 "Dacă televizorul nu are setarea sau o blochează, prin ADB (o singură dată, rămâne după restart):\n\n" +
                 Access.adbScreenReaderCommands(this).joinToString("\n") + "\n\n"
         }
-        adb.text = listenerHelp + screenHelp + "Pe televizoarele care închid aplicațiile (ex. TCL), tot prin ADB, o singură dată:\n" +
+        val logcatHelp = if (LogcatProbe.isAllowed(this)) {
+            ""
+        } else {
+            "Netflix nu spune ce redă. Ca AK Scrobbler să afle codul titlului din jurnalul sistemului, " +
+                "dă-i voie o singură dată prin ADB (în Bugjaeger scrie fără „adb shell”):\n\n" +
+                LogcatProbe.adbCommand(this) + "\n\napoi închide și redeschide AK Scrobbler.\n\n"
+        }
+        adb.text = listenerHelp + screenHelp + logcatHelp + "Pe televizoarele care închid aplicațiile (ex. TCL), tot prin ADB, o singură dată:\n" +
             "• bulina: ${Access.adbOverlayCommand(this)}\n" +
             "• fără economie de baterie: ${Access.adbBatteryCommand(this)}"
 
