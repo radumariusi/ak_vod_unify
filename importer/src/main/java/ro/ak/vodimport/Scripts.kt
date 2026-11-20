@@ -110,7 +110,16 @@ object Scripts {
               var scan = {};
               try { scan = JSON.parse(${NETFLIX_PAGE_SCAN}); } catch (e) { scan = { items: [], diag: "scan: " + e }; }
               var sample = (scan.items || []).slice(0, 3).map(function (it) { return (it.series ? it.series + " · " : "") + it.title + " @" + Math.round(it.bookmark / 60) + "min"; }).join(" | ");
-              AK.fail("Netflix API " + codes.join("/") + " · " + scan.diag + (sample ? " · ex: " + sample : ""));
+              // Și pagina vizibilă „Activitate de vizionare”: are datele în HTML?
+              var page = "-";
+              try {
+                var pr = await fetch("/viewingactivity", { credentials: "include" });
+                var ph = await pr.text();
+                page = pr.status + " " + (pr.url || "").replace("https://www.netflix.com", "") + " " + Math.round(ph.length / 1024) + "KB" +
+                  (ph.indexOf("viewedItems") >= 0 ? " viewedItems" : "") + (ph.indexOf("dateStr") >= 0 ? " dateStr" : "") +
+                  (ph.indexOf("bookmark") >= 0 ? " bookmark" : "") + (ph.indexOf("falcorCache") >= 0 ? " falcor" : "");
+              } catch (e) { page = "eroare " + e; }
+              AK.fail("TEST Netflix · API " + codes.join("/") + " · " + scan.diag + (sample ? " · ex: " + sample : "") + " · pagina activitate: " + page);
               return;
             }
             try { if (!profile) profile = ctx.models.userInfo.data.name || ""; } catch (e) {}
