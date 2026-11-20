@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
     Citim doar textele de pe ecran (titlul din player, timpul), fără să apăsăm nimic în locul tău.
+    Ne prezentăm ca un cititor de ecran (feedbackSpoken + explorare la atingere): unele playere
+    (Netflix) își expun textele doar când e pornit un cititor de ecran, ca TalkBack. Nu vorbim nimic.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewFocused|typeViewSelected"
-    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityEventTypes="typeAllMask"
+    android:accessibilityFeedbackType="feedbackSpoken|feedbackGeneric"
     android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews|flagRetrieveInteractiveWindows"
+    android:canRequestTouchExplorationMode="true"
     android:canRetrieveWindowContent="true"
     android:description="@string/screen_reader_description"
     android:notificationTimeout="300" />

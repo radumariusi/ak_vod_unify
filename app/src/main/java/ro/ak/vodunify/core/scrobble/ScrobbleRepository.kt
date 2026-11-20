@@ -108,7 +108,7 @@ class ScrobbleRepository @Inject constructor(
         // Codul e mai sigur decât textele aplicației, deci are prioritate.
         val extra = serviceTitles.fieldsFor(original)
         val event = if (extra.isEmpty()) original else original.copy(fields = original.fields + extra)
-        val raw = ScrobbleRules.rawLabel(event.fields)
+        val raw = ScrobbleRules.rawLabel(event.fields) + (serviceTitles.noteFor(original)?.let { " [$it]" } ?: "")
         fun done(result: ScrobbleResult, media: MediaRef? = null, duration: Long? = event.duration, position: Long = event.positionMs): ScrobbleResult {
             val e = entry(event, raw, media, duration, result, position, fromQueue)
             // În timpul redării păstrăm o singură linie pe titlu; pauzele, opririle și problemele se adaugă.

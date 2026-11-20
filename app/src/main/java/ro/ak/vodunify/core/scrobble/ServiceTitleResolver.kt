@@ -93,7 +93,22 @@ class ServiceTitleResolver @Inject constructor(http: OkHttpClient) {
     private val client = http.newBuilder().callTimeout(12, TimeUnit.SECONDS).followRedirects(true).build()
     private val cache = ConcurrentHashMap<String, Optional>()
 
-    private data class Optional(val value: ServiceTitle?, val at: Long)
+    private data class Optional(val value: ServiceTitle?, val at: Long, val note: String)
+
+    /** Ce s-a întâmplat la ultima căutare (pentru jurnalul din Setări): „Prime: The Boys S4E3”, „Prime: HTTP 403”… */
+    fun noteFor(event: ScrobbleEvent): String? = keyFor(event)?.let { cache[it]?.note }
+
+    private fun keyFor(event: ScrobbleEvent): String? {
+        val gti = event.fields.values.firstNotNullOfOrNull { ServicePages.PRIME_GTI.find(it)?.value }
+        val netflixId = event.fields["netflix_id"]?.takeIf { ServicePages.NETFLIX_ID.matches(it) }
+        return when {
+            gti != null -> "prime:$gti"
+            netflixId != null -> "netflix:$netflixId"
+            else -> null
+        }
+    }
+
+    private var lastHttp: String = ""
 
     /** Câmpurile de adăugat la eveniment, sau gol dacă nu avem cod / nu am găsit nimic. */
     suspend fun fieldsFor(event: ScrobbleEvent): Map<String, String> {
@@ -113,9 +128,17 @@ class ServiceTitleResolver @Inject constructor(http: OkHttpClient) {
             // Eșecurile se reîncearcă după 30 de minute.
             if (c.value != null || now - c.at < TimeUnit.MINUTES.toMillis(30)) return c.value
         }
-        val v = runCatching { load() }.getOrNull()
+        lastHttp = ""
+        val r = runCatching { load() }
+        val v = r.getOrNull()
+        val service = key.substringBefore(':').replaceFirstChar { it.uppercase() }
+        val note = when {
+            v != null -> "$service: ${v.show}" + (v.season?.let { " S$it" } ?: "") + (v.episode?.let { "E$it" } ?: "")
+            r.isFailure -> "$service: eroare ${r.exceptionOrNull()?.javaClass?.simpleName} ${r.exceptionOrNull()?.message?.take(60)}"
+            else -> "$service: pagina nu are titlu $lastHttp"
+        }
         if (cache.size > 500) cache.clear()
-        cache[key] = Optional(v, now)
+        cache[key] = Optional(v, now, note)
         return v
     }
 
@@ -124,6 +147,9 @@ class ServiceTitleResolver @Inject constructor(http: OkHttpClient) {
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
             .header("Accept-Language", "en-US,en;q=0.8,ro;q=0.6")
             .build()
-        client.newCall(req).execute().use { r -> if (r.isSuccessful) r.body?.string() else null }
+        client.newCall(req).execute().use { r ->
+            lastHttp = "(HTTP ${r.code} ${r.request.url.host}${r.request.url.encodedPath.take(40)})"
+            if (r.isSuccessful) r.body?.string() else null
+        }
     }
 }

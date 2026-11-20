@@ -270,7 +270,7 @@ class StatusActivity : Activity() {
 
     private fun saveLog() {
         val msg = try {
-            "✅ Jurnal salvat: ${LogExport.saveToDownloads(this)}\n(de pe telefon, cu ADB: adb pull <calea de mai sus>)"
+            "✅ Jurnal salvat: ${LogExport.saveToDownloads(this)}\n(în Bugjaeger: cat \"$(ls -t /sdcard/Download/ak-scrobbler-jurnal* | head -1)\")"
         } catch (e: Exception) {
             "❌ Nu am putut salva jurnalul: ${e.message}. Folosește „Trimite jurnalul” sau fă poze."
         }

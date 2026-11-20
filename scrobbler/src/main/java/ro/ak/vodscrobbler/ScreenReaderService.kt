@@ -1,6 +1,8 @@
 package ro.ak.vodscrobbler
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -31,7 +33,16 @@ class ScreenReaderService : AccessibilityService() {
         super.onServiceConnected()
         DiagLog.init(this)
         ScreenState.serviceConnected = true
-        DiagLog.add("Citirea ecranului (accesibilitate) a pornit")
+        // Doar pe televizor (fără ecran tactil): ne prezentăm ca un cititor de ecran complet, ca
+        // Netflix să-și expună textele. Pe telefon asta ar schimba atingerile, deci nu.
+        val tv = packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) &&
+            !packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
+        if (tv) {
+            runCatching {
+                serviceInfo = serviceInfo.apply { flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE }
+            }
+        }
+        DiagLog.add("Citirea ecranului (accesibilitate) a pornit" + if (tv) " · mod cititor de ecran (TV)" else "")
         KeepAliveService.start(this)
     }
 
