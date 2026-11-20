@@ -1,5 +1,6 @@
 package ro.ak.vodunify.core.calendar.android
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -24,6 +25,8 @@ import ro.ak.vodunify.core.calendar.format.whereToWatch
  * The "Azi apare" channel on the Android TV home screen: today's episodes and movies,
  * followed ones first. Rebuilt on every refresh (programs are replaced, not merged).
  */
+// Constantele TvContractCompat (tip program, raport poster) sunt scrise ca valori: lint nu le recunoaște.
+@SuppressLint("WrongConstant")
 object TodayChannel {
     private const val TAG = "TodayChannel"
     private const val PREFS = "tv_channel"
