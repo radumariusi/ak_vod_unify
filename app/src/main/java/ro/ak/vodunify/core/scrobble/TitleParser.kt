@@ -31,7 +31,7 @@ object TitleParser {
 
     private val SEASON_EPISODE = listOf(
         // S1:E3, S01E03, S1 E3, T1:E3, S1 Ep. 3
-        Regex("""(?i)(?<![\p{L}\d])[ST](\d{1,2})\s*[:.\-]?\s*(?:E|Ep\.?\s?)(\d{1,3})(?!\d)"""),
+        Regex("""(?i)(?<![\p{L}\d])[ST](\d{1,2})\s*[:.,\-]?\s*(?:E|Ep\.?\s?)(\d{1,3})(?!\d)"""),
         // Season 1 Episode 3, Sezonul 1 Episodul 3, Staffel 1 Folge 3 …
         Regex(
             """(?i)(?:season|sezonul|sezon|staffel|temporada|saison|stagione|seizoen)\s*(\d{1,2})\D{0,20}?""" +
