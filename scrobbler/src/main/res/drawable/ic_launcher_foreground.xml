@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Un punct roșu (înregistrare) cu două unde: „ascultă” ce rulează. -->
+    <path
+        android:fillColor="#FFE50914"
+        android:pathData="M54,46 a8,8 0 1,0 0.01,0 z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="4"
+        android:pathData="M40,40 a20,20 0 0,0 0,28 M68,40 a20,20 0 0,1 0,28" />
+</vector>

@@ -81,6 +81,13 @@ jobs:
           OUT="ak-vod-unify-${VERSION_NAME}-vc${VERSION_CODE}.apk"
           cp "$SRC" "$OUT"
           echo "file=$OUT" >> "$GITHUB_OUTPUT"
+          SCR=scrobbler/build/outputs/apk/release/scrobbler-release.apk
+          if [ ! -f "$SCR" ]; then
+            echo "::error::APK-ul AK Scrobbler nu a fost generat."; ls -la scrobbler/build/outputs/apk/release; exit 1
+          fi
+          SOUT="ak-scrobbler-${VERSION_NAME}-vc${VERSION_CODE}.apk"
+          cp "$SCR" "$SOUT"
+          echo "scrobbler=$SOUT" >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -91,4 +98,6 @@ jobs:
           prerelease: ${{ inputs.prerelease }}
           make_latest: ${{ !inputs.prerelease }}
           generate_release_notes: true
-          files: ${{ steps.apk.outputs.file }}
+          files: |
+            ${{ steps.apk.outputs.file }}
+            ${{ steps.apk.outputs.scrobbler }}
