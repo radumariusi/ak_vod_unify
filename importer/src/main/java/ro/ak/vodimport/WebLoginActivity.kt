@@ -83,12 +83,15 @@ class WebLoginActivity : Activity() {
         }
         web.addJavascriptInterface(Bridge(), "AK")
         web.webViewClient = object : WebViewClient() {
+            override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
+                // Navigare internă (fără încărcare nouă): ținem adresa la zi pentru punte.
+                currentUrl = url
+            }
+
             override fun onPageFinished(view: WebView, url: String) {
                 currentUrl = url
                 if (pendingImport && isHistoryPage(url)) {
-                    pendingImport = false
-                    status.text = "Citesc istoricul din ${service.name}…"
-                    view.evaluateJavascript(service.script ?: return, null)
+                    runScript()
                 } else if (pendingImport && isLoginPage(url)) {
                     pendingImport = false
                     status.text = "Nu ești conectat încă. Conectează-te, apoi apasă din nou „Importă istoricul”."
@@ -119,22 +122,55 @@ class WebLoginActivity : Activity() {
 
     private fun startImport() {
         pendingImport = true
+        // Netflix: scriptul merge de pe orice pagină netflix.com pe care ești conectat, deci nu
+        // mai depindem de adresa paginii de istoric (Netflix a mutat-o la /settings/viewed/…).
+        val url = currentUrl
+        if (service.runAnywhere && url != null && trustedPage() && !isLoginPage(url)) {
+            runScript()
+            return
+        }
         status.text = "Deschid pagina de istoric…"
         web.loadUrl(service.historyUrl ?: return)
+        // Plasă de siguranță: dacă pagina se încarcă fără „gata” (site-uri cu navigare internă),
+        // pornim oricum după câteva secunde.
+        handler.postDelayed({
+            val now = currentUrl ?: web.url
+            if (pendingImport && now != null && isTrusted(now) && !isLoginPage(now)) runScript()
+        }, FALLBACK_DELAY_MS)
     }
 
+    private fun runScript() {
+        if (!pendingImport) return
+        pendingImport = false
+        status.text = "Citesc istoricul din ${service.name}…"
+        val started = System.currentTimeMillis()
+        web.evaluateJavascript(service.script ?: return, null)
+        handler.postDelayed({
+            if (lastBridgeAt < started) {
+                status.text = "⚠️ Pagina nu a răspuns. Reîncarcă pagina (Înapoi, apoi din nou) și apasă „Importă istoricul”. " +
+                    "Adresa curentă: ${currentUrl.orEmpty().take(80)}"
+            }
+        }, WATCHDOG_MS)
+    }
+
+    /** Ultima dată când scriptul a răspuns prin punte. */
+    @Volatile private var lastBridgeAt = 0L
+
     private fun isHistoryPage(url: String): Boolean {
+        if (service.runAnywhere) return isTrusted(url) && !isLoginPage(url)
         val target = Uri.parse(service.historyUrl ?: return false)
         val u = Uri.parse(url)
         return u.host == target.host && (u.path ?: "").trimEnd('/').startsWith((target.path ?: "").trimEnd('/'))
     }
 
-    private fun isLoginPage(url: String): Boolean = url.contains("login", ignoreCase = true) || url.contains("signin", ignoreCase = true)
-
-    private fun trustedPage(): Boolean {
-        val host = Uri.parse(currentUrl ?: return false).host ?: return false
+    private fun isTrusted(url: String): Boolean {
+        val host = Uri.parse(url).host ?: return false
         return service.hosts.any { host == it || host.endsWith(".$it") }
     }
+
+    private fun isLoginPage(url: String): Boolean = url.contains("login", ignoreCase = true) || url.contains("signin", ignoreCase = true)
+
+    private fun trustedPage(): Boolean = isTrusted(currentUrl ?: return false)
 
     private fun saveStatus(message: String) {
         getSharedPreferences(MainActivity.PREFS, Context.MODE_PRIVATE).edit()
@@ -147,18 +183,21 @@ class WebLoginActivity : Activity() {
         @JavascriptInterface
         fun progress(count: Int) {
             if (!trustedPage()) return
+            lastBridgeAt = System.currentTimeMillis()
             handler.post { status.text = "Citesc istoricul din ${service.name}… ($count)" }
         }
 
         @JavascriptInterface
         fun fail(message: String) {
             if (!trustedPage()) return
+            lastBridgeAt = System.currentTimeMillis()
             handler.post { status.text = "⚠️ $message" }
         }
 
         @JavascriptInterface
         fun done(payload: String) {
             if (!trustedPage()) return
+            lastBridgeAt = System.currentTimeMillis()
             thread {
                 val result = runCatching {
                     val json = JSONObject(payload)
@@ -190,6 +229,8 @@ class WebLoginActivity : Activity() {
 
     companion object {
         const val EXTRA_SERVICE = "service"
+        private const val FALLBACK_DELAY_MS = 8_000L
+        private const val WATCHDOG_MS = 15_000L
         private const val DESKTOP_UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     }

@@ -11,20 +11,33 @@ object Scripts {
     val NETFLIX = """
         (async function () {
           try {
+            var profile = "";
             var ctx = (window.netflix && (window.netflix.reactContext || (window.netflix.appContext && window.netflix.appContext.state && window.netflix.appContext.state.model))) || null;
             var build = null;
             try { build = ctx.models.serverDefs.data.BUILD_IDENTIFIER; } catch (e) {}
+            AK.progress(0);
             if (!build) {
               var m = document.documentElement.innerHTML.match(/"BUILD_IDENTIFIER":"([^"]+)"/);
               if (m) build = m[1];
             }
+            if (!build) {
+              // Paginile noi (ex. /settings/viewed/…) nu au datele vechi: le luăm din /browse.
+              try {
+                var html = await (await fetch("/browse", { credentials: "include" })).text();
+                var mb = html.match(/"BUILD_IDENTIFIER":"([^"]+)"/);
+                if (mb) build = mb[1];
+                if (!profile) {
+                  var mp = html.match(/"userInfo":\{"data":\{"name":"([^"]*)"/);
+                  if (mp) profile = mp[1];
+                }
+              } catch (e) {}
+            }
             if (!build) { AK.fail("Nu găsesc sesiunea Netflix. Conectează-te, alege profilul, apoi apasă din nou „Importă istoricul”."); return; }
-            var profile = "";
-            try { profile = ctx.models.userInfo.data.name || ""; } catch (e) {}
+            try { if (!profile) profile = ctx.models.userInfo.data.name || ""; } catch (e) {}
             var all = [];
             for (var pg = 0; pg < 300; pg++) {
               var r = await fetch("/api/shakti/" + build + "/viewingactivity?pg=" + pg + "&pgSize=100", { credentials: "include" });
-              if (!r.ok) { AK.fail("Netflix a răspuns cu " + r.status + ". Reîncearcă după ce reîncarci pagina."); return; }
+              if (!r.ok) { AK.fail("Netflix a răspuns cu " + r.status + (r.status === 401 || r.status === 403 ? ". Alege întâi profilul (pagina „Cine se uită?”), apoi apasă din nou." : ". Reîncearcă după ce reîncarci pagina.")); return; }
               var j = await r.json();
               var items = j.viewedItems || [];
               for (var i = 0; i < items.length; i++) {
