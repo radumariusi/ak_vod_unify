@@ -1,6 +1,6 @@
 package ro.ak.vodunify.core.playback
 
-import kotlinx.coroutines.flow.first
+import ro.ak.vodunify.core.publish.LOCAL_SOURCE
 import ro.ak.vodunify.core.tracking.SyncStatus
 import ro.ak.vodunify.core.tracking.TrackingRepository
 import javax.inject.Inject
@@ -19,7 +19,7 @@ class TrackerResumeLookup @Inject constructor(
         if (request.type == PlaybackRequest.Type.SHOW) return ResumeInfo.Manual
         val titleKey = if (request.type == PlaybackRequest.Type.MOVIE) "movie:tmdb:${request.tmdbId}" else "tv:tmdb:${request.tmdbId}"
         // Punctul reconciliat: cel mai recent din toate sursele, fără cele terminate între timp.
-        val point = tracking.reconciled.first().resume
+        val point = tracking.reconcileNow().resume
             .filter { it.titleKey == titleKey }
             .map { it.winner }
             .filter { request.type != PlaybackRequest.Type.EPISODE || (it.ref.season == request.season && it.ref.episode == request.episode) }
@@ -30,6 +30,9 @@ class TrackerResumeLookup @Inject constructor(
             runtimeMinutes = request.runtimeMinutes,
             source = point.source,
             pendingSync = tracking.status.value is SyncStatus.Running,
+            // Poziția setată de tine e exactă: nu mai e estimată din procent.
+            exactPositionMs = point.positionMs?.takeIf { point.source == LOCAL_SOURCE },
+            local = point.source == LOCAL_SOURCE,
         )
     }
 

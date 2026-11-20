@@ -34,6 +34,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import ro.ak.vodunify.ui.components.layoutSpec
 import ro.ak.vodunify.ui.details.DetailsScreen
+import ro.ak.vodunify.ui.diagnostics.DiagnosticsScreen
 import ro.ak.vodunify.ui.home.HomeScreen
 import ro.ak.vodunify.ui.library.LibraryScreen
 import ro.ak.vodunify.ui.person.PersonScreen
@@ -55,6 +56,7 @@ fun AppNavigation() {
             openPerson = { id -> nav.navigate(Routes.person(id)) },
             openStudio = { kind, id -> nav.navigate(Routes.studio(kind, id)) },
             openSettings = { nav.navigateTop(TopDestination.SETTINGS) },
+            openDiagnostics = { nav.navigate(Routes.DIAGNOSTICS) },
         )
     }
 
@@ -103,6 +105,7 @@ fun AppNavigation() {
                 composable(TopDestination.SEARCH.route) { SearchScreen() }
                 composable(TopDestination.LIBRARY.route) { LibraryScreen() }
                 composable(TopDestination.SETTINGS.route) { SettingsScreen() }
+                composable(Routes.DIAGNOSTICS) { DiagnosticsScreen() }
                 composable(
                     Routes.TITLE,
                     arguments = listOf(

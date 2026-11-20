@@ -32,11 +32,14 @@ object ResumeEstimator {
         source: String?,
         pendingSync: Boolean = false,
         exactPositionMs: Long? = null,
+        local: Boolean = false,
+        durationMs: Long? = null,
     ): ResumeInfo {
-        val duration = runtimeMinutes?.takeIf { it > 0 }?.let { it * 60_000L }
+        val duration = durationMs?.takeIf { it > 0 } ?: runtimeMinutes?.takeIf { it > 0 }?.let { it * 60_000L }
         val position = exactPositionMs ?: if (progress != null && duration != null) (duration * progress.coerceIn(0f, 1f)).toLong() else null
         if (position == null || position <= 0) return ResumeInfo.Manual
         val state = when {
+            exactPositionMs != null && local -> ResumeState.LOCAL
             pendingSync -> ResumeState.PENDING
             exactPositionMs != null -> ResumeState.SYNCED
             else -> ResumeState.ESTIMATED

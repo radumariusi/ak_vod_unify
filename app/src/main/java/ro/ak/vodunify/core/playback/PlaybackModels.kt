@@ -57,6 +57,9 @@ enum class ResumeState(val label: String) {
     /** Calculată din procent × durată (trackerele dau doar procentul). */
     ESTIMATED("Poziție estimată"),
 
+    /** Poziție exactă setată de tine („Setează minutul”). */
+    LOCAL("Setată de tine"),
+
     /** Nu avem poziție: reluarea se face manual în aplicația-țintă. */
     MANUAL("Reluare manuală"),
 }

@@ -37,6 +37,7 @@ object AppModule {
 
     @Provides fun mediaDao(db: VodDatabase) = db.mediaDao()
     @Provides fun trackingDao(db: VodDatabase) = db.trackingDao()
+    @Provides fun publishDao(db: VodDatabase) = db.publishDao()
     @Provides fun tmdbCacheDao(db: VodDatabase) = db.tmdbCacheDao()
     @Provides fun availabilityDao(db: VodDatabase) = db.availabilityDao()
 }

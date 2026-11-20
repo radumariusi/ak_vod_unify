@@ -9,9 +9,9 @@ Hub VOD pentru **Android TV** (funcționează și pe telefon, cu touch): adună 
 | 1 | Fundație: proiect Kotlin + Compose, arhitectură modulară, Room, Hilt, CI, release manual, self-update | ✅ |
 | 2 | Catalog TMDb: Acasă (hero + rânduri), detalii filme/seriale (sezoane, episoade), persoane, studiouri/rețele, căutare cu filtre, limbă RO/original, disponibilitate US/RO (JustWatch), cache Room | ✅ |
 | 3 | Trakt: login cu cod (device code + PKCE), istoric, „Continuă vizionarea”, „Următorul episod”, „De văzut”, marcare văzut | ✅ |
-| 4 | „Alege unde vezi” + deep links (Netflix, Nuvio, Stremio, DebridStream) | ⏳ |
+| 4 | „Alege unde vezi” + deep links (Netflix, Nuvio, Stremio, DebridStream) | ✅ |
 | 5 | SIMKL + reconciliere între surse + Bibliotecă (WeTrakr pus deoparte până la API-ul public) | ✅ |
-| 6 | Publicare progres înapoi în surse + ecran diagnostic | ⏳ |
+| 6 | Publicare progres înapoi în surse (profiluri: automat / la cerere / doar vizualizare) + Diagnostic rute | ✅ |
 | 7 | Opțional: backend, Younify, import CSV; integrare AK VOD Calendar | ⏳ |
 
 ## Arhitectură
@@ -20,6 +20,7 @@ Hub VOD pentru **Android TV** (funcționează și pe telefon, cu touch): adună 
 app/src/main/java/ro/ak/vodunify/
 ├── core/connector   Connector, DeviceAuthConnector + Capability (istoric, progres, watchlist, următorul episod, deep link), ConnectorRegistry
 ├── core/trakt       Client Trakt API v2 (device code + PKCE, refresh token), DTO-uri, mapări, TraktConnector
+├── core/publish    Publicare progres: profiluri, reguli (PublishPlanner), scriere + citire înapoi, Diagnostic rute
 ├── core/tracking    TrackingRepository: sincronizare din toți trackerii conectați în Room + acțiuni (văzut, De văzut)
 ├── core/db          Room: media, watch_events, resume_points, watchlist, up_next, watched_titles, sync_state, tmdb_cache, availability
 ├── core/tmdb        Client TMDb v3 (Bearer v4 sau api_key v3), DTO-uri, imagini, cache cu TTL + mod offline
@@ -92,6 +93,15 @@ Din pagina unui film, a unui serial sau de pe orice episod se deschide dialogul 
 - Ținta se alege de la cea mai precisă la cea mai slabă și se folosește doar dacă aplicația instalată o acceptă (verificat cu PackageManager): **episod** (Stremio) → **pagina titlului/serialului** (Stremio, Nuvio) → **căutare** (Netflix, Prime Video, Disney+, HBO Max nu au id public în TMDb) → **doar deschide aplicația**.
 - Eticheta de reluare: Poziție sincronizată / În așteptare / Poziție estimată / Reluare manuală. Cu Trakt conectat, poziția e estimată din procentul dat de Trakt („În așteptare” cât rulează sincronizarea); fără tracker e „Reluare manuală”. La o poziție nesigură apare „Deschide acum · mm:ss” sau „Așteaptă sincronizarea”.
 - **Setări → Redare**: piața conturilor (RO/US), aplicația preferată pentru fiecare serviciu (oficială sau un player) și lista aplicațiilor detectate. Dacă titlul e doar în cealaltă piață, dialogul afișează o avertizare.
+
+## Publicare progres (etapa 6)
+
+- **Setează minutul**: în „Alege unde vezi”, pe un film sau episod. Poziția se salvează local (sursa „Local”) și intră în reconciliere ca orice altă sursă: câștigă cea mai nouă.
+- **Publică acum**: trimite poziția cea mai nouă (a ta sau din alt tracker) în destinațiile profilului activ, prin metoda documentată de pauză: Trakt `POST /scrobble/pause`, SIMKL `POST /scrobble/pause`. Nu se trimit `start`/`stop`, deci nu se pornesc sesiuni false și nu se marchează nimic ca văzut.
+- **Publicat** apare doar după ce aplicația citește înapoi punctele de reluare din tracker și găsește poziția trimisă. Altfel: „Trimis, neconfirmat” (se reverifică la fiecare sincronizare) sau „Eroare”.
+- Reguli: doar poziții cunoscute între 1% și 80% (lipsă ≠ 0%; peste 80% Trakt/SIMKL le-ar putea trece ca văzute, iar „văzut” se marchează doar cu „Marchează văzut”); nu se scrie înapoi în sursa poziției și nici peste o poziție mai nouă; aceeași poziție nu se retrimite (idempotent); fiecare scriere e înregistrată ca scriere proprie, ca ecoul ei să nu devină o poziție nouă.
+- **Setări → Publicare progres**: 3 profiluri (Principal, Profil 2, Profil 3), fiecare cu modul lui (**Automat**: după „Setează minutul” și după fiecare sincronizare, maxim 10 scrieri/rulare, doar poziții din ultimele 14 zile; **La cerere**; **Doar vizualizare**) și destinațiile lui (Trakt, SIMKL).
+- **Diagnostic rute** (din Setări): pe fiecare film/episod început, poziția în Local / Trakt / SIMKL cu ora actualizării, care câștigă (★), starea publicării pe fiecare destinație (cu progresul citit înapoi) și ce primește fiecare player: Nuvio citește reluarea din Trakt, Stremio și serviciile oficiale au progres propriu.
 
 ## Semnare și release
 

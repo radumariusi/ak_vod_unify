@@ -130,6 +130,7 @@ fun SettingsScreen(
             }
         }
         item { PlaybackSection() }
+        item { PublishSection() }
         item {
             Text("Conturi", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         }
