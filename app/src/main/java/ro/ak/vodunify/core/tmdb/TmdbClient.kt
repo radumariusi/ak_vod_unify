@@ -42,7 +42,8 @@ class TmdbClient @Inject constructor(
         return json.decodeFromString(serializer, body)
     }
 
-    private suspend fun getRaw(path: String, params: Map<String, String?>, ttlMillis: Long): String =
+    /** Corpul JSON brut (din cache sau rețea), pentru cine își decodează singur DTO-urile (ex. Calendarul). */
+    suspend fun getRaw(path: String, params: Map<String, String?>, ttlMillis: Long = DEFAULT_TTL): String =
         withContext(Dispatchers.IO) {
             if (auth is TmdbAuth.Missing) throw TmdbNotConfiguredException()
             val clean = params.filterValues { !it.isNullOrBlank() }.mapValues { it.value!! }

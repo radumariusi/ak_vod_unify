@@ -12,7 +12,8 @@ Hub VOD pentru **Android TV** (funcționează și pe telefon, cu touch): adună 
 | 4 | „Alege unde vezi” + deep links (Netflix, Nuvio, Stremio, DebridStream) | ✅ |
 | 5 | SIMKL + reconciliere între surse + Bibliotecă (WeTrakr pus deoparte până la API-ul public) | ✅ |
 | 6 | Publicare progres înapoi în surse (profiluri: automat / la cerere / doar vizualizare) + Diagnostic rute | ✅ |
-| 7 | Opțional: backend, Younify, import CSV; integrare AK VOD Calendar | ⏳ |
+| 7 | Opțional: backend, Younify, import CSV | amânat |
+| 8 | Integrare AK VOD Calendar: tab Calendar (seriale + filme), notificări, canalul „Azi apare” | ✅ |
 
 ## Arhitectură
 
@@ -26,6 +27,7 @@ app/src/main/java/ro/ak/vodunify/
 ├── core/tmdb        Client TMDb v3 (Bearer v4 sau api_key v3), DTO-uri, imagini, cache cu TTL + mod offline
 ├── core/catalog     CatalogRepository + modele de domeniu (titluri, persoane, studiouri, disponibilitate)
 ├── core/prefs       Setări catalog (DataStore): limbă RO/Original, piață RO/US
+├── core/calendar   Calendarul din AK VOD Calendar: motor pur (engine, model, time, quality, filter, anticipated, omdb, tmdb peste TmdbClient) + android (setări, notificări, canal TV, WorkManager)
 ├── core/update      Self-update din GitHub Releases (verificare, descărcare, PackageInstaller)
 ├── core/device      Detecție TV vs. telefon
 ├── di               Module Hilt (rețea, DB, conectori prin @IntoSet)
@@ -45,6 +47,7 @@ Nu se commit-uiesc niciodată. Local se pun în `local.properties` (ignorat de g
 | `TMDB_API_KEY` | Catalog TMDb | etapa 2 |
 | `TRAKT_CLIENT_ID` (`TRAKT_CLIENT_SECRET` doar pentru aplicații Trakt vechi, opțional) | Trakt | etapa 3 |
 | `SIMKL_CLIENT_ID` | SIMKL (aplicație OAuth 2.0, tip „TV, devices & command line”, fără secret) | etapa 5 |
+| `OMDB_API_KEY` (opțional) | Note IMDb în Calendar, prin OMDb; se poate pune și din aplicație | etapa 8 |
 | — | WeTrakr: nu are încă API public; conectorul (fără cheie) e în `core/wetrakr`, neactivat | — |
 
 Pașii exacți pentru obținerea fiecărei chei vin în etapa respectivă.
@@ -102,6 +105,19 @@ Din pagina unui film, a unui serial sau de pe orice episod se deschide dialogul 
 - Reguli: doar poziții cunoscute între 1% și 80% (lipsă ≠ 0%; peste 80% Trakt/SIMKL le-ar putea trece ca văzute, iar „văzut” se marchează doar cu „Marchează văzut”); nu se scrie înapoi în sursa poziției și nici peste o poziție mai nouă; aceeași poziție nu se retrimite (idempotent); fiecare scriere e înregistrată ca scriere proprie, ca ecoul ei să nu devină o poziție nouă.
 - **Setări → Publicare progres**: 3 profiluri (Principal, Profil 2, Profil 3), fiecare cu modul lui (**Automat**: după „Setează minutul” și după fiecare sincronizare, maxim 10 scrieri/rulare, doar poziții din ultimele 14 zile; **La cerere**; **Doar vizualizare**) și destinațiile lui (Trakt, SIMKL).
 - **Diagnostic rute** (din Setări): pe fiecare film/episod început, poziția în Local / Trakt / SIMKL cu ora actualizării, care câștigă (★), starea publicării pe fiecare destinație (cu progresul citit înapoi) și ce primește fiecare player: Nuvio citește reluarea din Trakt, Stremio și serviciile oficiale au progres propriu.
+
+## Calendar (etapa 8)
+
+Funcțiile din [AK VOD Calendar](https://github.com/radumariusi/ak_vod_calendar), mutate în tabul **Calendar**. Folosesc clientul TMDb al aplicației (aceeași cheie și același cache), conturile Trakt / SIMKL deja conectate și „Alege unde vezi”.
+
+- **Seriale** și **Filme**, pe **Zi / Săptămână / Lună**, cu ◀ ▶ și „Azi”. Orele sunt în ora României și sunt estimate („≈”): originalele de streaming apar la 00:00 ora Pacificului, serialele TV la 21:00 în țara lor. Pe o aplicație care doar licențiază serialul, episodul apare mai târziu: a doua zi dimineața pe US, la 12:00 pe RO.
+- **Filme**: Streaming, Digital (închiriere / cumpărare), Cinema SUA, Cinema România, fiecare cu buton de pornit/oprit.
+- **Ce intră**: serialele și filmele trebuie să treacă pragurile de notă (IMDb dacă există cheie OMDb, altfel TMDb). Cele noi intră dacă sunt pe lista „mult așteptate” (cele mai populare premiere din TMDb). Categoriile ascunse (anime, turcești, reality etc.) nu apar. Ce urmărești apare mereu.
+- **Ce urmărești**: „De văzut” și serialele în curs din Trakt / SIMKL, plus butonul „Urmăresc” din calendar. „Ascunde” scoate un titlu din calendar. Episoadele și filmele văzute apar cu ✓, iar „Marchează văzut” trimite în trackere.
+- **Apăsare** pe un titlu deschide pagina lui. **Apăsare lungă** (sau OK ținut apăsat pe telecomandă) deschide „Alege unde vezi”.
+- **Filtre**: „Doar aplicațiile mele” și „Arată și ce nu trece pragurile”, care arată estompat ce s-a filtrat și de ce.
+- **Notificări**: pornești din *Setări → Calendar* fie „Doar ce urmăresc”, fie „Ce urmăresc + rezumatul zilei”, și alegi ora. Canalul **„Azi apare”** de pe ecranul principal Android TV se reface la 3 ore.
+- **Setări → Calendar**: aplicațiile tale și țara fiecăreia (detectate automat la prima pornire), praguri, cheia OMDb, categorii, notificări, liste de urmărite / ascunse.
 
 ## Semnare și release
 

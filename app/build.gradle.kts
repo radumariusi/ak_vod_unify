@@ -43,6 +43,8 @@ android {
         buildConfigField("String", "SIMKL_CLIENT_ID", quoted(secret("SIMKL_CLIENT_ID")))
         buildConfigField("String", "SIMKL_CLIENT_SECRET", quoted(secret("SIMKL_CLIENT_SECRET")))
         buildConfigField("String", "WETRAKR_API_KEY", quoted(secret("WETRAKR_API_KEY")))
+        // Opțional (Calendar): note IMDb prin OMDb. Se poate pune și din aplicație (Setări → Calendar).
+        buildConfigField("String", "OMDB_API_KEY", quoted(secret("OMDB_API_KEY")))
         buildConfigField("String", "UPDATE_REPO", quoted("radumariusi/ak_vod_unify"))
     }
 
@@ -120,6 +122,10 @@ dependencies {
     implementation(libs.datastore.preferences)
     implementation(libs.coil.compose)
     implementation(libs.zxing.core)
+    implementation(libs.androidx.work.runtime)
+    implementation(libs.androidx.tvprovider)
 
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.okhttp.mockwebserver)
 }

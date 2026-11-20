@@ -20,6 +20,7 @@ jobs:
       SIMKL_CLIENT_ID: ${{ secrets.SIMKL_CLIENT_ID }}
       SIMKL_CLIENT_SECRET: ${{ secrets.SIMKL_CLIENT_SECRET }}
       WETRAKR_API_KEY: ${{ secrets.WETRAKR_API_KEY }}
+      OMDB_API_KEY: ${{ secrets.OMDB_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
