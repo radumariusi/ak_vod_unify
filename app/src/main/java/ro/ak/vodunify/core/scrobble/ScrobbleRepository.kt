@@ -129,6 +129,10 @@ class ScrobbleRepository @Inject constructor(
             // Nu aruncăm nimic: păstrăm vizionarea și o completăm când aflăm titlul (alt eveniment
             // al aceleiași vizionări) sau la o reîncercare.
             if (!fromQueue) keepUnresolved(event)
+            // Netflix nu spune titlul: îl aflăm din „Activitate de vizionare” (AK Import), după minut.
+            if (!fromQueue && !event.isTick && guesses.isEmpty() && NetflixActivity.isNetflix(event.pkg)) {
+                NetflixRecentWorker.schedule(context)
+            }
             return done(if (guesses.isEmpty()) ScrobbleResult.PENDING else ScrobbleResult.UNMATCHED)
         }
         if (event.playId.isNotEmpty()) {
@@ -147,6 +151,41 @@ class ScrobbleRepository @Inject constructor(
         // Pauza / oprirea se publică (în modul automat); punctele intermediare doar se salvează.
         publisher.setManualPosition(media, position, duration, publish = !event.isTick)
         return done(ScrobbleResult.SAVED, media, duration, position)
+    }
+
+    // ---------- Netflix: titlul din „Activitate de vizionare” ----------
+
+    /**
+     * Răspunsul AK Import RO / US: potrivim vizionările Netflix fără titlu după zi + minut și le
+     * procesăm ca pe orice vizionare (minut salvat / văzut).
+     */
+    suspend fun applyNetflixRecent(result: NetflixRecentResult): Unit = mutex.withLock {
+        var matched = 0
+        if (result.status == "ok") {
+            val solved = mutableSetOf<String>()
+            for (e in readUnresolved()) {
+                if (!NetflixActivity.isNetflix(e.pkg) || TitleParser.guesses(e.fields, e.app).isNotEmpty()) continue
+                val item = NetflixActivity.match(e, result.items) ?: continue
+                matched++
+                val r = process(e.copy(fields = e.fields + NetflixActivity.fields(item)), fromQueue = true)
+                if (r == ScrobbleResult.SAVED || r == ScrobbleResult.WATCHED || r == ScrobbleResult.IGNORED || r == ScrobbleResult.TOO_SHORT) {
+                    solved += unresolvedKey(e)
+                }
+            }
+            if (solved.isNotEmpty()) writeUnresolved(readUnresolved().filterNot { unresolvedKey(it) in solved })
+        }
+        val time = java.text.SimpleDateFormat("dd.MM HH:mm", java.util.Locale.ROOT).format(java.util.Date())
+        val line = when (result.status) {
+            "ok" -> "$time · ${result.items.size} titluri citite, $matched vizionări recunoscute"
+            "not_logged_in" -> "$time · ${result.message ?: "neconectat"}"
+            else -> "$time · eroare: ${result.message ?: "-"}"
+        }
+        prefs.edit().putString(KEY_NETFLIX_STATUS + result.route.ifBlank { "?" }, line).apply()
+    }
+
+    /** Starea ultimei citiri din Netflix, pe fiecare AK Import (RO / US). */
+    fun netflixStatus(): List<String> = listOf("RO", "US").mapNotNull { r ->
+        prefs.getString(KEY_NETFLIX_STATUS + r, null)?.let { "AK Import $r: $it" }
     }
 
     private suspend fun knownPosition(media: MediaRef): Long? =
@@ -189,6 +228,9 @@ class ScrobbleRepository @Inject constructor(
         prefs.edit().putLong(KEY_LAST_RETRY, now).apply()
         if (!matcher.isConfigured) return
         val list = readUnresolved()
+        if (list.any { NetflixActivity.isNetflix(it.pkg) && now - it.at < TimeUnit.DAYS.toMillis(2) }) {
+            NetflixRecentWorker.schedule(context)
+        }
         val solved = mutableSetOf<String>()
         for (e in list) {
             if (TitleParser.guesses(e.fields, e.app).isEmpty()) continue
@@ -266,6 +308,7 @@ class ScrobbleRepository @Inject constructor(
         const val KEY_WATCHED_PCT = "watched_percent"
         const val KEY_UNRESOLVED = "unresolved"
         const val KEY_LAST_RETRY = "unresolved_last_retry"
+        const val KEY_NETFLIX_STATUS = "netflix_status_"
         const val MAX_UNRESOLVED = 100
         const val UNRESOLVED_DAYS = 30L
         const val MAX_LOG = 50

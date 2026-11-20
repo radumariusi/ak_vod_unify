@@ -40,5 +40,15 @@
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- AK VOD Unify cere „ce ai văzut recent pe Netflix” (doar aplicațiile cu aceeași semnătură). -->
+        <receiver
+            android:name=".NetflixRecentReceiver"
+            android:exported="true"
+            android:permission="${mainAppId}.permission.SCROBBLE">
+            <intent-filter>
+                <action android:name="ro.ak.vodimport.action.NETFLIX_RECENT" />
+            </intent-filter>
+        </receiver>
+
     </application>
 </manifest>

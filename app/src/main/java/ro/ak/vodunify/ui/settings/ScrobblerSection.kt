@@ -39,6 +39,7 @@ fun ScrobblerSection(viewModel: ScrobblerSettingsViewModel = hiltViewModel()) {
     val installed by viewModel.installed.collectAsStateWithLifecycle()
     val watchedPercent by viewModel.watchedPercent.collectAsStateWithLifecycle()
     val unresolved by viewModel.unresolved.collectAsStateWithLifecycle()
+    val netflix by viewModel.netflix.collectAsStateWithLifecycle()
     val context = LocalContext.current
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
 
@@ -80,6 +81,15 @@ fun ScrobblerSection(viewModel: ScrobblerSettingsViewModel = hiltViewModel()) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            Text(
+                "Netflix nu spune titlul: îl iau din „Activitate de vizionare” prin AK Import, după minut. " +
+                    "Conectează-te o dată la Netflix în AK Import (RO sau US, unde e contul tău).",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            netflix.forEach { line ->
+                Text("Netflix · $line", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Text("Primite recent", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 6.dp))
             if (log.isEmpty()) {

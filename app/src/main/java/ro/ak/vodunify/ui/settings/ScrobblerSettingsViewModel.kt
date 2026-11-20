@@ -24,6 +24,9 @@ class ScrobblerSettingsViewModel @Inject constructor(
     private val _unresolved = MutableStateFlow(repository.unresolvedCount())
     val unresolved: StateFlow<Int> = _unresolved.asStateFlow()
 
+    private val _netflix = MutableStateFlow(repository.netflixStatus())
+    val netflix: StateFlow<List<String>> = _netflix.asStateFlow()
+
     fun setWatchedPercent(value: Int) = repository.setWatchedPercent(value)
 
     private val _installed = MutableStateFlow(repository.isScrobblerInstalled())
@@ -32,6 +35,7 @@ class ScrobblerSettingsViewModel @Inject constructor(
     fun refresh() {
         _installed.value = repository.isScrobblerInstalled()
         _unresolved.value = repository.unresolvedCount()
+        _netflix.value = repository.netflixStatus()
     }
 
     fun setEnabled(value: Boolean) = repository.setEnabled(value)

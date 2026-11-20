@@ -52,6 +52,17 @@ class ScrobbleProvider : ContentProvider() {
                 null
             }
         }
+        // AK Import (RO / US): ce ai văzut recent pe Netflix, pentru vizionările fără titlu.
+        if (uri.lastPathSegment == "netflix_recent") {
+            return try {
+                val result = entry.json().decodeFromString(NetflixRecentResult.serializer(), payload)
+                runBlocking { withTimeout(TIMEOUT_MS) { entry.repository().applyNetflixRecent(result) } }
+                uri.buildUpon().appendPath("ok").build()
+            } catch (e: Exception) {
+                Log.w(TAG, "Activitate Netflix invalidă", e)
+                null
+            }
+        }
         val event = try {
             entry.json().decodeFromString(ScrobbleEvent.serializer(), payload)
         } catch (e: Exception) {
