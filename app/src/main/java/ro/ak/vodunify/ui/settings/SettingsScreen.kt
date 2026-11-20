@@ -36,13 +36,17 @@ import ro.ak.vodunify.BuildConfig
 import ro.ak.vodunify.core.connector.Capability
 import ro.ak.vodunify.core.connector.Connector
 import ro.ak.vodunify.core.connector.ConnectorKind
+import ro.ak.vodunify.core.connector.DeviceAuthConnector
 import ro.ak.vodunify.core.prefs.ContentLanguage
 import ro.ak.vodunify.core.prefs.Market
 import ro.ak.vodunify.core.update.UpdateState
 import ro.ak.vodunify.ui.components.layoutSpec
 
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
+fun SettingsScreen(
+    viewModel: SettingsViewModel = hiltViewModel(),
+    accounts: AccountsViewModel = hiltViewModel(),
+) {
     val spec = layoutSpec()
     val update by viewModel.update.collectAsStateWithLifecycle()
     val catalog by viewModel.catalogSettings.collectAsStateWithLifecycle()
@@ -127,9 +131,13 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
         }
         item { PlaybackSection() }
         item {
+            Text("Conturi", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        }
+        items(accounts.connectors, key = { "account_${it.id}" }) { AccountCard(it, accounts) }
+        item {
             Text("Conectori", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         }
-        items(viewModel.connectors, key = { it.id }) { ConnectorRow(it) }
+        items(viewModel.connectors.filterNot { it is DeviceAuthConnector }, key = { it.id }) { ConnectorRow(it) }
     }
 }
 
@@ -195,7 +203,7 @@ private fun ConnectorRow(connector: Connector) {
                 Text(connector.displayName, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 val status = when {
                     connector.kind == ConnectorKind.PLAYER -> "Țintă redare · vezi Redare"
-                    connector.isConfigured -> "Chei prezente · conectare în curând"
+                    connector.isConfigured -> "Chei prezente · conectare în etapa 5"
                     else -> "Lipsesc cheile API"
                 }
                 Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -211,7 +219,11 @@ private fun ConnectorRow(connector: Connector) {
 
 private fun Capability.label() = when (this) {
     Capability.HISTORY_READ -> "istoric"
+    Capability.HISTORY_WRITE -> "marcare văzut"
     Capability.RESUME_READ -> "citire progres"
     Capability.RESUME_WRITE -> "scriere progres"
+    Capability.WATCHLIST_READ -> "listă De văzut"
+    Capability.WATCHLIST_WRITE -> "editare De văzut"
+    Capability.UP_NEXT_READ -> "următorul episod"
     Capability.DEEP_LINK -> "deep link"
 }

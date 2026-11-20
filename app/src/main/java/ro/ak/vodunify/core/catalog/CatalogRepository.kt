@@ -115,6 +115,29 @@ class CatalogRepository @Inject constructor(
                 TmdbMappers.items(t.await().results, settings.language, TitleKind.TV)
         }
 
+    /**
+     * Date minime (titlu în limba aleasă, poster, fundal) pentru un titlu după id-ul TMDb.
+     * Folosit pentru rândurile personale (Trakt); cache 7 zile.
+     */
+    suspend fun basic(kind: TitleKind, id: Long, settings: CatalogSettings): CatalogItem {
+        val dto = tmdb.get("${kind.path}/$id", mapOf("language" to settings.apiLanguage), TmdbTitleDetails.serializer(), TmdbClient.LONG_TTL)
+        val isMovie = kind == TitleKind.MOVIE
+        return CatalogItem(
+            id = dto.id,
+            kind = kind,
+            title = TmdbMappers.displayTitle(
+                if (isMovie) dto.title else dto.name,
+                if (isMovie) dto.originalTitle else dto.originalName,
+                settings.language,
+            ),
+            year = TmdbMappers.year(if (isMovie) dto.releaseDate else dto.firstAirDate),
+            overview = dto.overview.orEmpty(),
+            posterUrl = TmdbImages.poster(dto.posterPath),
+            backdropUrl = TmdbImages.backdrop(dto.backdropPath),
+            rating = dto.voteAverage?.takeIf { it > 0 },
+        )
+    }
+
     // ---------- Detalii ----------
 
     suspend fun details(kind: TitleKind, id: Long, settings: CatalogSettings): TitleDetails {

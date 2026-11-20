@@ -53,7 +53,6 @@ import ro.ak.vodunify.ui.components.ErrorPanel
 import ro.ak.vodunify.ui.components.LoadState
 import ro.ak.vodunify.ui.components.LoadingPanel
 import ro.ak.vodunify.ui.components.NetworkImage
-import ro.ak.vodunify.ui.components.PlaceholderRow
 import ro.ak.vodunify.ui.components.TitleRow
 import ro.ak.vodunify.ui.components.formatRating
 import ro.ak.vodunify.ui.components.layoutSpec
@@ -62,18 +61,24 @@ import ro.ak.vodunify.ui.navigation.LocalCatalogActions
 @Composable
 fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val personal by viewModel.personal.collectAsStateWithLifecycle()
+    val sync by viewModel.syncStatus.collectAsStateWithLifecycle()
+    val personalRows: @Composable () -> Unit = { PersonalSection(personal, sync, viewModel::syncNow) }
     when (val s = state) {
-        LoadState.Loading -> LoadingPanel(Modifier.fillMaxSize())
+        LoadState.Loading -> LazyColumn(Modifier.fillMaxSize()) {
+            item { personalRows() }
+            item { LoadingPanel() }
+        }
         is LoadState.Failed -> LazyColumn(Modifier.fillMaxSize()) {
             item { ErrorPanel(s.error, onRetry = viewModel::retry) }
-            item { PlaceholderRows() }
+            item { personalRows() }
         }
-        is LoadState.Data -> HomeContent(s.value)
+        is LoadState.Data -> HomeContent(s.value, personalRows)
     }
 }
 
 @Composable
-private fun HomeContent(catalog: HomeCatalog) {
+private fun HomeContent(catalog: HomeCatalog, personalRows: @Composable () -> Unit) {
     val spec = layoutSpec()
     val heroFocus = remember { FocusRequester() }
 
@@ -88,17 +93,9 @@ private fun HomeContent(catalog: HomeCatalog) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         if (catalog.hero.isNotEmpty()) item(key = "hero") { Hero(catalog.hero, heroFocus) }
-        item(key = "placeholders") { PlaceholderRows() }
+        item(key = "personal") { personalRows() }
         items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
         item(key = "attribution") { AttributionNote() }
-    }
-}
-
-@Composable
-private fun PlaceholderRows() {
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        PlaceholderRow("Continuă vizionarea", "Apare după conectarea Trakt (etapa 3): progresul tău din toate sursele.")
-        PlaceholderRow("Următorul episod", "Apare după conectarea Trakt (etapa 3): episoadele noi din serialele urmărite.")
     }
 }
 

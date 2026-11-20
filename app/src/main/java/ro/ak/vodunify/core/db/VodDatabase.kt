@@ -8,16 +8,19 @@ import androidx.room.RoomDatabase
         MediaEntity::class,
         WatchEventEntity::class,
         ResumePointEntity::class,
+        WatchlistEntity::class,
+        UpNextEntity::class,
+        WatchedTitleEntity::class,
+        SyncStateEntity::class,
         TmdbCacheEntity::class,
         AvailabilityEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class VodDatabase : RoomDatabase() {
     abstract fun mediaDao(): MediaDao
-    abstract fun watchEventDao(): WatchEventDao
-    abstract fun resumePointDao(): ResumePointDao
+    abstract fun trackingDao(): TrackingDao
     abstract fun tmdbCacheDao(): TmdbCacheDao
     abstract fun availabilityDao(): AvailabilityDao
 }

@@ -8,6 +8,6 @@ import dagger.hilt.components.SingletonComponent
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class PlaybackModule {
-    /** Înlocuiește cu implementarea bazată pe trackere când Trakt/SIMKL au puncte de reluare. */
-    @Binds abstract fun resumeLookup(impl: NoResumeLookup): ResumeLookup
+    /** Pozițiile vin din trackerele conectate; fără tracker, „Reluare manuală”. */
+    @Binds abstract fun resumeLookup(impl: TrackerResumeLookup): ResumeLookup
 }
