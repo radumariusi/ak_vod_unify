@@ -65,12 +65,13 @@ class ScrobbleMatcher @Inject constructor(private val tmdb: TmdbClient) {
                 result = when (g) {
                     is TitleGuess.NumberedEpisode -> numbered(g, strict = false)
                     is TitleGuess.NamedEpisode -> named(g)
+                    is TitleGuess.SeasonNamedEpisode -> seasonNamed(g)
                     is TitleGuess.Movie -> movie(g, durationMs)
                 }
                 if (result != null) break
             }
         }
-        if (memo.size > 300) memo.clear()
+        if (memo.size > 5000) memo.clear()
         memo[key] = Optional(result)
         return result
     }
@@ -130,8 +131,21 @@ class ScrobbleMatcher @Inject constructor(private val tmdb: TmdbClient) {
         return findByName(show, g.episodeTitle)
     }
 
-    private suspend fun findByName(show: TvShow, episodeTitle: String): ScrobbleMatch? {
-        val seasons = show.details.seasons.filter { it.seasonNumber > 0 }.take(MAX_SEASONS_SCANNED)
+    private suspend fun seasonNamed(g: TitleGuess.SeasonNamedEpisode): ScrobbleMatch? {
+        val show = searchShow(g.show) ?: return null
+        val season = g.season
+        if (season != null && show.details.seasons.any { it.seasonNumber == season }) {
+            for (lang in LANGUAGES) {
+                val ep = season(show.id, season, lang)?.episodes?.firstOrNull { MatchRules.sameName(it.name, g.episodeTitle) } ?: continue
+                return episodeMatch(show, season, ep.episodeNumber, ep.name, ep.runtime)
+            }
+        }
+        // Netflix numerotează uneori altfel („Partea 2”): căutăm în toate sezoanele.
+        return findByName(show, g.episodeTitle, preferred = season)
+    }
+
+    private suspend fun findByName(show: TvShow, episodeTitle: String, preferred: Int? = null): ScrobbleMatch? {
+        val seasons = show.details.seasons.filter { it.seasonNumber > 0 && it.seasonNumber != preferred }.take(MAX_SEASONS_SCANNED)
         for (lang in LANGUAGES) {
             for (s in seasons) {
                 val details = season(show.id, s.seasonNumber, lang) ?: continue

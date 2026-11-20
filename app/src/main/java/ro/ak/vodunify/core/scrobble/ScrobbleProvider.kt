@@ -13,9 +13,12 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
+import ro.ak.vodunify.core.imports.HistoryImportRepository
+import ro.ak.vodunify.core.imports.ImportBatch
 
 /**
- * Punctul prin care AK Scrobbler trimite ce redă televizorul. Exportat, dar protejat de permisiunea
+ * Punctul prin care AK Scrobbler trimite ce redă televizorul (`/events`) și AK Import RO/US
+ * trimite istoricul din conturi (`/history`). Exportat, dar protejat de permisiunea
  * „signature” `<pachet>.permission.SCROBBLE` (vezi manifestul), deci doar aplicațiile semnate cu
  * aceeași cheie pot scrie aici.
  *
@@ -28,6 +31,7 @@ class ScrobbleProvider : ContentProvider() {
     @InstallIn(SingletonComponent::class)
     interface ScrobbleEntryPoint {
         fun repository(): ScrobbleRepository
+        fun imports(): HistoryImportRepository
         fun json(): Json
     }
 
@@ -37,6 +41,17 @@ class ScrobbleProvider : ContentProvider() {
         val ctx = context ?: return null
         val payload = values?.getAsString("payload") ?: return null
         val entry = EntryPointAccessors.fromApplication(ctx.applicationContext, ScrobbleEntryPoint::class.java)
+        // AK Import (RO / US): loturi de istoric. Intră într-o coadă; potrivirea se face în fundal.
+        if (uri.lastPathSegment == "history") {
+            return try {
+                val batch = entry.json().decodeFromString(ImportBatch.serializer(), payload)
+                entry.imports().enqueue(batch)
+                uri.buildUpon().appendPath("queued").build()
+            } catch (e: Exception) {
+                Log.w(TAG, "Lot de istoric invalid", e)
+                null
+            }
+        }
         val event = try {
             entry.json().decodeFromString(ScrobbleEvent.serializer(), payload)
         } catch (e: Exception) {

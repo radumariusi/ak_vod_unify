@@ -77,6 +77,7 @@ class PublishRepository @Inject constructor(
 
     fun label(id: String): String = when (id) {
         LOCAL_SOURCE -> "Local (setat de tine sau AK Scrobbler)"
+        in ro.ak.vodunify.core.imports.ImportSources.labels -> ro.ak.vodunify.core.imports.ImportSources.labels.getValue(id) + " (import)"
         else -> registry.byId(id)?.displayName ?: id
     }
 

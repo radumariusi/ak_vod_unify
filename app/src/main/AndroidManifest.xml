@@ -66,6 +66,11 @@
         <!-- AK Scrobbler (aplicația însoțitoare). -->
         <package android:name="ro.ak.vodscrobbler" />
         <package android:name="ro.ak.vodscrobbler.debug" />
+        <!-- AK Import RO / US (conectare în conturi, import istoric). -->
+        <package android:name="ro.ak.vodimport.ro" />
+        <package android:name="ro.ak.vodimport.us" />
+        <package android:name="ro.ak.vodimport.ro.debug" />
+        <package android:name="ro.ak.vodimport.us.debug" />
     </queries>
 
     <application
