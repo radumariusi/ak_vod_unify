@@ -170,7 +170,10 @@ class WebLoginActivity : Activity() {
 
     private fun isLoginPage(url: String): Boolean = url.contains("login", ignoreCase = true) || url.contains("signin", ignoreCase = true)
 
-    private fun trustedPage(): Boolean = isTrusted(currentUrl ?: return false)
+    private fun trustedPage(): Boolean {
+        val url = currentUrl ?: return false
+        return isTrusted(url)
+    }
 
     private fun saveStatus(message: String) {
         getSharedPreferences(MainActivity.PREFS, Context.MODE_PRIVATE).edit()
