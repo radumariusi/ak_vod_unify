@@ -25,7 +25,7 @@ data class CsvParse(
 object NetflixCsv {
 
     fun parse(text: String, zone: ZoneId = ZoneId.of("Europe/Bucharest")): CsvParse {
-        val rows = rows(text.removePrefix("﻿"))
+        val rows = rows(text.removePrefix("\uFEFF"))
         if (rows.isEmpty()) return CsvParse(emptyList(), emptyList(), emptyList(), 0)
         val header = rows.first().map { it.trim().lowercase() }
         val body = rows.drop(1).filter { r -> r.any { it.isNotBlank() } }
