@@ -1,12 +1,17 @@
 package ro.ak.vodimport
 
+import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.webkit.CookieManager
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -27,15 +32,90 @@ class NetflixRecentReceiver : BroadcastReceiver() {
         val cookies = runCatching { CookieManager.getInstance().getCookie(NetflixRecent.BASE) }.getOrNull()
         val app = context.applicationContext
         val pending = goAsync()
+        val main = Handler(Looper.getMainLooper())
         thread {
-            try {
-                NetflixRecent.send(app, NetflixRecent.fetch(cookies))
-            } catch (e: Exception) {
-                Log.w("NetflixRecent", "eșuat", e)
-            } finally {
-                pending.finish()
+            val api = runCatching { NetflixRecent.fetch(cookies) }.getOrElse {
+                JSONObject().put("route", BuildConfig.ROUTE).put("status", "error").put("message", it.toString())
+            }
+            if (api.optString("status") != "error") {
+                sendAndFinish(app, api, pending)
+                return@thread
+            }
+            // API-ul Netflix e închis (403/404): citim „Continuă vizionarea” din pagina principală,
+            // într-un browser invizibil cu aceeași sesiune.
+            main.post {
+                NetflixPageScan.run(app) { scan ->
+                    val items = scan?.optJSONArray("items")
+                    val result = JSONObject().put("route", BuildConfig.ROUTE)
+                    if (items != null && items.length() > 0) {
+                        result.put("status", "ok").put("items", items)
+                            .put("message", "din pagina principală (API: ${api.optString("message")})")
+                    } else {
+                        result.put("status", "error")
+                            .put("message", "${api.optString("message")} · pagina: ${scan?.optString("diag") ?: "nu s-a încărcat"}".take(300))
+                    }
+                    thread { sendAndFinish(app, result, pending) }
+                }
             }
         }
+    }
+
+    private fun sendAndFinish(app: Context, result: JSONObject, pending: PendingResult) {
+        try {
+            NetflixRecent.send(app, result)
+        } catch (e: Exception) {
+            Log.w("NetflixRecent", "eșuat", e)
+        } finally {
+            pending.finish()
+        }
+    }
+}
+
+/** Încarcă netflix.com/browse într-un WebView invizibil și rulează [Scripts.NETFLIX_PAGE_SCAN]. */
+object NetflixPageScan {
+    private const val SETTLE_MS = 4_000L
+    private const val TIMEOUT_MS = 35_000L
+
+    @SuppressLint("SetJavaScriptEnabled")
+    fun run(context: Context, done: (JSONObject?) -> Unit) {
+        val main = Handler(Looper.getMainLooper())
+        val web = try {
+            WebView(context)
+        } catch (e: Exception) {
+            done(JSONObject().put("diag", "WebView indisponibil: ${e.message}"))
+            return
+        }
+        var finished = false
+        fun finish(result: JSONObject?) {
+            if (finished) return
+            finished = true
+            main.removeCallbacksAndMessages(null)
+            runCatching { web.stopLoading(); web.destroy() }
+            done(result)
+        }
+        web.settings.javaScriptEnabled = true
+        web.settings.domStorageEnabled = true
+        web.settings.userAgentString = NetflixRecent.UA
+        CookieManager.getInstance().setAcceptCookie(true)
+        web.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView, url: String) {
+                if (finished) return
+                if (url.contains("login", ignoreCase = true)) {
+                    finish(JSONObject().put("diag", "neconectat (pagina de login)"))
+                    return
+                }
+                main.postDelayed({
+                    if (finished) return@postDelayed
+                    web.evaluateJavascript(Scripts.NETFLIX_PAGE_SCAN) { raw ->
+                        // evaluateJavascript întoarce rezultatul ca șir JSON (cu ghilimele).
+                        val parsed = runCatching { JSONObject(org.json.JSONTokener(raw).nextValue() as String) }.getOrNull()
+                        finish(parsed ?: JSONObject().put("diag", "răspuns gol din pagină"))
+                    }
+                }, SETTLE_MS)
+            }
+        }
+        main.postDelayed({ finish(JSONObject().put("diag", "pagina nu s-a încărcat în ${TIMEOUT_MS / 1000}s")) }, TIMEOUT_MS)
+        web.loadUrl("${NetflixRecent.BASE}/browse")
     }
 }
 
@@ -43,7 +123,7 @@ object NetflixRecent {
     const val ACTION = "ro.ak.vodimport.action.NETFLIX_RECENT"
     const val BASE = "https://www.netflix.com"
     private const val PAGE_SIZE = 40
-    private const val UA =
+    const val UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     private val BUILD = Regex("\"BUILD_IDENTIFIER\":\"([^\"]+)\"")
     private val AUTH = Regex("\"authURL\":\"([^\"]+)\"")

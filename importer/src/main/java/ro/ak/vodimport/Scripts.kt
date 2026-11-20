@@ -7,6 +7,55 @@ package ro.ak.vodimport
  */
 object Scripts {
 
+    /**
+     * Netflix: ce e în pagina deschisă (/browse) — „Continuă vizionarea” are, pentru fiecare
+     * titlu început, minutul unde ai rămas (falcorCache). Sincron (îl rulăm și cu
+     * evaluateJavascript, care nu așteaptă promisiuni). Întoarce JSON {items, diag}.
+     */
+    val NETFLIX_PAGE_SCAN = """
+        (function () {
+          var out = { items: [], diag: "" };
+          try {
+            var n = window.netflix || {};
+            var fc = n.falcorCache || null;
+            var vids = fc && fc.videos ? fc.videos : null;
+            var val = function (x) { return (x && typeof x === "object" && "value" in x) ? x.value : x; };
+            var showOf = {};
+            if (vids) {
+              for (var sid in vids) {
+                var sv = vids[sid];
+                var cur = sv && val(sv.current);
+                if (Array.isArray(cur) && cur.length > 1) showOf[String(cur[cur.length - 1])] = sid;
+              }
+              for (var id in vids) {
+                var v = vids[id];
+                if (!v) continue;
+                var bm = val(v.bookmarkPosition);
+                if (typeof bm !== "number" || bm <= 0) continue;
+                var sum = val(v.summary) || {};
+                var title = val(v.title) || "";
+                var showId = showOf[String(id)];
+                var series = null, season = null, episode = null;
+                if (sum.type === "episode" || showId) {
+                  series = showId && vids[showId] ? (val(vids[showId].title) || null) : null;
+                  episode = title || null;
+                  if (typeof sum.season === "number") season = "Season " + sum.season;
+                  if (typeof sum.episode === "number" && !episode) episode = "Episode " + sum.episode;
+                  if (!series) { series = null; }
+                }
+                if (!title && !series) continue;
+                out.items.push({ series: series, season: season, episode: series ? episode : null, title: title || series || "",
+                  date: Date.now(), bookmark: bm, duration: val(v.runtime) || null, id: String(id) });
+              }
+            }
+            var wk = Object.keys(window).filter(function (k) { return /netflix|apollo|cache|state|falcor/i.test(k); }).slice(0, 12).join(",");
+            out.diag = "chei netflix: " + Object.keys(n).slice(0, 12).join(",") + " · falcor: " + (fc ? "da" : "nu") +
+              " · titluri: " + (vids ? Object.keys(vids).length : 0) + " · cu minut: " + out.items.length + " · window: " + wk;
+          } catch (e) { out.diag = "eroare: " + e; }
+          return JSON.stringify(out);
+        })()
+    """.trimIndent()
+
     /** Netflix: API-ul intern al paginii „Activitate de vizionare” (viewingactivity), pagină cu pagină. */
     val NETFLIX = """
         (async function () {
@@ -56,7 +105,23 @@ object Scripts {
                 if (t.ok) { var tj = await t.json(); if (tj && tj.viewedItems) base = bases[b]; }
               } catch (e) { codes.push("x"); }
             }
-            if (!base) { AK.fail("Netflix a răspuns cu " + codes.join("/") + ". Alege întâi profilul (pagina „Cine se uită?”), apoi apasă din nou."); return; }
+            if (!base) {
+              // API-ul e închis (403/404): arătăm ce găsim în pagină (minutul din „Continuă vizionarea”).
+              var scan = {};
+              try { scan = JSON.parse(${NETFLIX_PAGE_SCAN}); } catch (e) { scan = { items: [], diag: "scan: " + e }; }
+              var sample = (scan.items || []).slice(0, 3).map(function (it) { return (it.series ? it.series + " · " : "") + it.title + " @" + Math.round(it.bookmark / 60) + "min"; }).join(" | ");
+              // Și pagina vizibilă „Activitate de vizionare”: are datele în HTML?
+              var page = "-";
+              try {
+                var pr = await fetch("/viewingactivity", { credentials: "include" });
+                var ph = await pr.text();
+                page = pr.status + " " + (pr.url || "").replace("https://www.netflix.com", "") + " " + Math.round(ph.length / 1024) + "KB" +
+                  (ph.indexOf("viewedItems") >= 0 ? " viewedItems" : "") + (ph.indexOf("dateStr") >= 0 ? " dateStr" : "") +
+                  (ph.indexOf("bookmark") >= 0 ? " bookmark" : "") + (ph.indexOf("falcorCache") >= 0 ? " falcor" : "");
+              } catch (e) { page = "eroare " + e; }
+              AK.fail("TEST Netflix · API " + codes.join("/") + " · " + scan.diag + (sample ? " · ex: " + sample : "") + " · pagina activitate: " + page);
+              return;
+            }
             try { if (!profile) profile = ctx.models.userInfo.data.name || ""; } catch (e) {}
             var all = [];
             for (var pg = 0; pg < 300; pg++) {
@@ -84,6 +149,7 @@ object Scripts {
           } catch (e) { AK.fail("Eroare: " + e); }
         })();
     """.trimIndent()
+
 
     /**
      * Prime Video (experimental): derulăm pagina „Istoric vizionări” ca să se încarce tot, apoi
