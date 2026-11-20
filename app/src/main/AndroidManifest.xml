@@ -6,6 +6,17 @@
     <!-- Calendar: notificarea de dimineață și canalul „Azi apare” de pe ecranul principal TV. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+        AK Scrobbler trimite aici ce redă televizorul. Permisiunea e „signature”: o primesc doar
+        aplicațiile semnate cu aceeași cheie. E definită și în AK Scrobbler (aceeași cheie), ca
+        să meargă indiferent care aplicație se instalează prima.
+    -->
+    <permission
+        android:name="${applicationId}.permission.SCROBBLE"
+        android:label="Trimite redarea către AK VOD Unify"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="${applicationId}.permission.SCROBBLE" />
+
     <!-- Rulează atât pe Android TV (fără touchscreen) cât și pe telefoane. -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
@@ -52,6 +63,9 @@
         <package android:name="com.debridstream.tv" />
         <package android:name="com.debridstream.app" />
         <package android:name="com.debridstream" />
+        <!-- AK Scrobbler (aplicația însoțitoare). -->
+        <package android:name="ro.ak.vodscrobbler" />
+        <package android:name="ro.ak.vodscrobbler.debug" />
     </queries>
 
     <application
@@ -77,6 +91,12 @@
         <receiver
             android:name=".core.update.InstallResultReceiver"
             android:exported="false" />
+
+        <provider
+            android:name=".core.scrobble.ScrobbleProvider"
+            android:authorities="${applicationId}.scrobble"
+            android:exported="true"
+            android:permission="${applicationId}.permission.SCROBBLE" />
 
     </application>
 </manifest>

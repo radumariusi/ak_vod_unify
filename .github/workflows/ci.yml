@@ -32,12 +32,20 @@ jobs:
         run: ./gradlew --no-daemon assembleDebug lintDebug testDebugUnitTest
       - name: Show lint errors
         if: failure()
-        run: cat app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt || true
+        run: |
+          cat app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt || true
+          cat scrobbler/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt || true
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: ak-vod-unify-debug
           path: app/build/outputs/apk/debug/*.apk
+          retention-days: 7
+      - name: Upload AK Scrobbler debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ak-scrobbler-debug
+          path: scrobbler/build/outputs/apk/debug/*.apk
           retention-days: 7
       - name: Upload lint report
         if: always()

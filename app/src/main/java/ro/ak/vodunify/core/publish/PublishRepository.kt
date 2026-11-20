@@ -76,7 +76,7 @@ class PublishRepository @Inject constructor(
     val settings = prefs.settings
 
     fun label(id: String): String = when (id) {
-        LOCAL_SOURCE -> "Local (setat de tine)"
+        LOCAL_SOURCE -> "Local (setat de tine sau AK Scrobbler)"
         else -> registry.byId(id)?.displayName ?: id
     }
 
@@ -114,9 +114,10 @@ class PublishRepository @Inject constructor(
 
     /**
      * Salvează poziția ta pentru un film / episod (sursa „local”), apoi, în modul automat,
-     * o publică. [positionMs] = 0 șterge poziția locală.
+     * o publică. [positionMs] = 0 șterge poziția locală. [publish] = false doar salvează
+     * (punctele intermediare din AK Scrobbler, ca să nu scriem în trackere la fiecare minut).
      */
-    suspend fun setManualPosition(media: MediaRef, positionMs: Long, durationMs: Long?): List<PublishOutcome> {
+    suspend fun setManualPosition(media: MediaRef, positionMs: Long, durationMs: Long?, publish: Boolean = true): List<PublishOutcome> {
         require(media.type != MediaType.SHOW) { "Setează minutul pentru un film sau un episod" }
         val id = "$LOCAL_SOURCE|${media.itemKey}"
         if (positionMs <= 0L) {
@@ -138,7 +139,7 @@ class PublishRepository @Inject constructor(
             ),
         )
         val profile = prefs.current().active
-        return if (profile.mode == PublishMode.AUTOMATIC) publishItem(media, manual = true) else emptyList()
+        return if (publish && profile.mode == PublishMode.AUTOMATIC) publishItem(media, manual = true) else emptyList()
     }
 
     // ---------- Publicare ----------

@@ -14,6 +14,7 @@ Hub VOD pentru **Android TV** (funcționează și pe telefon, cu touch): adună 
 | 6 | Publicare progres înapoi în surse (profiluri: automat / la cerere / doar vizualizare) + Diagnostic rute | ✅ |
 | 7 | Opțional: backend, Younify, import CSV | amânat |
 | 8 | Integrare AK VOD Calendar: tab Calendar (seriale + filme), notificări, canalul „Azi apare” | ✅ |
+| 9 | Istoric direct din servicii: **AK Scrobbler** (ce redă TV-ul, din orice aplicație), apoi login în servicii (AK Import) și import CSV | în lucru (A ✅) |
 
 ## Arhitectură
 
@@ -21,6 +22,7 @@ Hub VOD pentru **Android TV** (funcționează și pe telefon, cu touch): adună 
 app/src/main/java/ro/ak/vodunify/
 ├── core/connector   Connector, DeviceAuthConnector + Capability (istoric, progres, watchlist, următorul episod, deep link), ConnectorRegistry
 ├── core/trakt       Client Trakt API v2 (device code + PKCE, refresh token), DTO-uri, mapări, TraktConnector
+├── core/scrobble   Primește ce redă TV-ul de la AK Scrobbler (ContentProvider protejat), recunoaște titlul (TitleParser) și îl găsește în TMDb (ScrobbleMatcher)
 ├── core/publish    Publicare progres: profiluri, reguli (PublishPlanner), scriere + citire înapoi, Diagnostic rute
 ├── core/tracking    TrackingRepository: sincronizare din toți trackerii conectați în Room + acțiuni (văzut, De văzut)
 ├── core/db          Room: media, watch_events, resume_points, watchlist, up_next, watched_titles, sync_state, tmdb_cache, availability
@@ -106,6 +108,28 @@ Din pagina unui film, a unui serial sau de pe orice episod se deschide dialogul 
 - **Setări → Publicare progres**: 3 profiluri (Principal, Profil 2, Profil 3), fiecare cu modul lui (**Automat**: după „Setează minutul” și după fiecare sincronizare, maxim 10 scrieri/rulare, doar poziții din ultimele 14 zile; **La cerere**; **Doar vizualizare**) și destinațiile lui (Trakt, SIMKL).
 - **Diagnostic rute** (din Setări): pe fiecare film/episod început, poziția în Local / Trakt / SIMKL cu ora actualizării, care câștigă (★), starea publicării pe fiecare destinație (cu progresul citit înapoi) și ce primește fiecare player: Nuvio citește reluarea din Trakt, Stremio și serviciile oficiale au progres propriu.
 
+## AK Scrobbler (etapa 9A)
+
+Aplicație separată, foarte mică (`scrobbler/`, pachet `ro.ak.vodscrobbler`), fără permisiunea de internet. Se înregistrează ca „ascultător de notificări”: așa Android îi dă voie să citească **sesiunile media** active (titlu, poziție, durată, redare/pauză) ale oricărei aplicații — Netflix, Prime Video, SkyShowtime, HBO Max, Disney+, Peacock, Stremio etc. Notificările în sine nu le citește. Odată ce are acces, Android o ține pornită singur și o repornește după restart (plus `BOOT_COMPLETED` ca plasă de siguranță); nu are nevoie de un serviciu în prim-plan.
+
+- **Când trimite**: la pauză, la oprire / închiderea aplicației / începutul altui titlu și o dată pe minut în timpul redării. Ignoră primele 30 de secunde. Dacă AK VOD Unify nu răspunde, evenimentele stau într-o coadă și se retrimit.
+- **Cum ajung în AK VOD Unify**: printr-un `ContentProvider` (`<pachet>.scrobble`) protejat de o permisiune `signature`, deci doar aplicațiile semnate cu aceeași cheie pot scrie. Ambele APK-uri trebuie să vină din același release (sau din același build CI pentru debug).
+- **Recunoașterea titlului**: `TitleParser` caută „S1:E3”, „S01E03”, „Sezonul 1 Episodul 3”, „1x03”, „Episodul 3” în oricare câmp și încearcă toate combinațiile serial / nume episod / film; `ScrobbleMatcher` acceptă doar **potriviri exacte** de nume în TMDb (română sau engleză, ori titlul original), ca progresul să nu ajungă niciodată pe alt titlu. YouTube, muzica și orice sub 10 minute sunt ignorate.
+- **Ce se salvează**: poziția exactă, ca sursă „Local” (la fel ca „Setează minutul”), deci apare în „Continuă vizionarea” și „Alege unde vezi”; la pauză/oprire se publică în Trakt/SIMKL după profilul activ. Peste 90% la pauză/oprire = văzut, doar local.
+- **Setări → AK Scrobbler**: pornit/oprit și jurnalul cu ce s-a primit (ce a citit, ce titlu a găsit, minutul, rezultatul). În AK Scrobbler, ecranul **„Ce văd acum”** arată exact câmpurile brute pe care le dă fiecare aplicație.
+- **VPN cu tunel pe aplicații**: AK Scrobbler nu iese pe internet, deci nu se pune în niciun tunel. AK VOD Unify merge direct.
+
+### Activare pe TV
+
+1. Instalează din același release `ak-vod-unify-….apk` și `ak-scrobbler-….apk`.
+2. Deschide **AK Scrobbler** → **Dă acces** → pornește „AK Scrobbler” în *Acces la notificări*.
+3. Dacă televizorul nu are acest ecran (multe Google TV îl ascund), accesul se dă o singură dată prin ADB, de pe telefon:
+   - pe TV: *Setări → Sistem → Despre* → apasă de 7 ori pe *Versiune build Android TV OS* → *Opțiuni dezvoltator* → pornește *Depanare USB* / *Depanare wireless*;
+   - pe telefon, o aplicație ADB prin Wi-Fi (ex. „Bugjaeger” sau „Remote ADB Shell”) → conectare la IP-ul TV-ului (portul 5555, sau codul de asociere de la *Depanare wireless*);
+   - comanda (o vezi și în AK Scrobbler): `adb shell cmd notification allow_listener ro.ak.vodscrobbler/ro.ak.vodscrobbler.MediaListenerService`
+4. Opțional: **Nu opri scrobblerul pentru economie de baterie**.
+5. Pornește ceva în Netflix, pune pauză și verifică în AK Scrobbler → „Ce văd acum” și în AK VOD Unify → Setări → AK Scrobbler.
+
 ## Calendar (etapa 8)
 
 Funcțiile din [AK VOD Calendar](https://github.com/radumariusi/ak_vod_calendar), mutate în tabul **Calendar**. Folosesc clientul TMDb al aplicației (aceeași cheie și același cache), conturile Trakt / SIMKL deja conectate și „Alege unde vezi”.
@@ -121,7 +145,7 @@ Funcțiile din [AK VOD Calendar](https://github.com/radumariusi/ak_vod_calendar)
 
 ## Semnare și release
 
-Release-ul se face **doar manual**: *Actions → Release APK → Run workflow*, cu versiunea (ex. `0.1.0`). Workflow-ul construiește APK-ul semnat `ak-vod-unify-<versiune>-vc<cod>.apk` și publică un GitHub Release `v<versiune>`. Aplicația verifică acest release din *Setări → Verifică actualizări*.
+Release-ul se face **doar manual**: *Actions → Release APK → Run workflow*, cu versiunea (ex. `0.1.0`). Workflow-ul construiește APK-urile semnate `ak-vod-unify-<versiune>-vc<cod>.apk` și `ak-scrobbler-<versiune>-vc<cod>.apk` și publică un GitHub Release `v<versiune>`. Aplicația verifică acest release din *Setări → Verifică actualizări*.
 
 ### Varianta A (recomandată, merge doar de pe telefon)
 

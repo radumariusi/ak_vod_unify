@@ -30,7 +30,10 @@ class UpdateRepository @Inject constructor(
             if (resp.code == 404) return@withContext null // niciun release încă
             if (!resp.isSuccessful) throw IOException("GitHub a răspuns ${resp.code}")
             val release = json.decodeFromString(GhRelease.serializer(), resp.body!!.string())
-            val apk = release.assets.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) }
+            // Release-ul conține și AK Scrobbler: luăm doar APK-ul aplicației principale.
+            val apks = release.assets.filter { it.name.endsWith(".apk", ignoreCase = true) }
+            val apk = apks.firstOrNull { it.name.startsWith("ak-vod-unify", ignoreCase = true) }
+                ?: apks.firstOrNull { !it.name.contains("scrobbler", ignoreCase = true) }
                 ?: return@withContext null
             val remoteCode = Version.versionCodeFromAssetName(apk.name)
             val remoteName = release.tagName.removePrefix("v")

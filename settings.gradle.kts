@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "AKVodUnify"
 include(":app")
+include(":scrobbler")
