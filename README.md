@@ -72,6 +72,16 @@ TRAKT_CLIENT_SECRET=...
 - **Setări → Catalog**: limbă (Română / Original), piață (RO / US), golire cache.
 - Cache: răspunsurile TMDb se salvează în Room cu cheie = cale + limbă + piață (6 h listele, 7 zile listele de genuri/servicii); fără internet se folosesc datele salvate. Titlurile deschise se salvează în `media`, iar disponibilitatea în `availability` (pe titlu și piață).
 
+## Alege unde vezi (etapa 4)
+
+Din pagina unui film, a unui serial sau de pe orice episod se deschide dialogul **Alege unde vezi**:
+
+- **Servicii oficiale** din piața conturilor tale (Setări → Redare): Netflix, Prime Video, Disney+, HBO Max, plus celelalte servicii raportate de TMDb/JustWatch (fără integrare încă: deschid pagina cu oferte). Dacă aplicația nu e instalată, se deschide magazinul.
+- **Playere instalate**: Nuvio, Stremio, DebridStream (detectate după pachet sau, pentru build-uri neoficiale, după numele din launcher).
+- Ținta se alege de la cea mai precisă la cea mai slabă și se folosește doar dacă aplicația instalată o acceptă (verificat cu PackageManager): **episod** (Stremio) → **pagina titlului/serialului** (Stremio, Nuvio) → **căutare** (Netflix, Prime Video, Disney+, HBO Max nu au id public în TMDb) → **doar deschide aplicația**.
+- Eticheta de reluare: Poziție sincronizată / În așteptare / Poziție estimată / Reluare manuală. Până la conectarea trackerelor e mereu „Reluare manuală”. La o poziție nesigură apare „Deschide acum · mm:ss” sau „Așteaptă sincronizarea”.
+- **Setări → Redare**: piața conturilor (RO/US), aplicația preferată pentru fiecare serviciu (oficială sau un player) și lista aplicațiilor detectate. Dacă titlul e doar în cealaltă piață, dialogul afișează o avertizare.
+
 ## Semnare și release
 
 Release-ul se face **doar manual**: *Actions → Release APK → Run workflow*, cu versiunea (ex. `0.1.0`). Workflow-ul construiește APK-ul semnat `ak-vod-unify-<versiune>-vc<cod>.apk` și publică un GitHub Release `v<versiune>`. Aplicația verifică acest release din *Setări → Verifică actualizări*.

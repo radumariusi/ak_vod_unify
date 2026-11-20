@@ -31,11 +31,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -70,21 +67,28 @@ import ro.ak.vodunify.ui.components.formatRating
 import ro.ak.vodunify.ui.components.layoutSpec
 import ro.ak.vodunify.ui.components.openUrl
 import ro.ak.vodunify.ui.navigation.LocalCatalogActions
+import ro.ak.vodunify.ui.watch.WatchChooserHost
+import ro.ak.vodunify.ui.watch.WatchChooserViewModel
+import ro.ak.vodunify.ui.watch.playbackRequest
 
 @Composable
-fun DetailsScreen(viewModel: DetailsViewModel = hiltViewModel()) {
+fun DetailsScreen(
+    viewModel: DetailsViewModel = hiltViewModel(),
+    chooser: WatchChooserViewModel = hiltViewModel(),
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     when (val s = state) {
         LoadState.Loading -> LoadingPanel(Modifier.fillMaxSize())
         is LoadState.Failed -> ErrorPanel(s.error, onRetry = viewModel::retry)
-        is LoadState.Data -> DetailsContent(s.value, viewModel)
+        is LoadState.Data -> DetailsContent(s.value, viewModel, chooser)
     }
+    WatchChooserHost(chooser)
 }
 
 private const val AVAILABILITY_INDEX = 1
 
 @Composable
-private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel) {
+private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel, chooser: WatchChooserViewModel) {
     val spec = layoutSpec()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -108,7 +112,12 @@ private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item(key = "header") {
-            Header(details, primaryFocus) { scope.launch { listState.animateScrollToItem(AVAILABILITY_INDEX) } }
+            Header(
+                details,
+                primaryFocus,
+                onChooseWhere = { chooser.open(details.playbackRequest(), details.availability) },
+                onShowOffers = { scope.launch { listState.animateScrollToItem(AVAILABILITY_INDEX) } },
+            )
         }
         item(key = "availability") { AvailabilitySection(details.availability) }
         if (details.item.kind == TitleKind.TV && details.seasons.isNotEmpty()) {
@@ -118,7 +127,7 @@ private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel) {
             when (val e = episodes) {
                 null, LoadState.Loading -> item(key = "episodes_loading") { LoadingPanel() }
                 is LoadState.Failed -> item(key = "episodes_error") { ErrorPanel(e.error, onRetry = null) }
-                is LoadState.Data -> episodeItems(e.value)
+                is LoadState.Data -> episodeItems(e.value) { ep -> chooser.open(details.playbackRequest(ep), details.availability) }
             }
         }
         item(key = "cast") { PersonRow("Distribuție", details.cast) }
@@ -129,7 +138,7 @@ private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel) {
     }
 }
 
-private fun androidx.compose.foundation.lazy.LazyListScope.episodeItems(season: Season) {
+private fun androidx.compose.foundation.lazy.LazyListScope.episodeItems(season: Season, onWatch: (Episode) -> Unit) {
     if (season.episodes.isEmpty()) {
         item(key = "episodes_empty") {
             Text(
@@ -140,11 +149,16 @@ private fun androidx.compose.foundation.lazy.LazyListScope.episodeItems(season: 
         }
         return
     }
-    items(season.episodes, key = { "ep_${it.season}_${it.number}" }) { EpisodeCard(it) }
+    items(season.episodes, key = { "ep_${it.season}_${it.number}" }) { EpisodeCard(it) { onWatch(it) } }
 }
 
 @Composable
-private fun Header(details: TitleDetails, primaryFocus: FocusRequester, onWhereToWatch: () -> Unit) {
+private fun Header(
+    details: TitleDetails,
+    primaryFocus: FocusRequester,
+    onChooseWhere: () -> Unit,
+    onShowOffers: () -> Unit,
+) {
     val spec = layoutSpec()
     val context = LocalContext.current
     val item = details.item
@@ -214,8 +228,13 @@ private fun Header(details: TitleDetails, primaryFocus: FocusRequester, onWhereT
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(onClick = onWhereToWatch, modifier = Modifier.focusRequester(primaryFocus)) {
-                        Text("Unde vezi")
+                    Button(onClick = onChooseWhere, modifier = Modifier.focusRequester(primaryFocus)) {
+                        Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (item.kind == TitleKind.TV) "Alege unde vezi serialul" else "Alege unde vezi")
+                    }
+                    if (!spec.isCompact) {
+                        OutlinedButton(onClick = onShowOffers) { Text("Oferte") }
                     }
                     details.trailerYoutubeKey?.let { key ->
                         OutlinedButton(onClick = { context.openUrl("https://www.youtube.com/watch?v=$key") }) {
@@ -251,7 +270,7 @@ private fun AvailabilitySection(markets: List<MarketAvailability>) {
     val spec = layoutSpec()
     val context = LocalContext.current
     Column {
-        SectionTitle("Unde vezi")
+        SectionTitle("Disponibilitate")
         Column(
             Modifier.padding(horizontal = spec.screenPadding),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -337,11 +356,10 @@ private fun SeasonPicker(details: TitleDetails, selected: Int?, onSelect: (Int) 
 }
 
 @Composable
-private fun EpisodeCard(episode: Episode) {
+private fun EpisodeCard(episode: Episode, onWatch: () -> Unit) {
     val spec = layoutSpec()
-    var expanded by rememberSaveable(episode.season, episode.number) { mutableStateOf(false) }
     FocusCard(
-        onClick = { expanded = !expanded },
+        onClick = onWatch,
         modifier = Modifier
             .padding(horizontal = spec.screenPadding)
             .fillMaxWidth()
@@ -356,7 +374,16 @@ private fun EpisodeCard(episode: Episode) {
                 contentScale = ContentScale.Crop,
             )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("${episode.number}. ${episode.name}", fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "${episode.number}. ${episode.name}",
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(Icons.Filled.PlayArrow, contentDescription = "Alege unde vezi", tint = MaterialTheme.colorScheme.primary)
+                }
                 Text(
                     listOfNotNull(episode.airDate, episode.runtimeMinutes?.let { "${it}m" }).joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall,
@@ -367,7 +394,7 @@ private fun EpisodeCard(episode: Episode) {
                         episode.overview,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = if (expanded) Int.MAX_VALUE else 2,
+                        maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
