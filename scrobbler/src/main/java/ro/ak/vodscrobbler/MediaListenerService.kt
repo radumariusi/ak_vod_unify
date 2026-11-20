@@ -276,13 +276,16 @@ class MediaListenerService : NotificationListenerService() {
         if (!tracked.values.contains(t)) return
         LogcatProbe.probe(this, t.tracker.packageName) { r ->
             handler.post {
+                // Liniile brute de sistem nu se mai scriu în jurnal (acopereau tot);
+                // păstrăm doar cele care conțin codul găsit, maxim 5.
                 val fresh = r.lines.filter { loggedLogcat.add(it) }
                 while (loggedLogcat.size > 2000) loggedLogcat.remove(loggedLogcat.first())
-                if (fresh.isNotEmpty()) DiagLog.add("LOGCAT ${t.tag} (${fresh.size} linii noi):\n" + fresh.joinToString("\n") { "  " + it.take(220) })
                 if (r.ids.isEmpty()) {
-                    DiagLog.add("${t.tag}: niciun cod de titlu în logcat")
+                    if (fresh.isNotEmpty()) DiagLog.add("${t.tag}: niciun cod de titlu în logcat (${fresh.size} linii verificate)")
                     return@post
                 }
+                fresh.filter { line -> r.ids.values.any { line.contains(it) } }.take(5)
+                    .forEach { DiagLog.add("LOGCAT ${t.tag}: ${it.take(220)}") }
                 if (r.ids.all { (k, v) -> t.extraFields[k] == v }) return@post
                 t.extraFields.putAll(r.ids)
                 DiagLog.add("${t.tag}: cod titlu din logcat: ${r.ids}")
