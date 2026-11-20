@@ -74,6 +74,7 @@ class MediaListenerService : NotificationListenerService() {
         override fun run() {
             val now = SystemClock.elapsedRealtime()
             tracked.values.toList().forEach { t -> dispatch(t.tracker.onTick(now)) }
+            tickScreenOnly(now)
             publishLive()
             handler.postDelayed(this, TICK_CHECK_MS)
         }
@@ -314,7 +315,10 @@ class MediaListenerService : NotificationListenerService() {
     private fun onScreen(snap: ScreenSnapshot) {
         val now = SystemClock.elapsedRealtime()
         val sessions = tracked.values.filter { it.tracker.packageName == snap.packageName }
-        if (sessions.isEmpty()) return
+        if (sessions.isEmpty()) {
+            onScreenOnly(snap, now)
+            return
+        }
         // Doar ecranul playerului (redare în curs, pauză cu timpi sau linie de episod), nu meniurile.
         val active = sessions.filter { it.tracker.state == PlayState.PLAYING || it.tracker.state == PlayState.PAUSED || it.tracker.state == PlayState.BUFFERING }
         if (active.isEmpty()) return
@@ -332,6 +336,48 @@ class MediaListenerService : NotificationListenerService() {
             dispatch(t.tracker.onMetadata(merged(t), now, correction = hadScreenTitle))
         }
         publishLive()
+    }
+
+    /** Redări fără sesiune media (Nuvio, DebridStream…), urmărite doar de pe ecran. */
+    private val screenOnly = HashMap<String, ScreenPlayback>()
+
+    private fun onScreenOnly(snap: ScreenSnapshot, now: Long) {
+        val pkg = snap.packageName
+        var p = screenOnly[pkg]
+        if (p == null) {
+            if (!ScreenState.KNOWN_VIDEO_PREFIXES.any { pkg.startsWith(it) } || !ScreenPlayback.looksLikePlayer(snap.times)) return
+            p = ScreenPlayback(pkg, appLabel(pkg))
+            val tag = "${p.appLabel}#ecran"
+            var lastSkip: String? = null
+            p.tracker.onSkip = { reason, why ->
+                val line = "${reason.wire}: $why"
+                if (lastSkip != line) {
+                    lastSkip = line
+                    DiagLog.add("$tag: NU trimit (${reason.wire}) → $why")
+                }
+            }
+            screenOnly[pkg] = p
+            ScreenState.screenOnlyPackages = screenOnly.keys.toSet()
+            ScreenState.rememberMediaApp(this, pkg)
+            DiagLog.add("$tag: redare fără sesiune media; o urmăresc de pe ecran")
+        }
+        val details = ScreenState.lastDetails(pkg)?.takeIf { now - it.at < DETAILS_MAX_AGE_MS }?.guess
+        val before = p.guess
+        dispatch(p.onScreen(snap.guess, snap.times, now, details))
+        if (p.guess != before) DiagLog.add("${p.appLabel}#ecran: titlu de pe ecran: ${p.guess?.title} · ${p.guess?.subtitle ?: "-"}")
+    }
+
+    private fun tickScreenOnly(now: Long) {
+        if (screenOnly.isEmpty()) return
+        val fg = ScreenState.foregroundPackage
+        screenOnly.values.toList().forEach { p ->
+            dispatch(p.onTick(now, fg))
+            if (p.finished) {
+                DiagLog.add("${p.appLabel}#ecran: aplicația nu mai e pe ecran → oprire")
+                screenOnly.remove(p.packageName)
+            }
+        }
+        ScreenState.screenOnlyPackages = screenOnly.keys.toSet()
     }
 
     /**

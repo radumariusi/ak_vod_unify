@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityWindowInfo
 import android.view.accessibility.AccessibilityNodeInfo
 
 /**
@@ -22,6 +23,28 @@ class ScreenReaderService : AccessibilityService() {
     private var lastSnapshotAt = 0L
     private var nodeCount = 0
     private val classes = HashMap<String, Int>()
+
+    /**
+     * Playerele fără sesiune media (Nuvio, DebridStream) nu ne anunță pauza: dacă bara cu timpul
+     * stă pe ecran, n-avem evenimente noi. Le recitim ecranul la câteva secunde cât sunt în față.
+     */
+    private val pollRunnable = object : Runnable {
+        override fun run() {
+            // Aplicația din față, după ferestre (lansatorul e ignorat la evenimente, deci nu ne-am baza pe ele).
+            if (ScreenState.screenOnlyPackages.isNotEmpty()) {
+                runCatching {
+                    val apps = windows.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+                    val front = apps.firstOrNull { it.isFocused } ?: apps.firstOrNull { it.isActive } ?: apps.firstOrNull()
+                    front?.root?.packageName?.toString()
+                }.getOrNull()?.let { ScreenState.foregroundPackage = it }
+            }
+            val fg = ScreenState.foregroundPackage
+            if (fg != null && fg in ScreenState.screenOnlyPackages && pendingPackage == null) {
+                runCatching { snapshot(fg) }
+            }
+            handler.postDelayed(this, POLL_MS)
+        }
+    }
 
     private val snapshotRunnable = Runnable {
         val pkg = pendingPackage
@@ -42,6 +65,8 @@ class ScreenReaderService : AccessibilityService() {
                 serviceInfo = serviceInfo.apply { flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE }
             }
         }
+        handler.removeCallbacks(pollRunnable)
+        handler.postDelayed(pollRunnable, POLL_MS)
         DiagLog.add("Citirea ecranului (accesibilitate) a pornit" + if (tv) " · mod cititor de ecran (TV)" else "")
         KeepAliveService.start(this)
     }
@@ -133,6 +158,7 @@ class ScreenReaderService : AccessibilityService() {
 
     private companion object {
         const val SETTLE_MS = 700L
+        const val POLL_MS = 4_000L
         const val MIN_GAP_MS = 1_500L
         const val MAX_DEPTH = 40
         const val MAX_ITEMS = 300

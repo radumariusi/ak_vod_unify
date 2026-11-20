@@ -22,6 +22,9 @@ data class ScreenSnapshot(
 object ScreenState {
     @Volatile var serviceConnected: Boolean = false
 
+    /** Aplicațiile urmărite doar de pe ecran acum (fără sesiune media): le recitim periodic. */
+    @Volatile var screenOnlyPackages: Set<String> = emptySet()
+
     /** Aplicația din prim-plan, după accesibilitate. */
     @Volatile var foregroundPackage: String? = null
 
