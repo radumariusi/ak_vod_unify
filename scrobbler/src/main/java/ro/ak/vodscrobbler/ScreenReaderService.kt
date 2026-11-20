@@ -31,13 +31,10 @@ class ScreenReaderService : AccessibilityService() {
     private val pollRunnable = object : Runnable {
         override fun run() {
             // Aplicația din față, după ferestre (lansatorul e ignorat la evenimente, deci nu ne-am baza pe ele).
-            if (ScreenState.screenOnlyPackages.isNotEmpty()) {
-                runCatching {
-                    val apps = windows.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
-                    val front = apps.firstOrNull { it.isFocused } ?: apps.firstOrNull { it.isActive } ?: apps.firstOrNull()
-                    front?.root?.packageName?.toString()
-                }.getOrNull()?.let { ScreenState.foregroundPackage = it }
-            }
+            val front = frontApp()
+            if (ScreenState.screenOnlyPackages.isNotEmpty()) front?.let { ScreenState.foregroundPackage = it }
+            // Verificăm des și modul cititor de ecran: Netflix nu trebuie să-l vadă niciodată.
+            updateReaderMode(front)
             val fg = ScreenState.foregroundPackage
             if (fg != null && fg in ScreenState.screenOnlyPackages && pendingPackage == null) {
                 runCatching { snapshot(fg) }
@@ -61,7 +58,8 @@ class ScreenReaderService : AccessibilityService() {
         val tv = packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) &&
             !packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
         isTv = tv
-        if (tv) setReaderMode(true)
+        // Nu pornim orbește: TV-ul repornește serviciul și când Netflix e deja în față.
+        if (tv) updateReaderMode(frontApp())
         handler.removeCallbacks(pollRunnable)
         handler.postDelayed(pollRunnable, POLL_MS)
         DiagLog.add("Citirea ecranului (accesibilitate) a pornit" + if (tv) " · mod cititor de ecran (TV)" else "")
@@ -70,12 +68,16 @@ class ScreenReaderService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val pkg = event?.packageName?.toString() ?: return
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            // Netflix, când vede un cititor de ecran, citește cu voce tare butoanele (și oricum nu
+            // ne arată textele): cât e Netflix în față, nu ne mai prezentăm ca cititor de ecran.
+            // Decidem după fereastra aplicației din față, nu după cine a trimis evenimentul (bara
+            // de volum sau o notificare peste Netflix nu înseamnă că Netflix a ieșit).
+            updateReaderMode(frontApp() ?: pkg.takeUnless { it == packageName || IGNORED.any { p -> it.startsWith(p) } })
+        }
         if (pkg == packageName || IGNORED.any { pkg.startsWith(it) }) return
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             ScreenState.foregroundPackage = pkg
-            // Netflix, când vede un cititor de ecran, citește cu voce tare butoanele (și oricum nu
-            // ne arată textele): cât e Netflix în față, nu ne mai prezentăm ca cititor de ecran.
-            if (isTv) setReaderMode(!NO_READER_PREFIXES.any { pkg.startsWith(it) })
         }
         if (!isInteresting(pkg)) return
         // Cel mult o citire la ~1 s: playerele schimbă textele (timpul) foarte des.
@@ -90,8 +92,28 @@ class ScreenReaderService : AccessibilityService() {
     private var isTv = false
     private var readerMode: Boolean? = null
 
+    /** Pachetul ferestrei de aplicație din față (null dacă nu se poate afla). */
+    private fun frontApp(): String? = runCatching {
+        val apps = windows.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+        val front = apps.firstOrNull { it.isFocused } ?: apps.firstOrNull { it.isActive } ?: apps.firstOrNull()
+        front?.root?.packageName?.toString()
+    }.getOrNull()
+
+    /**
+     * Cititor de ecran pornit doar când în față nu e o aplicație din [NO_READER_PREFIXES].
+     * [front] necunoscut: păstrăm starea, iar la pornirea serviciului alegem „oprit” (sigur pentru Netflix).
+     */
+    private fun updateReaderMode(front: String?) {
+        if (!isTv) return
+        if (front == null) {
+            if (readerMode == null) setReaderMode(false, "aplicația din față necunoscută")
+            return
+        }
+        setReaderMode(!NO_READER_PREFIXES.any { front.startsWith(it) }, front)
+    }
+
     /** Mod „cititor de ecran” (Apple TV își arată textele doar așa) pornit / oprit. */
-    private fun setReaderMode(on: Boolean) {
+    private fun setReaderMode(on: Boolean, why: String) {
         if (readerMode == on) return
         runCatching {
             serviceInfo = serviceInfo.apply {
@@ -107,7 +129,7 @@ class ScreenReaderService : AccessibilityService() {
                 }
             }
             readerMode = on
-            DiagLog.add("Mod cititor de ecran: ${if (on) "pornit" else "oprit (Netflix în față)"}")
+            DiagLog.add("Mod cititor de ecran: ${if (on) "pornit" else "oprit"} · $why")
         }
     }
 
