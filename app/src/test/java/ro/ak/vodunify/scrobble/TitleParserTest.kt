@@ -91,7 +91,11 @@ class TitleParserTest {
         assertTrue(!ScrobbleRules.isIgnoredPackage("com.netflix.ninja"))
         assertEquals(0.5f, ScrobbleRules.progress(25 * 60_000L, 50 * 60_000L)!!, 0.0001f)
         assertNull(ScrobbleRules.progress(1000, null))
-        assertTrue(ScrobbleRules.isFinished(0.95f, isTick = false))
-        assertTrue(!ScrobbleRules.isFinished(0.95f, isTick = true))
+        assertTrue(ScrobbleRules.isFinished(0.95f))
+        assertTrue(!ScrobbleRules.isFinished(0.85f))
+        assertTrue(ScrobbleRules.isFinished(0.85f, threshold = 0.80f))
+        assertTrue(!ScrobbleRules.isFinished(null))
+        assertEquals(30 * 60_000L, ScrobbleRules.mergeEstimated(5 * 60_000L, 30 * 60_000L))
+        assertEquals(5 * 60_000L, ScrobbleRules.mergeEstimated(5 * 60_000L, null))
     }
 }

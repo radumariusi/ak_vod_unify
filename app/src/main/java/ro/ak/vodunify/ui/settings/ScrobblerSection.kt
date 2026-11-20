@@ -25,6 +25,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ro.ak.vodunify.core.scrobble.ScrobbleLogEntry
 import ro.ak.vodunify.core.scrobble.ScrobbleResult
+import ro.ak.vodunify.core.scrobble.ScrobbleRules
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -36,6 +37,8 @@ fun ScrobblerSection(viewModel: ScrobblerSettingsViewModel = hiltViewModel()) {
     val log by viewModel.log.collectAsStateWithLifecycle()
     val enabled by viewModel.enabled.collectAsStateWithLifecycle()
     val installed by viewModel.installed.collectAsStateWithLifecycle()
+    val watchedPercent by viewModel.watchedPercent.collectAsStateWithLifecycle()
+    val unresolved by viewModel.unresolved.collectAsStateWithLifecycle()
     val context = LocalContext.current
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
 
@@ -46,9 +49,10 @@ fun ScrobblerSection(viewModel: ScrobblerSettingsViewModel = hiltViewModel()) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("AK Scrobbler (ce rulează pe TV)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "Aplicația mică AK Scrobbler vede ce redă Netflix, Prime Video, SkyShowtime, HBO Max, Disney+ sau alt player " +
-                    "și trimite aici titlul și minutul. Le salvăm ca poziție locală (cu minutul exact), iar peste 90% " +
-                    "le trecem ca văzute. Publicarea în Trakt/SIMKL urmează profilul de mai sus.",
+                "Aplicația mică AK Scrobbler vede ce redă Netflix, Prime Video, SkyShowtime, HBO Max, Disney+, Apple TV, " +
+                    "Stremio sau alt player și trimite aici titlul și minutul. Le salvăm local, în „Continuă vizionarea”, " +
+                    "iar peste pragul de mai jos le trecem automat ca văzute, în istoric. Publicarea în Trakt/SIMKL " +
+                    "urmează profilul de mai sus.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -63,6 +67,19 @@ fun ScrobblerSection(viewModel: ScrobblerSettingsViewModel = hiltViewModel()) {
                     OutlinedButton(onClick = { viewModel.launchIntent()?.let(context::startActivity) }) { Text("Deschide AK Scrobbler") }
                 }
                 if (log.isNotEmpty()) OutlinedButton(onClick = viewModel::clearLog) { Text("Golește jurnalul") }
+            }
+            Text("Văzut de la", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 6.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ScrobbleRules.WATCHED_CHOICES.forEach { p ->
+                    FilterChip(selected = watchedPercent == p, onClick = { viewModel.setWatchedPercent(p) }, label = { Text("$p%") })
+                }
+            }
+            if (unresolved > 0) {
+                Text(
+                    "⏳ $unresolved vizionări încă fără titlu recunoscut: le păstrez și le completez automat.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             Text("Primite recent", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 6.dp))
             if (log.isEmpty()) {

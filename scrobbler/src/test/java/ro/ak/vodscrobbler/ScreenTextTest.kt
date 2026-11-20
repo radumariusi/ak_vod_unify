@@ -1,0 +1,93 @@
+package ro.ak.vodscrobbler
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class ScreenTextTest {
+    private fun items(vararg t: String) = t.map { ScreenItem(it) }
+
+    @Test
+    fun netflixPauseScreenShowAndEpisode() {
+        val g = ScreenText.guess(items("Back", "Stranger Things", "S1:E3 Chapter Three: Holly, Jolly", "12:34", "Next Episode", "Episodes"), "Netflix")
+        assertEquals("Stranger Things", g!!.title)
+        assertEquals("S1:E3 Chapter Three: Holly, Jolly", g.subtitle)
+    }
+
+    @Test
+    fun inlineEpisodeLine() {
+        val g = ScreenText.guess(items("Pause", "Slow Horses S2 E4 Cleaning Up"))
+        assertEquals("Slow Horses", g!!.title)
+        assertEquals("S2 E4 Cleaning Up", g.subtitle)
+    }
+
+    @Test
+    fun viewIdsWin() {
+        val g = ScreenText.guess(
+            listOf(
+                ScreenItem("Audio & Subtitles", "x:id/audio"),
+                ScreenItem("Severance", "com.apple.atve:id/player_title"),
+                ScreenItem("Season 2, Episode 1", "com.apple.atve:id/player_subtitle"),
+            ),
+        )
+        assertEquals("Severance", g!!.title)
+        assertEquals("Season 2, Episode 1", g.subtitle)
+    }
+
+    @Test
+    fun movieIsFirstMeaningfulText() {
+        val g = ScreenText.guess(items("Play", "Subtitles", "Dune: Part Two", "1:02:03", "-1:45:00"))
+        assertEquals("Dune: Part Two", g!!.title)
+        assertNull(g.subtitle)
+    }
+
+    @Test
+    fun onlyButtonsMeansNoGuess() {
+        assertNull(ScreenText.guess(items("Play", "Pause", "Subtitles", "12:00", "Netflix"), "Netflix"))
+    }
+
+    @Test
+    fun elapsedAndRemaining() {
+        val t = ScreenText.times(items("12:00", "-48:00"))
+        assertEquals(12 * 60_000L, t.positionMs)
+        assertEquals(60 * 60_000L, t.durationMs)
+    }
+
+    @Test
+    fun elapsedSlashTotal() {
+        val t = ScreenText.times(items("1:02:03 / 2:10:00"))
+        assertEquals(3_723_000L, t.positionMs)
+        assertEquals(7_800_000L, t.durationMs)
+    }
+
+    @Test
+    fun onlyRemainingUsesKnownDuration() {
+        val t = ScreenText.times(items("−45:00"))
+        assertNull(t.positionMs)
+        assertEquals(15 * 60_000L, t.position(60 * 60_000L))
+    }
+
+    @Test
+    fun seekBarInSecondsOrMillis() {
+        val s = ScreenText.times(emptyList(), listOf(ScreenRange(600f, 3_600f, false)))
+        assertEquals(600_000L, s.positionMs)
+        assertEquals(3_600_000L, s.durationMs)
+        val ms = ScreenText.times(emptyList(), listOf(ScreenRange(600_000f, 3_577_000f, false)))
+        assertEquals(600_000L, ms.positionMs)
+        assertEquals(3_577_000L, ms.durationMs)
+    }
+
+    @Test
+    fun ignoresClockInsideSentences() {
+        assertTrue(ScreenText.times(items("New episode Friday at 12:30 PM")).isEmpty)
+    }
+
+    @Test
+    fun playButton() {
+        assertTrue(ScreenText.hasPlayButton(items("Stranger Things", "Play", "Episodes")))
+        assertTrue(ScreenText.hasPlayButton(items("Reda episodul 3")))
+        assertFalse(ScreenText.hasPlayButton(items("Stranger Things", "My List")))
+    }
+}

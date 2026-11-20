@@ -17,6 +17,10 @@ data class ScrobbleEvent(
     @SerialName("duration_ms") val durationMs: Long = -1,
     val at: Long,
     val fields: Map<String, String> = emptyMap(),
+    /** O vizionare (aceeași aplicație + același titlu), ca să legăm evenimentele între ele. */
+    @SerialName("play_id") val playId: String = "",
+    /** Minutul e numărat de scrobbler (aplicația nu-l dă): e un minim sigur, nu minutul exact. */
+    val estimated: Boolean = false,
 ) {
     val duration: Long? get() = durationMs.takeIf { it > 0 }
     val isTick: Boolean get() = reason == "tick"
@@ -26,7 +30,8 @@ data class ScrobbleEvent(
 enum class ScrobbleResult(val wire: String, val label: String) {
     SAVED("saved", "minut salvat"),
     WATCHED("watched", "marcat văzut"),
-    UNMATCHED("unmatched", "negăsit în TMDb"),
+    UNMATCHED("unmatched", "negăsit în TMDb (păstrat, se reîncearcă)"),
+    PENDING("pending", "fără titlu încă (păstrat, se completează automat)"),
     IGNORED("ignored", "ignorat (nu e film/serial)"),
     TOO_SHORT("too_short", "prea scurt (sub 10 min)"),
     DISABLED("disabled", "primirea e oprită"),

@@ -119,7 +119,7 @@ object TitleParser {
             .filter { seen.add(normalize(it)) }
     }
 
-    private val IGNORED_KEYS = setOf("media_id", "media_uri", "genre", "date", "duration", "year", "track_number", "disc_number", "num_tracks", "rating", "user_rating")
+    private val IGNORED_KEYS = setOf("title_source", "media_id", "media_uri", "genre", "date", "duration", "year", "track_number", "disc_number", "num_tracks", "rating", "user_rating")
 
     private fun isNoise(s: String) = normalize(s) in NOISE_NORMALIZED
 

@@ -45,6 +45,14 @@ class MediaListenerService : NotificationListenerService() {
         val tag: String,
     ) {
         var lastSkip: String? = null
+
+        /** Ce dă aplicația în sesiunea media (fără completări). */
+        var nativeInfo: MediaInfo? = null
+
+        /** Titlul citit de pe ecran pentru această redare (dacă aplicația nu-l dă). */
+        var screenGuess: ScreenGuess? = null
+        var startedAt: Long = SystemClock.elapsedRealtime()
+        var everPlayed = false
         var lastStateLogged: Int? = null
         var lastPositionKnown: Boolean? = null
         var lastStateLogAt: Long = 0L
@@ -71,6 +79,7 @@ class MediaListenerService : NotificationListenerService() {
     override fun onCreate() {
         super.onCreate()
         DiagLog.init(this)
+        ScreenState.listener = ::onScreen
     }
 
     override fun onListenerConnected() {
@@ -119,6 +128,7 @@ class MediaListenerService : NotificationListenerService() {
     }
 
     override fun onDestroy() {
+        if (ScreenState.listener == ::onScreen) ScreenState.listener = null
         handler.removeCallbacksAndMessages(null)
         super.onDestroy()
     }
@@ -141,6 +151,13 @@ class MediaListenerService : NotificationListenerService() {
         DiagLog.add(
             "Notificare player ${appLabel(sbn.packageName)}: titlu=${n.title ?: "-"} · text=${n.text ?: "-"} · sub=${n.subText ?: "-"}",
         )
+        // Sesiunile acestei aplicații fără titlu îl pot lua acum din notificare.
+        val now = SystemClock.elapsedRealtime()
+        tracked.values.filter { it.tracker.packageName == sbn.packageName && it.nativeInfo?.hasTitle != true }.forEach { t ->
+            val hadTitle = t.tracker.media?.hasTitle == true
+            dispatch(t.tracker.onMetadata(merged(t), now, correction = hadTitle))
+        }
+        publishLive()
     }
 
     private fun refreshSessions(controllers: List<MediaController>) {
@@ -173,7 +190,8 @@ class MediaListenerService : NotificationListenerService() {
             val callback = object : MediaController.Callback() {
                 override fun onMetadataChanged(metadata: MediaMetadata?) {
                     DiagLog.add("$tag: metadate noi\n${describe(metadata)}")
-                    dispatch(tracker.onMetadata(metadata?.toInfo(), SystemClock.elapsedRealtime()))
+                    entry.nativeInfo = metadata?.toInfo()
+                    dispatch(tracker.onMetadata(merged(entry), SystemClock.elapsedRealtime()))
                     publishLive()
                 }
 
@@ -200,8 +218,10 @@ class MediaListenerService : NotificationListenerService() {
                 }
             }
             entry = Tracked(controller, tracker, callback, tag)
+            entry.nativeInfo = controller.metadata?.toInfo()
             controller.registerCallback(callback, handler)
             tracked[key] = entry
+            ScreenState.rememberMediaApp(this, controller.packageName)
             DiagLog.add(
                 "$tag: sesiune nouă (${controller.packageName})\n" +
                     "  titlu coadă: ${controller.queueTitle ?: "-"} · elemente în coadă: ${controller.queue?.size ?: 0}\n" +
@@ -209,7 +229,7 @@ class MediaListenerService : NotificationListenerService() {
                     describe(controller.metadata),
             )
             // Starea inițială.
-            dispatch(tracker.onMetadata(controller.metadata?.toInfo(), now))
+            dispatch(tracker.onMetadata(merged(entry), now))
             applyState(entry, controller.playbackState)
         }
         publishLive()
@@ -233,16 +253,90 @@ class MediaListenerService : NotificationListenerService() {
             t.lastStateLogAt = now
             DiagLog.add("${t.tag}: ${describe(state)}")
         }
+        if (s == PlayState.PLAYING && !t.everPlayed) {
+            t.everPlayed = true
+            onPlaybackStarted(t, now)
+        }
         dispatch(t.tracker.onPlaybackState(s, position, state?.lastPositionUpdateTime ?: 0L, state?.playbackSpeed ?: 1f, now))
+    }
+
+    /**
+     * Prima redare a unei sesiuni fără titlu: luăm titlul de pe pagina de detalii deschisă chiar
+     * înainte (cea cu butonul „Redă”), sau de pe ecranul playerului dacă l-am citit deja.
+     */
+    private fun onPlaybackStarted(t: Tracked, now: Long) {
+        if (t.nativeInfo?.hasTitle == true || t.screenGuess != null) return
+        val pkg = t.tracker.packageName
+        val latest = ScreenState.latest(pkg)?.takeIf { it.guess != null && now - it.at < 15_000 && (!it.times.isEmpty || it.guess.subtitle != null) }
+        val details = ScreenState.lastDetails(pkg)?.takeIf { now - it.at < DETAILS_MAX_AGE_MS }
+        val pick = latest ?: details ?: return
+        t.screenGuess = pick.guess
+        DiagLog.add("${t.tag}: titlu luat de pe ${if (pick === latest) "ecranul playerului" else "pagina titlului"}: ${pick.guess?.title} · ${pick.guess?.subtitle ?: "-"}")
+        dispatch(t.tracker.onMetadata(merged(t), now))
+    }
+
+    /** Ce s-a citit de pe ecran: titlul și minutul, pentru sesiunile aplicației respective. */
+    private fun onScreen(snap: ScreenSnapshot) {
+        val now = SystemClock.elapsedRealtime()
+        val sessions = tracked.values.filter { it.tracker.packageName == snap.packageName }
+        if (sessions.isEmpty()) return
+        // Doar ecranul playerului (redare în curs, pauză cu timpi sau linie de episod), nu meniurile.
+        val active = sessions.filter { it.tracker.state == PlayState.PLAYING || it.tracker.state == PlayState.PAUSED || it.tracker.state == PlayState.BUFFERING }
+        if (active.isEmpty()) return
+        val playing = active.any { it.tracker.state == PlayState.PLAYING }
+        val isPlayer = playing || !snap.times.isEmpty || snap.guess?.subtitle != null
+        if (!isPlayer) return
+        for (t in active) {
+            val duration = t.tracker.media?.durationMs ?: sessions.firstNotNullOfOrNull { it.tracker.media?.durationMs }
+            if (!snap.times.isEmpty) t.tracker.onScreenTimes(snap.times.position(duration), snap.times.durationMs, now)
+            val g = snap.guess ?: continue
+            if (t.nativeInfo?.hasTitle == true || g == t.screenGuess) continue
+            val hadScreenTitle = t.screenGuess != null
+            t.screenGuess = g
+            DiagLog.add("${t.tag}: titlu de pe ecran: ${g.title} · ${g.subtitle ?: "-"}")
+            dispatch(t.tracker.onMetadata(merged(t), now, correction = hadScreenTitle))
+        }
+        publishLive()
+    }
+
+    /**
+     * Ce știm despre conținut: sesiunea media, iar dacă ea nu are titlul, notificarea playerului
+     * sau ecranul. Cheia „title_source” spune de unde e titlul (pentru jurnal).
+     */
+    private fun merged(t: Tracked): MediaInfo? {
+        val native = t.nativeInfo
+        if (native?.hasTitle == true) return native
+        val fields = LinkedHashMap(native?.fields.orEmpty())
+        val n = mediaNotifications[t.tracker.packageName]
+        val notifTitle = n?.title?.takeIf { !it.equals(t.tracker.appLabel, ignoreCase = true) }
+        val g = t.screenGuess
+        when {
+            notifTitle != null -> {
+                fields["title"] = notifTitle
+                n?.text?.let { fields["display_subtitle"] = it }
+                fields["title_source"] = "notification"
+            }
+            g != null -> {
+                fields["title"] = g.title
+                g.subtitle?.let { fields["display_subtitle"] = it }
+                fields["title_source"] = "screen"
+            }
+            else -> if (native == null) return null
+        }
+        return MediaInfo(fields, native?.durationMs)
     }
 
     private fun dispatch(events: List<Outgoing>) {
         if (events.isEmpty()) return
         val forwarder = Forwarder.get(this)
-        events.map(::enrich).forEach { o ->
+        val now = SystemClock.elapsedRealtime()
+        events.map(::enrich).filterNot { o ->
+            // Apple TV are două sesiuni: dacă alta are minutul real, nu trimitem estimarea.
+            o.estimated && tracked.values.any { it.tracker.packageName == o.packageName && it.tracker.playId != o.playId && it.tracker.position(now) != null }
+        }.forEach { o ->
             val title = o.media.fields["title"] ?: o.media.fields["display_title"] ?: "(fără titlu)"
             DiagLog.add(
-                "${o.appLabel}: TRIMIT ${o.reason.wire} · $title · minut ${StatusActivity.clock(o.positionMs)}" +
+                "${o.appLabel}: TRIMIT ${o.reason.wire} · $title · minut ${StatusActivity.clock(o.positionMs)}${if (o.estimated) " (estimat)" else ""}" +
                     " / ${o.media.durationMs?.let(StatusActivity::clock) ?: "?"}",
             )
             forwarder.send(o)
@@ -299,6 +393,7 @@ class MediaListenerService : NotificationListenerService() {
                 state = t.tracker.state,
                 positionMs = t.tracker.position(now),
                 media = t.tracker.media,
+                playedMs = t.tracker.playedTime(now),
             )
         }
     }
@@ -313,6 +408,9 @@ class MediaListenerService : NotificationListenerService() {
     companion object {
         private const val TAG = "AKScrobbler"
         private const val TICK_CHECK_MS = 15_000L
+
+        /** Pagina titlului (cu „Redă”) contează doar dacă redarea a pornit la scurt timp după. */
+        private const val DETAILS_MAX_AGE_MS = 3 * 60_000L
         private const val PREFIX = "android.media.metadata."
 
         /** Toate câmpurile text din metadate (fără imagini), cu nume scurte: "title", "artist"… */

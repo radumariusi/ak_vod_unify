@@ -7,6 +7,8 @@ data class LiveSession(
     val state: PlayState,
     val positionMs: Long?,
     val media: MediaInfo?,
+    /** Timpul de redare numărat de noi, când aplicația nu dă poziția. */
+    val playedMs: Long = 0L,
 )
 
 /** Starea curentă, în memorie (serviciul și ecranul rulează în același proces). */
