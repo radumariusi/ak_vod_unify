@@ -4,16 +4,8 @@ import ro.ak.vodunify.BuildConfig
 
 /*
  * Conectori schelet pentru etapa 1. Implementările reale vin în etapele următoare:
- * Trakt (etapa 3), SIMKL + WeTrakr (etapa 5), deep link-uri (etapa 4).
+ * SIMKL + WeTrakr (etapa 5), deep link-uri (etapa 4). Trakt e în core/trakt.
  */
-
-class TraktConnector : Connector {
-    override val id = "trakt"
-    override val displayName = "Trakt"
-    override val kind = ConnectorKind.TRACKER
-    override val capabilities = setOf(Capability.HISTORY_READ, Capability.RESUME_READ, Capability.RESUME_WRITE)
-    override val isConfigured get() = BuildConfig.TRAKT_CLIENT_ID.isNotBlank() && BuildConfig.TRAKT_CLIENT_SECRET.isNotBlank()
-}
 
 class SimklConnector : Connector {
     override val id = "simkl"

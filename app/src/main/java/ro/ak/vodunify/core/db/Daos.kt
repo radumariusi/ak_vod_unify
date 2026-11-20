@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
@@ -20,19 +21,124 @@ interface MediaDao {
 }
 
 @Dao
-interface WatchEventDao {
+interface TrackingDao {
+    // ---------- Punct de reluare (playback) ----------
+    @Query("DELETE FROM resume_points WHERE source = :source")
+    suspend fun deleteResume(source: String)
+
+    @Upsert
+    suspend fun upsertResume(items: List<ResumePointEntity>)
+
+    @Transaction
+    suspend fun replaceResume(source: String, items: List<ResumePointEntity>) {
+        deleteResume(source)
+        upsertResume(items)
+    }
+
+    /** Peste 95% considerăm terminat (Trakt mută automat în istoric de la 80%+ la scrobble). */
+    @Query("SELECT * FROM resume_points WHERE progress IS NULL OR progress < 0.95 ORDER BY updatedAt DESC")
+    fun continueWatching(): Flow<List<ResumePointEntity>>
+
+    @Query("SELECT * FROM resume_points WHERE mediaKey = :mediaKey ORDER BY updatedAt DESC")
+    fun resumeFor(mediaKey: String): Flow<List<ResumePointEntity>>
+
+    @Query("DELETE FROM resume_points WHERE id = :id")
+    suspend fun deleteResumeById(id: String)
+
+    // ---------- Watchlist ----------
+    @Query("DELETE FROM watchlist WHERE source = :source")
+    suspend fun deleteWatchlist(source: String)
+
+    @Upsert
+    suspend fun upsertWatchlist(items: List<WatchlistEntity>)
+
+    @Transaction
+    suspend fun replaceWatchlist(source: String, items: List<WatchlistEntity>) {
+        deleteWatchlist(source)
+        upsertWatchlist(items)
+    }
+
+    @Query("SELECT * FROM watchlist ORDER BY listedAt DESC")
+    fun watchlist(): Flow<List<WatchlistEntity>>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM watchlist WHERE mediaKey = :mediaKey)")
+    fun inWatchlist(mediaKey: String): Flow<Boolean>
+
+    @Query("DELETE FROM watchlist WHERE mediaKey = :mediaKey")
+    suspend fun removeFromWatchlist(mediaKey: String)
+
+    // ---------- Următorul episod ----------
+    @Query("DELETE FROM up_next WHERE source = :source")
+    suspend fun deleteUpNext(source: String)
+
+    @Upsert
+    suspend fun upsertUpNext(items: List<UpNextEntity>)
+
+    @Transaction
+    suspend fun replaceUpNext(source: String, items: List<UpNextEntity>) {
+        deleteUpNext(source)
+        upsertUpNext(items)
+    }
+
+    @Query("DELETE FROM up_next WHERE id = :id")
+    suspend fun deleteUpNextById(id: String)
+
+    @Query("SELECT * FROM up_next ORDER BY lastWatchedAt DESC")
+    fun upNext(): Flow<List<UpNextEntity>>
+
+    // ---------- Titluri văzute ----------
+    @Query("DELETE FROM watched_titles WHERE source = :source")
+    suspend fun deleteWatched(source: String)
+
+    @Upsert
+    suspend fun upsertWatched(items: List<WatchedTitleEntity>)
+
+    @Transaction
+    suspend fun replaceWatched(source: String, items: List<WatchedTitleEntity>) {
+        deleteWatched(source)
+        upsertWatched(items)
+    }
+
+    @Query("SELECT EXISTS(SELECT 1 FROM watched_titles WHERE mediaKey = :mediaKey)")
+    fun isWatched(mediaKey: String): Flow<Boolean>
+
+    @Query("DELETE FROM watched_titles WHERE mediaKey = :mediaKey")
+    suspend fun removeWatched(mediaKey: String)
+
+    // ---------- Istoric ----------
     @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insert(events: List<WatchEventEntity>)
+    suspend fun insertHistory(events: List<WatchEventEntity>)
 
     @Query("SELECT * FROM watch_events ORDER BY watchedAt DESC LIMIT :limit")
-    fun recent(limit: Int = 50): Flow<List<WatchEventEntity>>
-}
+    fun recentHistory(limit: Int = 50): Flow<List<WatchEventEntity>>
 
-@Dao
-interface ResumePointDao {
+    @Query("SELECT COUNT(*) FROM watch_events WHERE source = :source")
+    fun historyCount(source: String): Flow<Int>
+
+    // ---------- Stare sincronizare ----------
+    @Query("SELECT * FROM sync_state WHERE source = :source")
+    suspend fun syncState(source: String): SyncStateEntity?
+
+    @Query("SELECT * FROM sync_state WHERE source = :source")
+    fun syncStateFlow(source: String): Flow<SyncStateEntity?>
+
     @Upsert
-    suspend fun upsert(points: List<ResumePointEntity>)
+    suspend fun putSyncState(state: SyncStateEntity)
 
-    @Query("SELECT * FROM resume_points WHERE progress < 0.95 ORDER BY updatedAt DESC")
-    fun continueWatching(): Flow<List<ResumePointEntity>>
+    /** La deconectare: șterge tot ce a venit din sursă. */
+    @Transaction
+    suspend fun clearSource(source: String) {
+        deleteResume(source)
+        deleteWatchlist(source)
+        deleteUpNext(source)
+        deleteWatched(source)
+        deleteHistory(source)
+        deleteSyncState(source)
+    }
+
+    @Query("DELETE FROM watch_events WHERE source = :source")
+    suspend fun deleteHistory(source: String)
+
+    @Query("DELETE FROM sync_state WHERE source = :source")
+    suspend fun deleteSyncState(source: String)
 }

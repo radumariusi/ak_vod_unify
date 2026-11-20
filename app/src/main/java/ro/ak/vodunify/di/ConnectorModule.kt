@@ -8,8 +8,8 @@ import dagger.multibindings.IntoSet
 import ro.ak.vodunify.core.connector.Connector
 import ro.ak.vodunify.core.connector.PlayerTargetConnector
 import ro.ak.vodunify.core.connector.SimklConnector
-import ro.ak.vodunify.core.connector.TraktConnector
 import ro.ak.vodunify.core.connector.WeTrakrConnector
+import ro.ak.vodunify.core.trakt.TraktConnector
 
 /**
  * Adaugi un conector nou = încă un @Provides @IntoSet aici.
@@ -18,7 +18,7 @@ import ro.ak.vodunify.core.connector.WeTrakrConnector
 @Module
 @InstallIn(SingletonComponent::class)
 object ConnectorModule {
-    @Provides @IntoSet fun trakt(): Connector = TraktConnector()
+    @Provides @IntoSet fun trakt(connector: TraktConnector): Connector = connector
     @Provides @IntoSet fun simkl(): Connector = SimklConnector()
     @Provides @IntoSet fun wetrakr(): Connector = WeTrakrConnector()
 
