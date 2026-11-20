@@ -1,33 +1,43 @@
 package ro.ak.vodunify.ui.home
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.stateIn
+import ro.ak.vodunify.core.catalog.CatalogRepository
+import ro.ak.vodunify.core.catalog.HomeCatalog
+import ro.ak.vodunify.core.prefs.CatalogPreferences
+import ro.ak.vodunify.ui.components.LoadState
+import ro.ak.vodunify.ui.components.loadCatching
 import javax.inject.Inject
 
-data class HomeItem(val id: String, val title: String, val subtitle: String, val progress: Float? = null)
-data class HomeRow(val title: String, val items: List<HomeItem>)
-data class HomeHero(val title: String, val description: String)
-data class HomeUiState(val hero: HomeHero, val rows: List<HomeRow>)
-
-/** Etapa 1: conținut demonstrativ. Din etapa 2 rândurile vin din TMDb + Room. */
+/** Ecranul principal: rânduri din TMDb pentru piața și limba din Setări. */
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
-class HomeViewModel @Inject constructor() : ViewModel() {
-    private val _state = MutableStateFlow(demoState())
-    val state: StateFlow<HomeUiState> = _state.asStateFlow()
+class HomeViewModel @Inject constructor(
+    private val catalog: CatalogRepository,
+    prefs: CatalogPreferences,
+) : ViewModel() {
 
-    private fun demoState() = HomeUiState(
-        hero = HomeHero(
-            title = "Bun venit în AK VOD Unify",
-            description = "Istoricul și progresul tău din Trakt, SIMKL și WeTrakr, într-un singur loc. " +
-                "Alegi apoi unde vezi: Netflix, Nuvio, Stremio sau DebridStream.",
-        ),
-        rows = listOf(
-            HomeRow("Continuă vizionarea", List(8) { HomeItem("c$it", "Titlu ${it + 1}", "S1 · E${it + 2}", progress = 0.15f + it * 0.1f) }),
-            HomeRow("Episoade noi", List(10) { HomeItem("n$it", "Serial ${it + 1}", "Episod nou") }),
-            HomeRow("Populare acum", List(12) { HomeItem("p$it", "Film ${it + 1}", "2026") }),
-        ),
-    )
+    private val reload = MutableStateFlow(0)
+
+    val state: StateFlow<LoadState<HomeCatalog>> = combine(prefs.settings, reload) { s, _ -> s }
+        .flatMapLatest { settings ->
+            flow {
+                emit(LoadState.Loading)
+                emit(loadCatching { catalog.home(settings) })
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LoadState.Loading)
+
+    fun retry() {
+        reload.value++
+    }
 }
