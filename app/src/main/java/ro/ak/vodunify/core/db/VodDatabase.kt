@@ -12,10 +12,11 @@ import androidx.room.RoomDatabase
         UpNextEntity::class,
         WatchedTitleEntity::class,
         SyncStateEntity::class,
+        OwnWriteEntity::class,
         TmdbCacheEntity::class,
         AvailabilityEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class VodDatabase : RoomDatabase() {

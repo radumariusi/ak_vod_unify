@@ -35,6 +35,7 @@ import androidx.navigation.navArgument
 import ro.ak.vodunify.ui.components.layoutSpec
 import ro.ak.vodunify.ui.details.DetailsScreen
 import ro.ak.vodunify.ui.home.HomeScreen
+import ro.ak.vodunify.ui.library.LibraryScreen
 import ro.ak.vodunify.ui.person.PersonScreen
 import ro.ak.vodunify.ui.search.SearchScreen
 import ro.ak.vodunify.ui.settings.SettingsScreen
@@ -100,6 +101,7 @@ fun AppNavigation() {
             NavHost(nav, startDestination = TopDestination.HOME.route, modifier = Modifier.fillMaxSize()) {
                 composable(TopDestination.HOME.route) { HomeScreen() }
                 composable(TopDestination.SEARCH.route) { SearchScreen() }
+                composable(TopDestination.LIBRARY.route) { LibraryScreen() }
                 composable(TopDestination.SETTINGS.route) { SettingsScreen() }
                 composable(
                     Routes.TITLE,
