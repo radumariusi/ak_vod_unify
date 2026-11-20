@@ -60,11 +60,8 @@ class ScreenReaderService : AccessibilityService() {
         // Netflix să-și expună textele. Pe telefon asta ar schimba atingerile, deci nu.
         val tv = packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) &&
             !packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
-        if (tv) {
-            runCatching {
-                serviceInfo = serviceInfo.apply { flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE }
-            }
-        }
+        isTv = tv
+        if (tv) setReaderMode(true)
         handler.removeCallbacks(pollRunnable)
         handler.postDelayed(pollRunnable, POLL_MS)
         DiagLog.add("Citirea ecranului (accesibilitate) a pornit" + if (tv) " · mod cititor de ecran (TV)" else "")
@@ -74,7 +71,12 @@ class ScreenReaderService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val pkg = event?.packageName?.toString() ?: return
         if (pkg == packageName || IGNORED.any { pkg.startsWith(it) }) return
-        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) ScreenState.foregroundPackage = pkg
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            ScreenState.foregroundPackage = pkg
+            // Netflix, când vede un cititor de ecran, citește cu voce tare butoanele (și oricum nu
+            // ne arată textele): cât e Netflix în față, nu ne mai prezentăm ca cititor de ecran.
+            if (isTv) setReaderMode(!NO_READER_PREFIXES.any { pkg.startsWith(it) })
+        }
         if (!isInteresting(pkg)) return
         // Cel mult o citire la ~1 s: playerele schimbă textele (timpul) foarte des.
         if (pendingPackage == pkg) return
@@ -83,6 +85,30 @@ class ScreenReaderService : AccessibilityService() {
         val delay = if (now - lastSnapshotAt > MIN_GAP_MS) SETTLE_MS else MIN_GAP_MS
         handler.removeCallbacks(snapshotRunnable)
         handler.postDelayed(snapshotRunnable, delay)
+    }
+
+    private var isTv = false
+    private var readerMode: Boolean? = null
+
+    /** Mod „cititor de ecran” (Apple TV își arată textele doar așa) pornit / oprit. */
+    private fun setReaderMode(on: Boolean) {
+        if (readerMode == on) return
+        runCatching {
+            serviceInfo = serviceInfo.apply {
+                flags = if (on) {
+                    flags or AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE
+                } else {
+                    flags and AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE.inv()
+                }
+                feedbackType = if (on) {
+                    AccessibilityServiceInfo.FEEDBACK_SPOKEN or AccessibilityServiceInfo.FEEDBACK_GENERIC
+                } else {
+                    AccessibilityServiceInfo.FEEDBACK_GENERIC
+                }
+            }
+            readerMode = on
+            DiagLog.add("Mod cititor de ecran: ${if (on) "pornit" else "oprit (Netflix în față)"}")
+        }
     }
 
     override fun onInterrupt() = Unit
@@ -157,6 +183,9 @@ class ScreenReaderService : AccessibilityService() {
     }.getOrDefault(pkg)
 
     private companion object {
+        /** Aplicații pentru care NU pornim modul cititor de ecran (ar vorbi). */
+        val NO_READER_PREFIXES = listOf("com.netflix.")
+
         const val SETTLE_MS = 700L
         const val POLL_MS = 4_000L
         const val MIN_GAP_MS = 1_500L
