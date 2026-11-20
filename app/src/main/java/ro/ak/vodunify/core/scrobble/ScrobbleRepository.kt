@@ -39,6 +39,7 @@ class ScrobbleRepository @Inject constructor(
     private val matcher: ScrobbleMatcher,
     private val publisher: PublishRepository,
     private val trackingDao: TrackingDao,
+    private val serviceTitles: ServiceTitleResolver,
     private val json: Json,
 ) {
     private val prefs = context.getSharedPreferences("scrobbler", Context.MODE_PRIVATE)
@@ -102,7 +103,11 @@ class ScrobbleRepository @Inject constructor(
         result
     }
 
-    private suspend fun process(event: ScrobbleEvent, fromQueue: Boolean): ScrobbleResult {
+    private suspend fun process(original: ScrobbleEvent, fromQueue: Boolean): ScrobbleResult {
+        // Fără titlu, dar cu codul titlului (Prime Video GTI, Netflix id): îl aflăm de pe pagina serviciului.
+        // Codul e mai sigur decât textele aplicației, deci are prioritate.
+        val extra = serviceTitles.fieldsFor(original)
+        val event = if (extra.isEmpty()) original else original.copy(fields = original.fields + extra)
         val raw = ScrobbleRules.rawLabel(event.fields)
         fun done(result: ScrobbleResult, media: MediaRef? = null, duration: Long? = event.duration, position: Long = event.positionMs): ScrobbleResult {
             val e = entry(event, raw, media, duration, result, position, fromQueue)

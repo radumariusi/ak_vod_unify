@@ -51,7 +51,7 @@ object TitleParser {
 
     /** Texte care nu sunt titluri (numele aplicației, mesaje de stare). */
     private val NOISE = setOf(
-        "netflix", "prime video", "amazon prime video", "disney", "disney+", "max", "hbo max", "hbo", "skyshowtime",
+        "netflix", "prime video", "primevideo", "amazon prime video", "video", "movie", "episode", "tv", "unknown", "disney", "disney+", "max", "hbo max", "hbo", "skyshowtime",
         "peacock", "paramount+", "apple tv", "apple tv+", "stremio", "nuvio", "voyo", "now playing", "playing",
         "se redă", "redare", "live", "trailer", "preview", "advertisement", "ad", "reclamă",
     )
@@ -110,7 +110,8 @@ object TitleParser {
     }
 
     private fun orderedTexts(fields: Map<String, String>, appLabel: String?): List<String> {
-        val keys = FIELD_ORDER + fields.keys.filter { it !in FIELD_ORDER && it !in IGNORED_KEYS }
+        // Cheile proprii ale aplicațiilor („com.amazon….content_type”) nu sunt titluri.
+        val keys = FIELD_ORDER + fields.keys.filter { it !in FIELD_ORDER && it !in IGNORED_KEYS && '.' !in it }
         val seen = mutableSetOf<String>()
         val app = appLabel?.let(::normalize)
         return keys.mapNotNull { k -> fields[k]?.trim() }
@@ -119,7 +120,7 @@ object TitleParser {
             .filter { seen.add(normalize(it)) }
     }
 
-    private val IGNORED_KEYS = setOf("title_source", "media_id", "media_uri", "genre", "date", "duration", "year", "track_number", "disc_number", "num_tracks", "rating", "user_rating")
+    private val IGNORED_KEYS = setOf("title_source", "netflix_id", "media_id", "media_uri", "genre", "date", "duration", "year", "track_number", "disc_number", "num_tracks", "rating", "user_rating")
 
     private fun isNoise(s: String) = normalize(s) in NOISE_NORMALIZED
 

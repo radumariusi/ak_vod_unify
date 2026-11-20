@@ -18,6 +18,8 @@ class ScreenReaderService : AccessibilityService() {
     private var pendingPackage: String? = null
     private val lastLogged = HashMap<String, String>()
     private var lastSnapshotAt = 0L
+    private var nodeCount = 0
+    private val classes = HashMap<String, Int>()
 
     private val snapshotRunnable = Runnable {
         val pkg = pendingPackage
@@ -65,6 +67,8 @@ class ScreenReaderService : AccessibilityService() {
         lastSnapshotAt = SystemClock.elapsedRealtime()
         val items = mutableListOf<ScreenItem>()
         val ranges = mutableListOf<ScreenRange>()
+        nodeCount = 0
+        classes.clear()
         val all = mutableListOf<AccessibilityNodeInfo>()
         runCatching { windows }.getOrNull()?.forEach { w -> w.root?.let { all.add(it) } }
         if (all.isEmpty()) rootInActiveWindow?.let { all.add(it) }
@@ -79,18 +83,24 @@ class ScreenReaderService : AccessibilityService() {
         ScreenState.publish(snap)
 
         // Jurnal: doar când se schimbă ce înțelegem de pe ecran (nu la fiecare secundă).
-        val summary = "titlu=${guess?.title ?: "-"} · episod=${guess?.subtitle ?: "-"} · buton redare=${if (snap.hasPlayButton) "da" else "nu"}"
+        val summary = "titlu=${guess?.title ?: "-"} · episod=${guess?.subtitle ?: "-"} · buton redare=${if (snap.hasPlayButton) "da" else "nu"}" +
+            " · ${items.size} texte"
         if (lastLogged[pkg] != summary) {
             lastLogged[pkg] = summary
             val sample = items.take(25).joinToString(" | ") { it.text.take(60) + (it.viewId?.substringAfterLast('/')?.let { id -> " #$id" } ?: "") }
             val t = times.let { "minut=${it.positionMs?.let(StatusActivity::clock) ?: "-"} durată=${it.durationMs?.let(StatusActivity::clock) ?: "-"} rămas=${it.remainingMs?.let(StatusActivity::clock) ?: "-"}" }
-            DiagLog.add("Ecran $app: $summary · $t\n  texte (${items.size}): $sample")
+            val tree = "noduri=$nodeCount ferestre=${roots.size} tipuri=" + classes.entries.sortedByDescending { it.value }.take(6).joinToString { "${it.key}×${it.value}" }
+            DiagLog.add("Ecran $app: $summary · $t\n  $tree\n  texte (${items.size}): $sample")
         }
     }
 
     private fun collect(node: AccessibilityNodeInfo, items: MutableList<ScreenItem>, ranges: MutableList<ScreenRange>, depth: Int) {
-        if (depth > MAX_DEPTH || items.size >= MAX_ITEMS) return
-        if (node.isVisibleToUser) {
+        if (depth > MAX_DEPTH || items.size >= MAX_ITEMS || nodeCount > MAX_NODES) return
+        nodeCount++
+        val cls = node.className?.toString()?.substringAfterLast('.') ?: "?"
+        classes[cls] = (classes[cls] ?: 0) + 1
+        // Și textele ascunse: unele playere țin titlul într-un panou ascuns cât timp rulează.
+        run {
             val id = node.viewIdResourceName
             val text = node.text?.toString()?.trim().orEmpty()
             val desc = node.contentDescription?.toString()?.trim().orEmpty()
@@ -115,6 +125,7 @@ class ScreenReaderService : AccessibilityService() {
         const val MIN_GAP_MS = 1_500L
         const val MAX_DEPTH = 40
         const val MAX_ITEMS = 300
+        const val MAX_NODES = 3000
 
         /** Sistemul, tastaturile și launcherele: nu au titluri de film. */
         val IGNORED = listOf(
