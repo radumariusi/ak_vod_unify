@@ -26,7 +26,9 @@ import ro.ak.vodunify.core.calendar.format.whereToWatch
  * followed ones first. Rebuilt on every refresh (programs are replaced, not merged).
  */
 // Constantele TvContractCompat (tip program, raport poster) sunt scrise ca valori: lint nu le recunoaște.
-@SuppressLint("WrongConstant")
+// RestrictedApi: setările din PreviewProgram.Builder sunt moștenite dintr-o clasă de bază marcată @RestrictTo în tvprovider
+// 1.0.0 (fals pozitiv cunoscut; e API-ul documentat pentru canalele de pe ecranul principal).
+@SuppressLint("WrongConstant", "RestrictedApi")
 object TodayChannel {
     private const val TAG = "TodayChannel"
     private const val PREFS = "tv_channel"
