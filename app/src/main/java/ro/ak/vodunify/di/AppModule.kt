@@ -38,4 +38,6 @@ object AppModule {
     @Provides fun mediaDao(db: VodDatabase) = db.mediaDao()
     @Provides fun watchEventDao(db: VodDatabase) = db.watchEventDao()
     @Provides fun resumePointDao(db: VodDatabase) = db.resumePointDao()
+    @Provides fun tmdbCacheDao(db: VodDatabase) = db.tmdbCacheDao()
+    @Provides fun availabilityDao(db: VodDatabase) = db.availabilityDao()
 }

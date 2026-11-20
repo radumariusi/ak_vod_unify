@@ -7,7 +7,7 @@ Hub VOD pentru **Android TV** (funcționează și pe telefon, cu touch): adună 
 | Etapă | Conținut | Stare |
 |---|---|---|
 | 1 | Fundație: proiect Kotlin + Compose, arhitectură modulară, Room, Hilt, CI, release manual, self-update | ✅ |
-| 2 | Catalog TMDb (rânduri reale, detalii, imagini) | ⏳ |
+| 2 | Catalog TMDb: Acasă (hero + rânduri), detalii filme/seriale (sezoane, episoade), persoane, studiouri/rețele, căutare cu filtre, limbă RO/original, disponibilitate US/RO (JustWatch), cache Room | ✅ |
 | 3 | Trakt (autentificare device code, istoric, progres) | ⏳ |
 | 4 | „Alege unde vezi” + deep links (Netflix, Nuvio, Stremio, DebridStream) | ⏳ |
 | 5 | SIMKL + WeTrakr + reconciliere între surse | ⏳ |
@@ -19,11 +19,14 @@ Hub VOD pentru **Android TV** (funcționează și pe telefon, cu touch): adună 
 ```
 app/src/main/java/ro/ak/vodunify/
 ├── core/connector   Connector + Capability (HISTORY_READ, RESUME_READ, RESUME_WRITE, DEEP_LINK), ConnectorRegistry
-├── core/db          Room: media, watch_events, resume_points
+├── core/db          Room: media, watch_events, resume_points, tmdb_cache, availability
+├── core/tmdb        Client TMDb v3 (Bearer v4 sau api_key v3), DTO-uri, imagini, cache cu TTL + mod offline
+├── core/catalog     CatalogRepository + modele de domeniu (titluri, persoane, studiouri, disponibilitate)
+├── core/prefs       Setări catalog (DataStore): limbă RO/Original, piață RO/US
 ├── core/update      Self-update din GitHub Releases (verificare, descărcare, PackageInstaller)
 ├── core/device      Detecție TV vs. telefon
 ├── di               Module Hilt (rețea, DB, conectori prin @IntoSet)
-└── ui               Compose: home (hero + rânduri), settings, navigation, components, theme
+└── ui               Compose: home, details, person, studio, search, settings, navigation, components, theme
 ```
 
 - Un singur APK pentru TV și telefon: focus vizibil pentru D-pad, tap/scroll pentru touch, layout adaptiv (`LayoutSpec`).
@@ -41,7 +44,16 @@ Nu se commit-uiesc niciodată. Local se pun în `local.properties` (ignorat de g
 | `SIMKL_CLIENT_ID`, `SIMKL_CLIENT_SECRET` | SIMKL | etapa 5 |
 | `WETRAKR_API_KEY` | WeTrakr | etapa 5 |
 
-Pașii exacți pentru obținerea fiecărei chei vin în etapa respectivă. Fără chei aplicația se compilează și rulează, doar conectorul respectiv apare ca „Lipsesc cheile API”.
+Pașii exacți pentru obținerea fiecărei chei vin în etapa respectivă.
+
+### TMDb (etapa 2)
+
+1. Cont gratuit pe [themoviedb.org](https://www.themoviedb.org/signup), confirmă emailul.
+2. [Settings → API](https://www.themoviedb.org/settings/api) → *Create* → tip *Developer*, completează formularul.
+3. Copiază **API Read Access Token** (începe cu `eyJ…`). Merge și „API Key” (32 caractere); aplicația detectează automat tipul.
+4. GitHub → Settings → Secrets and variables → Actions → `TMDB_API_KEY` = tokenul.
+
+Fără cheie, ecranele de catalog afișează pașii de mai sus în loc de conținut (fără crash). Fără chei aplicația se compilează și rulează, doar conectorul respectiv apare ca „Lipsesc cheile API”.
 
 Exemplu `local.properties`:
 ```properties
@@ -50,6 +62,15 @@ TMDB_API_KEY=...
 TRAKT_CLIENT_ID=...
 TRAKT_CLIENT_SECRET=...
 ```
+
+## Catalog (etapa 2)
+
+- **Acasă**: hero rotativ din „În tendințe”, rânduri Filme/Seriale populare, Filme apreciate și câte un rând pentru primele 5 servicii de streaming din piața aleasă („Pe Netflix (RO)” etc.). Rândurile „Continuă vizionarea” și „Următorul episod” sunt rezervate pentru Trakt (etapa 3).
+- **Detalii**: film sau serial, cu sezoane și episoade, distribuție, echipă, studiouri/rețele, recomandări, trailer.
+- **Unde vezi**: TMDb Watch Providers pentru RO și US (abonament, gratuit, închiriere, cumpărare), cu atribuire JustWatch.
+- **Căutare**: titlu sau persoană, filtre tip/gen/an; fără text, filtrele răsfoiesc catalogul (`/discover`).
+- **Setări → Catalog**: limbă (Română / Original), piață (RO / US), golire cache.
+- Cache: răspunsurile TMDb se salvează în Room cu cheie = cale + limbă + piață (6 h listele, 7 zile listele de genuri/servicii); fără internet se folosesc datele salvate. Titlurile deschise se salvează în `media`, iar disponibilitatea în `availability` (pe titlu și piață).
 
 ## Semnare și release
 

@@ -6,9 +6,16 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import ro.ak.vodunify.core.catalog.CatalogRepository
 import ro.ak.vodunify.core.connector.Connector
+import ro.ak.vodunify.core.prefs.CatalogPreferences
+import ro.ak.vodunify.core.prefs.CatalogSettings
+import ro.ak.vodunify.core.prefs.ContentLanguage
+import ro.ak.vodunify.core.prefs.Market
 import ro.ak.vodunify.core.connector.ConnectorRegistry
 import ro.ak.vodunify.core.update.ApkInstaller
 import ro.ak.vodunify.core.update.AvailableUpdate
@@ -21,7 +28,32 @@ class SettingsViewModel @Inject constructor(
     private val updates: UpdateRepository,
     private val installer: ApkInstaller,
     registry: ConnectorRegistry,
+    private val catalogPrefs: CatalogPreferences,
+    private val catalog: CatalogRepository,
 ) : ViewModel() {
+
+    val tmdbConfigured: Boolean = catalog.isConfigured
+
+    val catalogSettings: StateFlow<CatalogSettings> = catalogPrefs.settings
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CatalogSettings())
+
+    private val _cacheMessage = MutableStateFlow<String?>(null)
+    val cacheMessage: StateFlow<String?> = _cacheMessage.asStateFlow()
+
+    fun setLanguage(language: ContentLanguage) {
+        viewModelScope.launch { catalogPrefs.setLanguage(language) }
+    }
+
+    fun setMarket(market: Market) {
+        viewModelScope.launch { catalogPrefs.setMarket(market) }
+    }
+
+    fun clearCatalogCache() {
+        viewModelScope.launch {
+            _cacheMessage.value = runCatching { catalog.clearCache() }
+                .fold({ "Cache golit. Datele se reîncarcă din TMDb." }, { "Nu am putut goli cache-ul: ${it.message}" })
+        }
+    }
 
     val connectors: List<Connector> = registry.all
 

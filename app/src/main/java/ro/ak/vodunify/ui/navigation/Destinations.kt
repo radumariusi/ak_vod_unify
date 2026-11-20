@@ -2,6 +2,7 @@ package ro.ak.vodunify.ui.navigation
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
 
@@ -11,5 +12,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
  */
 enum class TopDestination(val route: String, val label: String, val icon: ImageVector) {
     HOME("home", "Acasă", Icons.Filled.Home),
+    SEARCH("search", "Caută", Icons.Filled.Search),
     SETTINGS("settings", "Setări", Icons.Filled.Settings),
 }

@@ -16,6 +16,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -35,6 +36,8 @@ import ro.ak.vodunify.BuildConfig
 import ro.ak.vodunify.core.connector.Capability
 import ro.ak.vodunify.core.connector.Connector
 import ro.ak.vodunify.core.connector.ConnectorKind
+import ro.ak.vodunify.core.prefs.ContentLanguage
+import ro.ak.vodunify.core.prefs.Market
 import ro.ak.vodunify.core.update.UpdateState
 import ro.ak.vodunify.ui.components.layoutSpec
 
@@ -42,6 +45,8 @@ import ro.ak.vodunify.ui.components.layoutSpec
 fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
     val spec = layoutSpec()
     val update by viewModel.update.collectAsStateWithLifecycle()
+    val catalog by viewModel.catalogSettings.collectAsStateWithLifecycle()
+    val cacheMessage by viewModel.cacheMessage.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
@@ -73,6 +78,50 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
                     onCheck = viewModel::checkForUpdates,
                     onInstall = viewModel::downloadAndInstall,
                     onGrantPermission = { context.startActivity(viewModel.installPermissionIntent()) },
+                )
+            }
+        }
+        item {
+            Section("Catalog (TMDb)") {
+                Text(
+                    if (viewModel.tmdbConfigured) "Cheie TMDb prezentă" else "Lipsește cheia TMDb (secretul TMDB_API_KEY)",
+                    color = if (viewModel.tmdbConfigured) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text("Limba titlurilor și descrierilor", fontWeight = FontWeight.Medium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ContentLanguage.entries.forEach { lang ->
+                        FilterChip(
+                            selected = catalog.language == lang,
+                            onClick = { viewModel.setLanguage(lang) },
+                            label = { Text(lang.label) },
+                        )
+                    }
+                }
+                Text(
+                    "Română: titluri traduse unde există (descrierile lipsă se iau în engleză). Original: titlul original al producției.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text("Piața (disponibilitate și cataloage pe servicii)", fontWeight = FontWeight.Medium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Market.entries.forEach { m ->
+                        FilterChip(
+                            selected = catalog.market == m,
+                            onClick = { viewModel.setMarket(m) },
+                            label = { Text("${m.label} (${m.code})") },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                OutlinedButton(onClick = viewModel::clearCatalogCache) { Text("Golește cache-ul catalogului") }
+                cacheMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                Text(
+                    "Acest produs folosește API-ul TMDb, dar nu este aprobat sau certificat de TMDb. " +
+                        "Disponibilitatea pe servicii de streaming este furnizată de JustWatch.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

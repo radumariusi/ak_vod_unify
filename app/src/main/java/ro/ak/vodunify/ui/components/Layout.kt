@@ -13,6 +13,9 @@ data class LayoutSpec(
     val cardWidth: Dp,
     val cardHeight: Dp,
     val heroHeight: Dp,
+    /** Postere verticale (2:3) pentru filme/seriale. */
+    val posterWidth: Dp,
+    val posterHeight: Dp,
 )
 
 val LocalLayoutSpec = compositionLocalOf { layoutSpecFor(isTv = false, widthDp = 400) }
@@ -20,9 +23,9 @@ val LocalLayoutSpec = compositionLocalOf { layoutSpecFor(isTv = false, widthDp =
 fun layoutSpecFor(isTv: Boolean, widthDp: Int): LayoutSpec {
     val compact = !isTv && widthDp < 600
     return when {
-        isTv -> LayoutSpec(true, false, 48.dp, 196.dp, 110.dp, 320.dp)
-        compact -> LayoutSpec(false, true, 16.dp, 140.dp, 80.dp, 220.dp)
-        else -> LayoutSpec(false, false, 32.dp, 180.dp, 100.dp, 280.dp)
+        isTv -> LayoutSpec(true, false, 48.dp, 240.dp, 135.dp, 380.dp, 140.dp, 210.dp)
+        compact -> LayoutSpec(false, true, 16.dp, 200.dp, 112.dp, 260.dp, 110.dp, 165.dp)
+        else -> LayoutSpec(false, false, 32.dp, 220.dp, 124.dp, 320.dp, 130.dp, 195.dp)
     }
 }
 

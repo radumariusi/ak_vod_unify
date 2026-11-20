@@ -13,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
 
 /**
@@ -22,6 +23,7 @@ import androidx.compose.ui.unit.dp
 fun FocusCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(10.dp),
     content: @Composable () -> Unit,
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -30,7 +32,7 @@ fun FocusCard(
     Surface(
         onClick = onClick,
         modifier = modifier.scale(scale),
-        shape = RoundedCornerShape(10.dp),
+        shape = shape,
         color = MaterialTheme.colorScheme.surfaceVariant,
         border = if (focused) BorderStroke(3.dp, Color.White) else null,
         tonalElevation = if (focused) 8.dp else 0.dp,
