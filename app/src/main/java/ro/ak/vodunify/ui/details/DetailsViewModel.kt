@@ -52,9 +52,9 @@ class DetailsViewModel @Inject constructor(
     val episodes: StateFlow<LoadState<Season>?> = combine(settings, selectedSeason) { s, n -> s to n }
         .flatMapLatest { (s, n) ->
             if (kind != TitleKind.TV || n == null) {
-                flowOf(null)
+                flowOf<LoadState<Season>?>(null)
             } else {
-                flow {
+                flow<LoadState<Season>?> {
                     emit(LoadState.Loading)
                     emit(loadCatching { catalog.season(id, n, s) })
                 }
