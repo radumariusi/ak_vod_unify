@@ -7,6 +7,72 @@ package ro.ak.vodimport
  */
 object Scripts {
 
+    /** Test Netflix: notează ce primește pagina (fetch/XHR) cât se încarcă „Activitate de vizionare”. */
+    val NETFLIX_CAPTURE_HOOK = """
+        (function () {
+          if (window.__akHook) return;
+          window.__akHook = true;
+          window.__akCap = [];
+          var keep = function (url) { return /graphql|viewed|viewing|activity|shakti|pathEvaluator|bookmark/i.test(String(url || "")); };
+          var note = function (url, status, body) {
+            try {
+              var b = String(body || "");
+              var i = b.search(/bookmark|watchedDate|viewedDate|dateStr|lastWatched|playbackPosition|progress/i);
+              var keys = (b.match(/"(bookmark\w*|watched\w*|viewed\w*|date\w*|progress\w*|runtime|duration|title|seriesTitle|episodeTitle|lastModified\w*|timestamp)"/gi) || [])
+                .filter(function (v, k, a) { return a.indexOf(v) === k; }).slice(0, 15).join("");
+              window.__akCap.push({ u: String(url).replace(/^https:\/\/[^\/]+/, "").slice(0, 80), s: status, n: b.length, k: keys,
+                x: i >= 0 ? b.slice(Math.max(0, i - 80), i + 160) : b.slice(0, 200) });
+            } catch (e) {}
+          };
+          var of = window.fetch;
+          if (of) {
+            window.fetch = function (input, init) {
+              var url = (input && input.url) || input;
+              return of.apply(this, arguments).then(function (r) {
+                if (keep(url)) { try { r.clone().text().then(function (t) { note(url, r.status, t); }); } catch (e) {} }
+                return r;
+              });
+            };
+          }
+          var oo = XMLHttpRequest.prototype.open, os = XMLHttpRequest.prototype.send;
+          XMLHttpRequest.prototype.open = function (m, u) { this.__akU = u; return oo.apply(this, arguments); };
+          XMLHttpRequest.prototype.send = function () {
+            var x = this;
+            x.addEventListener("load", function () { if (keep(x.__akU)) note(x.__akU, x.status, x.responseText); });
+            return os.apply(this, arguments);
+          };
+        })();
+    """.trimIndent()
+
+    /** Test Netflix: apasă „Show more” ca pagina să mai ceară o dată lista (o prindem sigur). */
+    val NETFLIX_SHOW_MORE = """
+        (function () {
+          var b = Array.prototype.slice.call(document.querySelectorAll("button, a, [role=button]")).filter(function (e) {
+            return /show more|load more|see more|mai mult|afișează mai|afiseaza mai/i.test(e.innerText || "");
+          })[0];
+          if (b) b.click();
+          return b ? "click" : "fara buton";
+        })()
+    """.trimIndent()
+
+    /** Test Netflix: ce s-a prins (cereri + rânduri cu dată din pagină), ca JSON. */
+    val NETFLIX_CAPTURE_REPORT = """
+        (function () {
+          var cap = window.__akCap || [];
+          var dateRe = /\b\d{1,2}[\/.]\d{1,2}[\/.]\d{2,4}\b|\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.? \d{1,2},? \d{4}\b|\b\d{1,2} (ian|feb|mar|apr|mai|iun|iul|aug|sep|oct|noi|dec)[a-z]*\.? \d{4}\b/i;
+          var els = document.querySelectorAll("li, tr, [role=row], [data-uia*=row], [class*=row]");
+          var rows = [], total = 0;
+          for (var i = 0; i < els.length; i++) {
+            var t = (els[i].innerText || "").replace(/\s+/g, " ").trim();
+            if (t.length > 6 && t.length < 200 && dateRe.test(t)) {
+              total++;
+              if (rows.length < 4) rows.push(t);
+            }
+          }
+          return JSON.stringify({ hook: !!window.__akHook, url: location.pathname, cap: cap.slice(0, 5), rows: rows, total: total });
+        })()
+    """.trimIndent()
+
     /**
      * Netflix: ce e în pagina deschisă (/browse) — „Continuă vizionarea” are, pentru fiecare
      * titlu început, minutul unde ai rămas (falcorCache). Sincron (îl rulăm și cu
