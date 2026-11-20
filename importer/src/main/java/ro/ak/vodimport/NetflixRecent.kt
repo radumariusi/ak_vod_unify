@@ -46,6 +46,21 @@ object NetflixRecent {
     private const val UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     private val BUILD = Regex("\"BUILD_IDENTIFIER\":\"([^\"]+)\"")
+    private val AUTH = Regex("\"authURL\":\"([^\"]+)\"")
+
+    /** Adresele de încercat pentru „Activitate de vizionare”, în ordine. */
+    fun activityUrls(build: String?, authUrl: String?, page: Int, size: Int): List<String> = buildList {
+        val q = "pg=$page&pgSize=$size"
+        if (authUrl != null) add("$BASE/api/shakti/mre/viewingactivity?languages=en-US&authURL=${java.net.URLEncoder.encode(authUrl, "UTF-8")}&$q")
+        add("$BASE/api/shakti/mre/viewingactivity?$q")
+        if (build != null) add("$BASE/api/shakti/$build/viewingactivity?$q")
+    }
+
+    /** authURL vine în pagină cu escape-uri JavaScript („\x2F”, „\u002F”). */
+    fun unescape(s: String): String = Regex("""\\x([0-9A-Fa-f]{2})|\\u([0-9A-Fa-f]{4})""").replace(s) {
+        val hex = it.groupValues[1].ifEmpty { it.groupValues[2] }
+        hex.toInt(16).toChar().toString()
+    }
 
     /** Rezultatul trimis către Unify: status ok / not_logged_in / error. */
     fun fetch(cookies: String?): JSONObject {
@@ -59,10 +74,24 @@ object NetflixRecent {
                 return out.put("status", "not_logged_in").put("message", "Sesiunea Netflix a expirat în ${appName()}")
             }
             val build = BUILD.find(html)?.groupValues?.get(1)
-                ?: return out.put("status", "error").put("message", "Netflix /browse fără sesiune (HTTP $code)")
-            val (code2, _, body) = get("$BASE/api/shakti/$build/viewingactivity?pg=0&pgSize=$PAGE_SIZE", cookies)
-            if (code2 !in 200..299) {
-                return out.put("status", "error").put("message", "Netflix a răspuns cu HTTP $code2 la activitatea de vizionare")
+            val auth = AUTH.find(html)?.groupValues?.get(1)?.let(::unescape)
+            if (build == null && auth == null) {
+                return out.put("status", "error").put("message", "Netflix /browse fără sesiune (HTTP $code)")
+            }
+            // Netflix a mutat API-ul: întâi forma nouă („mre” + authURL), apoi cea veche (BUILD_IDENTIFIER).
+            val urls = activityUrls(build, auth, 0, PAGE_SIZE)
+            var body: String? = null
+            val codes = mutableListOf<Int>()
+            for (u in urls) {
+                val (c, _, b) = get(u, cookies)
+                codes += c
+                if (c in 200..299 && b.contains("viewedItems")) {
+                    body = b
+                    break
+                }
+            }
+            if (body == null) {
+                return out.put("status", "error").put("message", "Netflix a răspuns cu HTTP ${codes.joinToString("/")} la activitatea de vizionare")
             }
             val viewed = JSONObject(body).optJSONArray("viewedItems") ?: JSONArray()
             val items = JSONArray()

@@ -32,11 +32,35 @@ object Scripts {
                 }
               } catch (e) {}
             }
-            if (!build) { AK.fail("Nu găsesc sesiunea Netflix. Conectează-te, alege profilul, apoi apasă din nou „Importă istoricul”."); return; }
+            var auth = null;
+            try { auth = ctx.models.userInfo.data.authURL; } catch (e) {}
+            if (!auth) {
+              try {
+                var h2 = await (await fetch("/browse", { credentials: "include" })).text();
+                var ma = h2.match(/"authURL":"([^"]+)"/);
+                if (ma) auth = ma[1].replace(/\\x([0-9A-Fa-f]{2})/g, function (_, x) { return String.fromCharCode(parseInt(x, 16)); });
+                if (!build) { var mb2 = h2.match(/"BUILD_IDENTIFIER":"([^"]+)"/); if (mb2) build = mb2[1]; }
+              } catch (e) {}
+            }
+            if (!build && !auth) { AK.fail("Nu găsesc sesiunea Netflix. Conectează-te, alege profilul, apoi apasă din nou „Importă istoricul”."); return; }
+            // Netflix a mutat API-ul: încercăm forma nouă („mre” + authURL), apoi cea veche.
+            var bases = [];
+            if (auth) bases.push("/api/shakti/mre/viewingactivity?languages=en-US&authURL=" + encodeURIComponent(auth) + "&");
+            bases.push("/api/shakti/mre/viewingactivity?");
+            if (build) bases.push("/api/shakti/" + build + "/viewingactivity?");
+            var base = null, codes = [];
+            for (var b = 0; b < bases.length && !base; b++) {
+              try {
+                var t = await fetch(bases[b] + "pg=0&pgSize=1", { credentials: "include" });
+                codes.push(t.status);
+                if (t.ok) { var tj = await t.json(); if (tj && tj.viewedItems) base = bases[b]; }
+              } catch (e) { codes.push("x"); }
+            }
+            if (!base) { AK.fail("Netflix a răspuns cu " + codes.join("/") + ". Alege întâi profilul (pagina „Cine se uită?”), apoi apasă din nou."); return; }
             try { if (!profile) profile = ctx.models.userInfo.data.name || ""; } catch (e) {}
             var all = [];
             for (var pg = 0; pg < 300; pg++) {
-              var r = await fetch("/api/shakti/" + build + "/viewingactivity?pg=" + pg + "&pgSize=100", { credentials: "include" });
+              var r = await fetch(base + "pg=" + pg + "&pgSize=100", { credentials: "include" });
               if (!r.ok) { AK.fail("Netflix a răspuns cu " + r.status + (r.status === 401 || r.status === 403 ? ". Alege întâi profilul (pagina „Cine se uită?”), apoi apasă din nou." : ". Reîncearcă după ce reîncarci pagina.")); return; }
               var j = await r.json();
               var items = j.viewedItems || [];
