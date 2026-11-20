@@ -28,16 +28,17 @@ object LogExport {
         val bytes = fullText(context).toByteArray()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val resolver = context.contentResolver
-            // Înlocuim fișierul vechi, ca să fie mereu unul singur, cu același nume.
+            // Ștergem jurnalele salvate anterior de noi (cele ale altor instalări nu le putem șterge),
+            // apoi salvăm cu un nume nou, fără spații sau paranteze, ușor de citit din ADB.
             runCatching {
                 resolver.delete(
                     MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                    "${MediaStore.Downloads.DISPLAY_NAME}=?",
-                    arrayOf(FILE_NAME),
+                    "${MediaStore.Downloads.DISPLAY_NAME} LIKE ?",
+                    arrayOf("ak-scrobbler-jurnal%"),
                 )
             }
             val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, FILE_NAME)
+                put(MediaStore.Downloads.DISPLAY_NAME, "ak-scrobbler-jurnal-${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date())}.txt")
                 put(MediaStore.Downloads.MIME_TYPE, "text/plain")
                 put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
             }
