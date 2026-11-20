@@ -11,6 +11,10 @@ data class ExternalIds(
     val trakt: Long? = null,
     val simkl: Long? = null,
     val tvdb: Long? = null,
+    /** MyAnimeList (anime, din SIMKL). */
+    val mal: Long? = null,
+    /** AniDB (anime, din SIMKL). */
+    val anidb: Long? = null,
 )
 
 /**

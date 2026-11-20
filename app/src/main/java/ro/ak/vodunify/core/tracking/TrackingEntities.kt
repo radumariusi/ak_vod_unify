@@ -29,11 +29,12 @@ object TrackingEntities {
         imdbId = m.ids.imdb,
         traktId = m.ids.trakt,
         tvdbId = m.ids.tvdb,
+        simklId = m.ids.simkl,
     )
 
     fun media(r: TrackedRef) = MediaRef(
         type = MediaType.entries.firstOrNull { it.name == r.type } ?: MediaType.MOVIE,
-        ids = ExternalIds(tmdb = r.tmdbId, imdb = r.imdbId, trakt = r.traktId, tvdb = r.tvdbId),
+        ids = ExternalIds(tmdb = r.tmdbId, imdb = r.imdbId, trakt = r.traktId, tvdb = r.tvdbId, simkl = r.simklId),
         title = r.title,
         year = r.year,
         season = r.season,
@@ -60,8 +61,7 @@ object TrackingEntities {
     fun watched(e: WatchEvent) = WatchedTitleEntity(
         id = "${e.source}|${e.media.titleKey}",
         source = e.source,
-        mediaKey = e.media.titleKey,
-        type = e.media.type.name,
+        ref = ref(if (e.media.type == MediaType.EPISODE) e.media.asShow() else e.media),
         lastWatchedAt = e.watchedAt.toEpochMilli(),
     )
 
@@ -84,10 +84,7 @@ object TrackingEntities {
         )
     }
 
-    /**
-     * Elimină dublurile când mai multe surse raportează același element (etapa 5 va avea
-     * reconciliere completă). Păstrează cel mai recent.
-     */
+    /** Elimină dublurile când mai multe surse raportează același element. Păstrează cel mai recent. */
     fun <T> dedupe(items: List<T>, key: (T) -> String, time: (T) -> Long): List<T> =
         items.groupBy(key).values.map { group -> group.maxBy(time) }.sortedByDescending(time)
 }

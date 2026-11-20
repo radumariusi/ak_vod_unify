@@ -32,7 +32,7 @@ sealed interface LoginState {
     data class Error(val message: String) : LoginState
 }
 
-/** Conturile conectorilor cu login prin cod (Trakt acum, SIMKL în etapa 5). */
+/** Conturile conectorilor cu login prin cod (Trakt, SIMKL, WeTrakr). */
 @HiltViewModel
 class AccountsViewModel @Inject constructor(
     registry: ConnectorRegistry,
@@ -85,7 +85,7 @@ class AccountsViewModel @Inject constructor(
                 }
                 when (result) {
                     DeviceAuthPoll.Pending -> Unit
-                    DeviceAuthPoll.SlowDown -> interval += 1
+                    DeviceAuthPoll.SlowDown -> interval += 5 // RFC 8628: +5 s la „slow_down”
                     is DeviceAuthPoll.Approved -> {
                         set(c.id, LoginState.Idle)
                         tracking.sync()

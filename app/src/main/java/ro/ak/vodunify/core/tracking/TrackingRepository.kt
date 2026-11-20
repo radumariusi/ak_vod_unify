@@ -1,7 +1,13 @@
 package ro.ak.vodunify.core.tracking
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,11 +27,16 @@ import ro.ak.vodunify.core.connector.ShowProgress
 import ro.ak.vodunify.core.connector.WatchEvent
 import ro.ak.vodunify.core.connector.WatchlistEntry
 import ro.ak.vodunify.core.connector.supports
+import ro.ak.vodunify.core.db.OwnWriteAction
+import ro.ak.vodunify.core.db.OwnWriteEntity
 import ro.ak.vodunify.core.db.ResumePointEntity
 import ro.ak.vodunify.core.db.SyncStateEntity
 import ro.ak.vodunify.core.db.TrackingDao
 import ro.ak.vodunify.core.db.UpNextEntity
 import ro.ak.vodunify.core.db.WatchlistEntity
+import ro.ak.vodunify.core.reconcile.LibraryEntry
+import ro.ak.vodunify.core.reconcile.ReconciledView
+import ro.ak.vodunify.core.reconcile.reconcile
 import java.time.Instant
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -66,17 +77,27 @@ class TrackingRepository @Inject constructor(
         .map { c -> c.account.map { it != null && c.isConfigured } }
         .let { flows -> if (flows.isEmpty()) flowOf(false) else combine(flows) { values -> values.any { it } } }
 
-    val continueWatching: Flow<List<ResumePointEntity>> = dao.continueWatching().map { list ->
-        TrackingEntities.dedupe(list, { it.ref.mediaKey + ":" + it.ref.season + ":" + it.ref.episode }, { it.updatedAt })
-    }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    val upNext: Flow<List<UpNextEntity>> = dao.upNext().map { list ->
-        TrackingEntities.dedupe(list, { it.ref.mediaKey }, { it.lastWatchedAt })
+    /** Tot ce știu sursele, reconciliat (vezi [Reconciler]). Calculat o dată, partajat. */
+    val reconciled: Flow<ReconciledView> = combine(
+        combine(dao.allResume(), dao.latestWatches(), dao.watchedTitles()) { a, b, c -> Triple(a, b, c) },
+        dao.watchlist(),
+        dao.upNext(),
+        dao.ownWrites(),
+    ) { (resume, watches, watched), list, next, own ->
+        reconcile(resume, watches, watched, list, next, own)
     }
+        .flowOn(Dispatchers.Default)
+        .shareIn(scope, SharingStarted.WhileSubscribed(5_000), replay = 1)
 
-    val watchlist: Flow<List<WatchlistEntity>> = dao.watchlist().map { list ->
-        TrackingEntities.dedupe(list, { it.ref.mediaKey }, { it.listedAt })
-    }
+    val continueWatching: Flow<List<ResumePointEntity>> = reconciled.map { v -> v.resume.map { it.winner } }
+
+    val upNext: Flow<List<UpNextEntity>> = reconciled.map { it.upNext }
+
+    val watchlist: Flow<List<WatchlistEntity>> = reconciled.map { it.watchlist }
+
+    val library: Flow<List<LibraryEntry>> = reconciled.map { it.library }
 
     fun titleState(mediaKey: String): Flow<TitleTrackState> = combine(
         dao.inWatchlist(mediaKey),
@@ -150,11 +171,23 @@ class TrackingRepository @Inject constructor(
 
     // ---------- Acțiuni din UI (trimise în toate sursele conectate) ----------
 
+    private suspend fun recordOwnWrite(targets: List<Connector>, itemKey: String, action: OwnWriteAction, at: Long, progress: Float? = null) {
+        dao.pruneOwnWrites(System.currentTimeMillis() - OWN_WRITE_TTL_MS)
+        dao.putOwnWrites(targets.map { OwnWriteEntity("${it.id}|$itemKey|${action.name}", it.id, itemKey, action.name, progress, at) })
+    }
+
     /** Marchează văzut / nevăzut. Întoarce numărul de surse actualizate. */
     suspend fun setWatched(media: MediaRef, watched: Boolean): Int {
         val targets = connected(Capability.HISTORY_WRITE)
         requireTargets(targets)
-        targets.forEach { it.setWatched(media, watched) }
+        val now = Instant.now()
+        targets.forEach { it.setWatched(media, watched, if (watched) now else null) }
+        recordOwnWrite(targets, media.itemKey, if (watched) OwnWriteAction.WATCHED else OwnWriteAction.UNWATCHED, now.toEpochMilli())
+        if (watched) {
+            // Copie locală a vizionării: închide imediat punctul de reluare; când sursa o trimite
+            // înapoi, reconcilierea o vede ca aceeași vizionare (ecou), nu ca una nouă.
+            dao.insertHistory(targets.map { TrackingEntities.history(WatchEvent(media, now, it.id)) })
+        }
         if (media.type != MediaType.EPISODE) {
             if (watched) {
                 dao.upsertWatched(
@@ -173,6 +206,13 @@ class TrackingRepository @Inject constructor(
         val targets = connected(Capability.WATCHLIST_WRITE)
         requireTargets(targets)
         targets.forEach { it.setInWatchlist(media, inWatchlist) }
+        val key = (if (media.type == MediaType.EPISODE) media.asShow() else media).titleKey
+        recordOwnWrite(
+            targets,
+            key,
+            if (inWatchlist) OwnWriteAction.WATCHLIST_ADD else OwnWriteAction.WATCHLIST_REMOVE,
+            System.currentTimeMillis(),
+        )
         if (inWatchlist) {
             dao.upsertWatchlist(
                 targets.map { TrackingEntities.watchlist(WatchlistEntry(media, Instant.now(), it.id)) },
@@ -203,6 +243,11 @@ class TrackingRepository @Inject constructor(
     suspend fun clearSource(source: String) = dao.clearSource(source)
 
     private fun requireTargets(targets: List<Connector>) {
-        if (targets.isEmpty()) throw IllegalStateException("Niciun cont conectat. Conectează Trakt din Setări.")
+        if (targets.isEmpty()) throw IllegalStateException("Niciun cont conectat. Conectează Trakt sau SIMKL din Setări.")
+    }
+
+    private companion object {
+        /** Scrierile proprii se țin o săptămână: destul cât să revină ecoul din orice sursă. */
+        val OWN_WRITE_TTL_MS: Long = TimeUnit.DAYS.toMillis(7)
     }
 }

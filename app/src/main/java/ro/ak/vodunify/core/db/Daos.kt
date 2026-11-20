@@ -45,6 +45,9 @@ interface TrackingDao {
     @Query("DELETE FROM resume_points WHERE id = :id")
     suspend fun deleteResumeById(id: String)
 
+    @Query("SELECT * FROM resume_points ORDER BY updatedAt DESC")
+    fun allResume(): Flow<List<ResumePointEntity>>
+
     // ---------- Watchlist ----------
     @Query("DELETE FROM watchlist WHERE source = :source")
     suspend fun deleteWatchlist(source: String)
@@ -105,6 +108,9 @@ interface TrackingDao {
     @Query("DELETE FROM watched_titles WHERE mediaKey = :mediaKey")
     suspend fun removeWatched(mediaKey: String)
 
+    @Query("SELECT * FROM watched_titles ORDER BY lastWatchedAt DESC")
+    fun watchedTitles(): Flow<List<WatchedTitleEntity>>
+
     // ---------- Istoric ----------
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertHistory(events: List<WatchEventEntity>)
@@ -114,6 +120,26 @@ interface TrackingDao {
 
     @Query("SELECT COUNT(*) FROM watch_events WHERE source = :source")
     fun historyCount(source: String): Flow<Int>
+
+    /** Ultima vizionare a fiecărui element (film / episod), pe sursă. */
+    @Query(
+        "SELECT * FROM watch_events w WHERE w.watchedAt = (SELECT MAX(x.watchedAt) FROM watch_events x " +
+            "WHERE x.source = w.source AND x.mediaKey = w.mediaKey AND x.season IS w.season AND x.episode IS w.episode)",
+    )
+    fun latestWatches(): Flow<List<WatchEventEntity>>
+
+    @Query("SELECT * FROM watch_events WHERE mediaKey = :mediaKey ORDER BY watchedAt DESC")
+    fun historyFor(mediaKey: String): Flow<List<WatchEventEntity>>
+
+    // ---------- Scrierile aplicației (pentru reconciliere) ----------
+    @Upsert
+    suspend fun putOwnWrites(items: List<OwnWriteEntity>)
+
+    @Query("SELECT * FROM own_writes")
+    fun ownWrites(): Flow<List<OwnWriteEntity>>
+
+    @Query("DELETE FROM own_writes WHERE at < :before")
+    suspend fun pruneOwnWrites(before: Long)
 
     // ---------- Stare sincronizare ----------
     @Query("SELECT * FROM sync_state WHERE source = :source")
@@ -134,7 +160,11 @@ interface TrackingDao {
         deleteWatched(source)
         deleteHistory(source)
         deleteSyncState(source)
+        deleteOwnWrites(source)
     }
+
+    @Query("DELETE FROM own_writes WHERE source = :source")
+    suspend fun deleteOwnWrites(source: String)
 
     @Query("DELETE FROM watch_events WHERE source = :source")
     suspend fun deleteHistory(source: String)

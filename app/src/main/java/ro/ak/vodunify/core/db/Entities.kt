@@ -40,6 +40,7 @@ data class TrackedRef(
     val imdbId: String?,
     val traktId: Long?,
     val tvdbId: Long?,
+    val simklId: Long? = null,
 )
 
 /** Istoric: vizionări complete. Id = "<sursă>|<id intrare>" ca să nu se dubleze la resincronizare. */
@@ -90,10 +91,28 @@ data class UpNextEntity(
 data class WatchedTitleEntity(
     @PrimaryKey val id: String, // "<sursă>|<mediaKey>"
     val source: String,
-    val mediaKey: String,
-    val type: String,
+    @Embedded val ref: TrackedRef,
     val lastWatchedAt: Long,
 )
+
+/**
+ * O scriere făcută de aplicație într-o sursă (marcat văzut, progres, watchlist).
+ * Reconcilierea o folosește ca să recunoască „ecoul” când sursa ne-o trimite înapoi
+ * și ca să nu lase un import mai vechi să anuleze o acțiune mai nouă.
+ */
+@Entity(tableName = "own_writes", indices = [Index("itemKey"), Index("at")])
+data class OwnWriteEntity(
+    @PrimaryKey val id: String, // "<sursă>|<itemKey>|<acțiune>"
+    val source: String,
+    /** Cheia elementului: titlu sau titlu + sezon/episod (MediaRef.itemKey). */
+    val itemKey: String,
+    /** Vezi [OwnWriteAction]. */
+    val action: String,
+    val progress: Float?,
+    val at: Long,
+)
+
+enum class OwnWriteAction { WATCHED, UNWATCHED, RESUME, WATCHLIST_ADD, WATCHLIST_REMOVE }
 
 /** Starea sincronizării pe sursă. */
 @Entity(tableName = "sync_state")

@@ -43,7 +43,7 @@ import ro.ak.vodunify.ui.components.openUrl
 import java.text.DateFormat
 import java.util.Date
 
-/** Cardul unui cont (Trakt): conectare cu cod, stare sincronizare, deconectare. */
+/** Cardul unui cont (Trakt, SIMKL, WeTrakr): conectare cu cod, stare sincronizare, deconectare. */
 @Composable
 fun AccountCard(connector: DeviceAuthConnector, viewModel: AccountsViewModel) {
     val account by viewModel.accounts.getValue(connector.id).collectAsStateWithLifecycle()
@@ -109,6 +109,14 @@ private fun LoginFlow(connector: DeviceAuthConnector, login: LoginState, viewMod
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (connector.id == "wetrakr") {
+                Text(
+                    "Experimental: WeTrakr nu are încă API public, așa că folosim protocolul add-on-ului lor oficial pentru Kodi. " +
+                        "Lista „De văzut” se citește, dar nu se poate modifica de aici.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Button(onClick = { viewModel.startLogin(connector) }) { Text("Conectează ${connector.displayName}") }
         }
         LoginState.Requesting -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -170,12 +178,16 @@ private fun secondsLeft(code: DeviceCode): Long =
 
 @Composable
 private fun MissingKeys(connector: DeviceAuthConnector) {
-    val steps = if (connector.id == "trakt") {
-        "1. Pe trakt.tv/oauth/applications → New Application (Redirect uri: urn:ietf:wg:oauth:2.0:oob).\n" +
-            "2. În GitHub: Settings → Secrets and variables → Actions → secretul TRAKT_CLIENT_ID (Client ID). Client secret nu mai e necesar.\n" +
-            "3. Construiește un APK nou (Actions → Release APK) și actualizează aplicația."
-    } else {
-        "Cheile pentru ${connector.displayName} se adaugă ca secrete în GitHub, apoi se construiește un APK nou."
+    val steps = when (connector.id) {
+        "trakt" ->
+            "1. Pe trakt.tv/oauth/applications → New Application (Redirect uri: urn:ietf:wg:oauth:2.0:oob).\n" +
+                "2. În GitHub: Settings → Secrets and variables → Actions → secretul TRAKT_CLIENT_ID (Client ID). Client secret nu mai e necesar.\n" +
+                "3. Construiește un APK nou (Actions → Release APK) și actualizează aplicația."
+        "simkl" ->
+            "1. Pe simkl.com/settings/developer/ creează o aplicație OAuth 2.0, tip „TV, devices & command line”.\n" +
+                "2. În GitHub: Settings → Secrets and variables → Actions → secretul SIMKL_CLIENT_ID (Client ID). Nu e nevoie de secret.\n" +
+                "3. Construiește un APK nou (Actions → Release APK) și actualizează aplicația."
+        else -> "Cheile pentru ${connector.displayName} se adaugă ca secrete în GitHub, apoi se construiește un APK nou."
     }
     Text(steps, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }

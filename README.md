@@ -10,7 +10,7 @@ Hub VOD pentru **Android TV** (funcționează și pe telefon, cu touch): adună 
 | 2 | Catalog TMDb: Acasă (hero + rânduri), detalii filme/seriale (sezoane, episoade), persoane, studiouri/rețele, căutare cu filtre, limbă RO/original, disponibilitate US/RO (JustWatch), cache Room | ✅ |
 | 3 | Trakt: login cu cod (device code + PKCE), istoric, „Continuă vizionarea”, „Următorul episod”, „De văzut”, marcare văzut | ✅ |
 | 4 | „Alege unde vezi” + deep links (Netflix, Nuvio, Stremio, DebridStream) | ⏳ |
-| 5 | SIMKL + WeTrakr + reconciliere între surse | ⏳ |
+| 5 | SIMKL + reconciliere între surse + Bibliotecă (WeTrakr pus deoparte până la API-ul public) | ✅ |
 | 6 | Publicare progres înapoi în surse + ecran diagnostic | ⏳ |
 | 7 | Opțional: backend, Younify, import CSV; integrare AK VOD Calendar | ⏳ |
 
@@ -43,8 +43,8 @@ Nu se commit-uiesc niciodată. Local se pun în `local.properties` (ignorat de g
 |---|---|---|
 | `TMDB_API_KEY` | Catalog TMDb | etapa 2 |
 | `TRAKT_CLIENT_ID` (`TRAKT_CLIENT_SECRET` doar pentru aplicații Trakt vechi, opțional) | Trakt | etapa 3 |
-| `SIMKL_CLIENT_ID`, `SIMKL_CLIENT_SECRET` | SIMKL | etapa 5 |
-| `WETRAKR_API_KEY` | WeTrakr | etapa 5 |
+| `SIMKL_CLIENT_ID` | SIMKL (aplicație OAuth 2.0, tip „TV, devices & command line”, fără secret) | etapa 5 |
+| — | WeTrakr: nu are încă API public; conectorul (fără cheie) e în `core/wetrakr`, neactivat | — |
 
 Pașii exacți pentru obținerea fiecărei chei vin în etapa respectivă.
 
