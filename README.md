@@ -55,21 +55,36 @@ TRAKT_CLIENT_SECRET=...
 
 Release-ul se face **doar manual**: *Actions → Release APK → Run workflow*, cu versiunea (ex. `0.1.0`). Workflow-ul construiește APK-ul semnat `ak-vod-unify-<versiune>-vc<cod>.apk` și publică un GitHub Release `v<versiune>`. Aplicația verifică acest release din *Setări → Verifică actualizări*.
 
-Secrete necesare pentru semnare (o singură dată):
+### Varianta A (recomandată, merge doar de pe telefon)
+
+Ai nevoie de **un singur secret**: `SIGNING_STORE_PASSWORD`, o parolă inventată de tine (minim 12 caractere, recomandat 20+, fără spații). Keystore-ul e generat pe serverele GitHub și salvat în repo **doar criptat** (`signing/release.jks.enc`, AES-256). Repo-ul e public, așa că parola lungă e cea care protejează cheia.
+
+1. În browser, pe telefon: github.com → repo-ul `ak_vod_unify` → meniul ⋯ / **Settings** (pe mobil poate fi nevoie de „Desktop site”).
+2. **Secrets and variables → Actions → New repository secret**.
+3. Name: `SIGNING_STORE_PASSWORD`, Secret: parola ta → **Add secret**. Salveaz-o și într-un manager de parole: fără ea nu mai poți semna actualizări.
+4. **Actions → Generate signing key → Run workflow** (o singură dată). Workflow-ul refuză să suprascrie o cheie existentă.
+5. De acum, release-urile se fac din **Actions → Release APK → Run workflow**.
+
+Alias-ul cheii este `akvod`, iar parola cheii e aceeași cu `SIGNING_STORE_PASSWORD`.
+
+### Varianta B (alternativă, cu keystore propriu)
+
+Dacă ai deja un keystore, pune-l în secrete; are prioritate față de fișierul criptat:
 
 | Nume | Valoare |
 |---|---|
 | `SIGNING_KEYSTORE_BASE64` | keystore-ul codat base64 |
 | `SIGNING_STORE_PASSWORD` | parola keystore-ului |
-| `SIGNING_KEY_ALIAS` | alias-ul cheii (ex. `akvod`) |
-| `SIGNING_KEY_PASSWORD` | parola cheii |
+| `SIGNING_KEY_ALIAS` | alias-ul cheii (implicit `akvod`) |
+| `SIGNING_KEY_PASSWORD` | parola cheii (implicit = parola keystore-ului) |
 
-Generare keystore (o dată, păstrează fișierul și parolele în siguranță: fără aceeași cheie, actualizările nu se mai pot instala peste versiunea existentă):
 ```bash
 keytool -genkeypair -v -keystore akvod-release.jks -alias akvod \
   -keyalg RSA -keysize 4096 -validity 10000
 base64 -w0 akvod-release.jks   # pe macOS: base64 -i akvod-release.jks
 ```
+
+Indiferent de variantă: păstrează aceeași cheie pentru totdeauna. Cu altă cheie, actualizările nu se mai instalează peste versiunea existentă.
 
 ## Build local
 

@@ -1,0 +1,65 @@
+name: Generate signing key
+
+# Rulează O SINGURĂ DATĂ, manual: Actions → Generate signing key → Run workflow.
+# Creează keystore-ul de semnare pe runner și îl salvează în repo DOAR criptat
+# (signing/release.jks.enc, AES-256 cu parola din secretul SIGNING_STORE_PASSWORD).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+      ENC_FILE: signing/release.jks.enc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check preconditions
+        run: |
+          if [ -z "$SIGNING_STORE_PASSWORD" ]; then
+            echo "::error::Lipsește secretul SIGNING_STORE_PASSWORD. Adaugă-l în Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          if [ ${#SIGNING_STORE_PASSWORD} -lt 12 ]; then
+            echo "::error::Parola trebuie să aibă cel puțin 12 caractere (recomandat 20+)."
+            exit 1
+          fi
+          if [ -f "$ENC_FILE" ]; then
+            echo "::error::$ENC_FILE există deja. Nu suprascriu cheia: fără ea actualizările nu se mai instalează peste versiunea existentă."
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Generate and encrypt keystore
+        run: |
+          mkdir -p signing
+          KS="$RUNNER_TEMP/release.jks"
+          keytool -genkeypair -keystore "$KS" -storetype PKCS12 -alias akvod \
+            -keyalg RSA -keysize 4096 -validity 10000 \
+            -dname "CN=AK VOD Unify, O=AK, C=RO" \
+            -storepass:env SIGNING_STORE_PASSWORD -keypass:env SIGNING_STORE_PASSWORD
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
+            -in "$KS" -out "$ENC_FILE" -pass env:SIGNING_STORE_PASSWORD
+          # verificare: decriptarea trebuie să dea exact același fișier
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -in "$ENC_FILE" -out "$RUNNER_TEMP/check.jks" -pass env:SIGNING_STORE_PASSWORD
+          cmp "$KS" "$RUNNER_TEMP/check.jks"
+          keytool -list -keystore "$KS" -storepass:env SIGNING_STORE_PASSWORD | grep -i "akvod"
+          rm -f "$KS" "$RUNNER_TEMP/check.jks"
+
+      - name: Commit encrypted keystore
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$ENC_FILE"
+          git commit -m "Adaugă keystore-ul de semnare (criptat)"
+          git push
