@@ -83,6 +83,7 @@ fun SettingsScreen(
                     onInstall = viewModel::downloadAndInstall,
                     onGrantPermission = { context.startActivity(viewModel.installPermissionIntent()) },
                 )
+                CompanionsPanel()
             }
         }
         item {

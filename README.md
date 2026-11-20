@@ -155,6 +155,10 @@ Funcțiile din [AK VOD Calendar](https://github.com/radumariusi/ak_vod_calendar)
 - **Notificări**: pornești din *Setări → Calendar* fie „Doar ce urmăresc”, fie „Ce urmăresc + rezumatul zilei”, și alegi ora. Canalul **„Azi apare”** de pe ecranul principal Android TV se reface la 3 ore.
 - **Setări → Calendar**: aplicațiile tale și țara fiecăreia (detectate automat la prima pornire), praguri, cheia OMDb, categorii, notificări, liste de urmărite / ascunse.
 
+## Actualizări
+
+*Setări → Aplicație*: „Verifică actualizări” pentru AK VOD Unify și „Verifică aplicațiile AK” pentru AK Scrobbler, AK Import RO și AK Import US. Acestea se instalează sau se actualizează din același release (AK VOD Unify descarcă APK-ul și sistemul cere confirmarea). Aplicațiile mici nu au propriul updater: AK Scrobbler nici nu are acces la internet.
+
 ## Semnare și release
 
 Release-ul se face **doar manual**: *Actions → Release APK → Run workflow*, cu versiunea (ex. `0.1.0`). Workflow-ul construiește APK-urile semnate `ak-vod-unify-<versiune>-vc<cod>.apk` `ak-scrobbler-…`, `ak-import-ro-…` și `ak-import-us-<versiune>-vc<cod>.apk` și publică un GitHub Release `v<versiune>`. Aplicația verifică acest release din *Setări → Verifică actualizări*.

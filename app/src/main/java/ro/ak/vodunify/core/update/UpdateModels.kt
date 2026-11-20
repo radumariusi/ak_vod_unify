@@ -40,3 +40,26 @@ sealed interface UpdateState {
     data object Installing : UpdateState
     data class Error(val message: String) : UpdateState
 }
+
+/** Aplicațiile mici care merg cu AK VOD Unify (pachetele de release). */
+enum class CompanionApp(val label: String, val packageName: String, val assetPrefix: String, val hint: String) {
+    SCROBBLER("AK Scrobbler", "ro.ak.vodscrobbler", "ak-scrobbler-", "vede ce rulează pe TV; fără VPN"),
+    IMPORT_RO("AK Import RO", "ro.ak.vodimport.ro", "ak-import-ro-", "conturi din România; fără VPN"),
+    IMPORT_US("AK Import US", "ro.ak.vodimport.us", "ak-import-us-", "conturi americane; pune-o în tunelul VPN US"),
+}
+
+data class CompanionStatus(
+    val companion: CompanionApp,
+    val installedCode: Long?,
+    val remoteCode: Int?,
+    val remoteName: String?,
+    val apkUrl: String?,
+    val apkName: String?,
+    val sizeBytes: Long,
+) {
+    val installed: Boolean get() = installedCode != null
+
+    /** Se poate instala (lipsește) sau actualiza (release-ul are un cod de versiune mai mare). */
+    val actionable: Boolean
+        get() = apkUrl != null && (installedCode == null || (remoteCode != null && remoteCode > installedCode))
+}
