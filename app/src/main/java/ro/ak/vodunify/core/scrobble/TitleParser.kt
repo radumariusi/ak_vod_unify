@@ -115,10 +115,13 @@ object TitleParser {
         val seen = mutableSetOf<String>()
         val app = appLabel?.let(::normalize)
         return keys.mapNotNull { k -> fields[k]?.trim() }
-            .filter { it.length > 1 && it.any(Char::isLetter) && it.length < 200 }
+            .filter { it.length > 1 && (it.any(Char::isLetter) || NUMERIC_TITLE.matches(it)) && it.length < 200 }
             .filterNot { isNoise(it) || normalize(it) == app }
             .filter { seen.add(normalize(it)) }
     }
+
+    /** Titluri doar din cifre: „1917”, „1883”, „12 12 12”. */
+    private val NUMERIC_TITLE = Regex("""^(\d{3,4}|\d{1,4}([ .\-]\d{1,4})+)$""")
 
     private val IGNORED_KEYS = setOf("title_source", "netflix_id", "media_id", "media_uri", "genre", "date", "duration", "year", "track_number", "disc_number", "num_tracks", "rating", "user_rating")
 
