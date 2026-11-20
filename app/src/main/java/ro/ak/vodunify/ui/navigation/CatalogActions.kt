@@ -10,6 +10,7 @@ data class CatalogActions(
     val openPerson: (Long) -> Unit = {},
     val openStudio: (StudioKind, Long) -> Unit = { _, _ -> },
     val openSettings: () -> Unit = {},
+    val openDiagnostics: () -> Unit = {},
 )
 
 val LocalCatalogActions = staticCompositionLocalOf { CatalogActions() }
@@ -18,6 +19,7 @@ object Routes {
     const val TITLE = "title/{kind}/{id}"
     const val PERSON = "person/{id}"
     const val STUDIO = "studio/{kind}/{id}"
+    const val DIAGNOSTICS = "diagnostics"
 
     fun title(kind: TitleKind, id: Long) = "title/${kind.path}/$id"
     fun person(id: Long) = "person/$id"

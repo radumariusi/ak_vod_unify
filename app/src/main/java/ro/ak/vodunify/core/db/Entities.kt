@@ -64,6 +64,8 @@ data class ResumePointEntity(
     val progress: Float?,
     val updatedAt: Long,
     val remoteId: Long?,
+    /** Poziția exactă în ms, doar pentru poziții setate de tine („Setează minutul”, sursa „local”). */
+    val positionMs: Long? = null,
 )
 
 /** Lista „De văzut”. */
@@ -122,4 +124,31 @@ data class SyncStateEntity(
     /** Data ultimei intrări din istoric descărcate (pentru sincronizare incrementală). */
     val historyCursor: Long?,
     val lastError: String?,
+)
+
+/**
+ * Starea publicării unui progres către o destinație (Trakt, SIMKL).
+ * Id = "<destinație>|<itemKey>": o singură înregistrare pe element și destinație (idempotent).
+ */
+@Entity(tableName = "publish_records", indices = [Index("itemKey"), Index("destination")])
+data class PublishRecordEntity(
+    @PrimaryKey val id: String,
+    val destination: String,
+    /** Cheia canonică a elementului (după reconciliere). */
+    val itemKey: String,
+    @Embedded val ref: TrackedRef,
+    /** Progresul trimis, 0–1. */
+    val progress: Float,
+    val positionMs: Long?,
+    /** Sursa poziției publicate: "local", "trakt", "simkl". */
+    val origin: String,
+    /** Când a fost înregistrată poziția în sursă. */
+    val originAt: Long,
+    /** Vezi PublishStatus. */
+    val status: String,
+    val attemptAt: Long,
+    val verifiedAt: Long?,
+    /** Progresul citit înapoi din destinație după scriere. */
+    val readBackProgress: Float?,
+    val error: String?,
 )

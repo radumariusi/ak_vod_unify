@@ -27,6 +27,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +49,7 @@ import ro.ak.vodunify.core.playback.ResumeInfo
 import ro.ak.vodunify.core.playback.ResumeState
 import ro.ak.vodunify.core.playback.ServiceOption
 import ro.ak.vodunify.core.playback.formatPosition
+import ro.ak.vodunify.core.publish.PublishMode
 import ro.ak.vodunify.ui.components.NetworkImage
 import ro.ak.vodunify.ui.components.layoutSpec
 
@@ -65,6 +68,14 @@ fun WatchChooserHost(viewModel: WatchChooserViewModel) {
     val s = state ?: return
     Dialog(onDismissRequest = viewModel::dismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         ChooserContent(s, viewModel)
+    }
+    if (s.editingMinute) {
+        SetMinuteDialog(
+            initialMs = s.resume.positionMs?.takeIf { s.resume.hasPosition } ?: 0L,
+            runtimeMinutes = s.request.runtimeMinutes,
+            onSave = viewModel::saveMinute,
+            onDismiss = viewModel::closeSetMinute,
+        )
     }
     s.confirm?.let { target ->
         ResumeConfirmDialog(
@@ -99,6 +110,22 @@ private fun ChooserContent(s: ChooserState, vm: WatchChooserViewModel) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             ResumeChip(s.resume)
+            if (s.canSetMinute && !s.loading) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = vm::openSetMinute, enabled = !s.publishing) { Text("Setează minutul") }
+                    if (s.publishMode != PublishMode.VIEW_ONLY && s.resume.hasPosition) {
+                        OutlinedButton(onClick = vm::publishNow, enabled = !s.publishing) { Text("Publică acum") }
+                    }
+                    if (s.publishing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                }
+                Hint(
+                    when (s.publishMode) {
+                        PublishMode.AUTOMATIC -> "Publicare automată: minutul setat se trimite în trackerele profilului."
+                        PublishMode.ON_DEMAND -> "Publicare la cerere: minutul rămâne local până apeși „Publică acum”."
+                        PublishMode.VIEW_ONLY -> "Doar vizualizare: minutul setat rămâne pe acest dispozitiv."
+                    },
+                )
+            }
 
             val options = s.options
             if (s.loading || options == null) {
@@ -225,6 +252,7 @@ private fun ChoiceRow(
 private fun ResumeChip(resume: ResumeInfo) {
     val color = when (resume.state) {
         ResumeState.SYNCED -> Color(0xFF4CAF50)
+        ResumeState.LOCAL -> Color(0xFFBA68C8)
         ResumeState.PENDING -> Color(0xFFFFB300)
         ResumeState.ESTIMATED -> Color(0xFF64B5F6)
         ResumeState.MANUAL -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -300,6 +328,48 @@ private fun ResumeConfirmDialog(
         },
         dismissButton = {
             OutlinedButton(onClick = onWait, enabled = !syncing) { Text("Așteaptă sincronizarea") }
+        },
+    )
+}
+
+/** „Setează minutul”: butoane mari pentru D-pad și touch, fără tastatură. */
+@Composable
+private fun SetMinuteDialog(initialMs: Long, runtimeMinutes: Int?, onSave: (Long) -> Unit, onDismiss: () -> Unit) {
+    val max = runtimeMinutes?.takeIf { it > 0 } ?: 600
+    var minute by remember { mutableIntStateOf((initialMs / 60_000L).toInt().coerceIn(0, max)) }
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Setează minutul") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    formatPosition(minute * 60_000L) + (runtimeMinutes?.let { " / " + formatPosition(it * 60_000L) } ?: ""),
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(-10, -1, 1, 10).forEach { step ->
+                        OutlinedButton(
+                            onClick = { minute = (minute + step).coerceIn(0, max) },
+                            modifier = if (step == 1) Modifier.focusRequester(focus) else Modifier,
+                        ) { Text(if (step > 0) "+$step" else "$step") }
+                    }
+                }
+                Text(
+                    if (runtimeMinutes == null) "Durata nu e cunoscută: poziția se salvează local, dar nu poate fi trimisă ca procent."
+                    else "Peste 80% nu se publică: trackerele l-ar putea trece ca văzut.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onSave(minute * 60_000L) }) { Text(if (minute == 0) "Șterge poziția" else "Salvează") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Anulează") }
         },
     )
 }

@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,6 +17,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import ro.ak.vodunify.core.catalog.MarketAvailability
+import ro.ak.vodunify.core.connector.ExternalIds
+import ro.ak.vodunify.core.connector.MediaRef
+import ro.ak.vodunify.core.connector.MediaType
+import ro.ak.vodunify.core.publish.PublishMode
+import ro.ak.vodunify.core.publish.PublishRepository
+import ro.ak.vodunify.core.publish.summary
 import ro.ak.vodunify.core.playback.InstalledApp
 import ro.ak.vodunify.core.playback.PlaybackPreferences
 import ro.ak.vodunify.core.playback.PlaybackRequest
@@ -43,13 +50,22 @@ data class ChooserState(
     /** Lansare care așteaptă confirmarea „Deschide acum / Așteaptă sincronizarea”. */
     val confirm: ResolvedLaunch? = null,
     val syncing: Boolean = false,
-)
+    /** Modul de publicare al profilului activ. */
+    val publishMode: PublishMode = PublishMode.ON_DEMAND,
+    /** Dialogul „Setează minutul” e deschis. */
+    val editingMinute: Boolean = false,
+    val publishing: Boolean = false,
+) {
+    /** Poți seta minutul / publica doar pentru un film sau un episod. */
+    val canSetMinute: Boolean get() = request.type != PlaybackRequest.Type.SHOW
+}
 
 @HiltViewModel
 class WatchChooserViewModel @Inject constructor(
     private val resolver: TargetResolver,
     private val prefs: PlaybackPreferences,
     private val resumeLookup: ResumeLookup,
+    private val publisher: PublishRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow<ChooserState?>(null)
@@ -72,8 +88,10 @@ class WatchChooserViewModel @Inject constructor(
             }
             val options = WatchOptionsBuilder.build(availability, settings, installed.keys)
             val resume = runCatching { resumeLookup.current(request) }.getOrDefault(ResumeInfo.Manual)
+            val mode = runCatching { publisher.settings.first().active.mode }.getOrDefault(PublishMode.ON_DEMAND)
             _state.update {
                 it?.copy(
+                    publishMode = mode,
                     loading = false,
                     options = options,
                     launches = launches,
@@ -145,6 +163,77 @@ class WatchChooserViewModel @Inject constructor(
             }
         }
     }
+
+    // ---------- Setează minutul / Publică acum ----------
+
+    fun openSetMinute() {
+        _state.update { it?.copy(editingMinute = true) }
+    }
+
+    fun closeSetMinute() {
+        _state.update { it?.copy(editingMinute = false) }
+    }
+
+    /** Salvează poziția ta (0 = o șterge); în modul automat o și publică. */
+    fun saveMinute(positionMs: Long) {
+        val s = _state.value ?: return
+        val durationMs = s.request.runtimeMinutes?.takeIf { it > 0 }?.let { it * 60_000L }
+        _state.value = s.copy(editingMinute = false, publishing = true)
+        viewModelScope.launch {
+            val text = try {
+                val outcomes = publisher.setManualPosition(mediaRef(s.request), positionMs, durationMs)
+                when {
+                    positionMs <= 0 -> "Poziția locală a fost ștearsă"
+                    outcomes.isEmpty() -> "Salvat: ${formatPosition(positionMs)}" +
+                        if (durationMs == null) " (durata e necunoscută, deci nu se poate publica ca procent)" else ""
+                    else -> "Salvat ${formatPosition(positionMs)} · ${outcomes.summary()}"
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                "Eroare: ${e.message ?: e.javaClass.simpleName}"
+            }
+            refreshResume()
+            say(text)
+        }
+    }
+
+    fun publishNow() {
+        val s = _state.value ?: return
+        if (s.publishing) return
+        _state.value = s.copy(publishing = true)
+        viewModelScope.launch {
+            val text = try {
+                publisher.publishItem(mediaRef(s.request), manual = true).summary()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                "Eroare: ${e.message ?: e.javaClass.simpleName}"
+            }
+            refreshResume()
+            say(text)
+        }
+    }
+
+    private suspend fun refreshResume() {
+        val s = _state.value ?: return
+        val resume = runCatching { resumeLookup.current(s.request) }.getOrDefault(s.resume)
+        _state.update { it?.copy(resume = resume, publishing = false) }
+    }
+
+    private fun mediaRef(r: PlaybackRequest) = MediaRef(
+        type = when (r.type) {
+            PlaybackRequest.Type.MOVIE -> MediaType.MOVIE
+            PlaybackRequest.Type.SHOW -> MediaType.SHOW
+            PlaybackRequest.Type.EPISODE -> MediaType.EPISODE
+        },
+        ids = ExternalIds(tmdb = r.tmdbId, imdb = r.imdbId),
+        title = r.title,
+        year = r.year,
+        season = r.season,
+        episode = r.episode,
+        episodeTitle = r.episodeTitle,
+    )
 
     private fun start(target: ResolvedLaunch) {
         val s = _state.value ?: return

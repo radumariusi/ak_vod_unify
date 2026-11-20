@@ -172,3 +172,24 @@ interface TrackingDao {
     @Query("DELETE FROM sync_state WHERE source = :source")
     suspend fun deleteSyncState(source: String)
 }
+
+@Dao
+interface PublishDao {
+    @Upsert
+    suspend fun upsert(record: PublishRecordEntity)
+
+    @Query("SELECT * FROM publish_records WHERE id = :id")
+    suspend fun get(id: String): PublishRecordEntity?
+
+    @Query("SELECT * FROM publish_records ORDER BY attemptAt DESC")
+    fun all(): Flow<List<PublishRecordEntity>>
+
+    @Query("SELECT * FROM publish_records WHERE status IN (:statuses)")
+    suspend fun withStatus(statuses: List<String>): List<PublishRecordEntity>
+
+    @Query("DELETE FROM publish_records WHERE attemptAt < :before")
+    suspend fun prune(before: Long)
+
+    @Query("DELETE FROM publish_records WHERE destination = :destination")
+    suspend fun clearDestination(destination: String)
+}

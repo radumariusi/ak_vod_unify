@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
@@ -90,6 +91,16 @@ class TrackingRepository @Inject constructor(
     }
         .flowOn(Dispatchers.Default)
         .shareIn(scope, SharingStarted.WhileSubscribed(5_000), replay = 1)
+
+    /** Reconcilierea calculată acum, direct din Room (fără valoarea partajată, care poate întârzia). */
+    suspend fun reconcileNow(): ReconciledView = reconcile(
+        dao.allResume().first(),
+        dao.latestWatches().first(),
+        dao.watchedTitles().first(),
+        dao.watchlist().first(),
+        dao.upNext().first(),
+        dao.ownWrites().first(),
+    )
 
     val continueWatching: Flow<List<ResumePointEntity>> = reconciled.map { v -> v.resume.map { it.winner } }
 
