@@ -37,6 +37,7 @@ data class TmdbListItem(
     val character: String? = null,
     val job: String? = null,
     val adult: Boolean = false,
+    @SerialName("origin_country") val originCountry: List<String> = emptyList(),
 )
 
 @Serializable

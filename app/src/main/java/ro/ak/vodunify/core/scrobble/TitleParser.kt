@@ -57,6 +57,7 @@ object TitleParser {
     )
 
     fun guesses(fields: Map<String, String>, appLabel: String? = null): List<TitleGuess> {
+        NetflixActivity.guesses(fields)?.let { return it }
         val texts = orderedTexts(fields, appLabel)
         if (texts.isEmpty()) return emptyList()
         val out = mutableListOf<TitleGuess>()
@@ -123,7 +124,8 @@ object TitleParser {
     /** Titluri doar din cifre: „1917”, „1883”, „12 12 12”. */
     private val NUMERIC_TITLE = Regex("""^(\d{3,4}|\d{1,4}([ .\-]\d{1,4})+)$""")
 
-    private val IGNORED_KEYS = setOf("title_source", "netflix_id", "media_id", "media_uri", "genre", "date", "duration", "year", "track_number", "disc_number", "num_tracks", "rating", "user_rating")
+    private val IGNORED_KEYS = setOf("title_source", "netflix_id", "media_id", "media_uri", "genre", "date", "duration", "year", "track_number", "disc_number", "num_tracks", "rating", "user_rating",
+        NetflixActivity.NF_SERIES, NetflixActivity.NF_EPISODE, NetflixActivity.NF_SEASON, NetflixActivity.NF_EPISODE_NUMBER)
 
     private fun isNoise(s: String) = normalize(s) in NOISE_NORMALIZED
 
