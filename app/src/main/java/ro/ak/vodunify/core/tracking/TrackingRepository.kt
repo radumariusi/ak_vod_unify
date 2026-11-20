@@ -1,5 +1,6 @@
 package ro.ak.vodunify.core.tracking
 
+import ro.ak.vodunify.core.publish.LOCAL_SOURCE
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -102,7 +103,12 @@ class TrackingRepository @Inject constructor(
         dao.ownWrites().first(),
     )
 
-    val continueWatching: Flow<List<ResumePointEntity>> = reconciled.map { v -> v.resume.map { it.winner } }
+    /**
+     * „Continuă vizionarea” vine DOAR din AK Scrobbler (sursa locală): ce ai început în Netflix,
+     * Prime, Apple TV, Stremio etc. Trakt/SIMKL nu mai sunt sursa (nu văd aplicațiile de streaming).
+     */
+    val continueWatching: Flow<List<ResumePointEntity>> =
+        dao.continueWatching().map { list -> list.filter { it.source == LOCAL_SOURCE } }
 
     val upNext: Flow<List<UpNextEntity>> = reconciled.map { it.upNext }
 

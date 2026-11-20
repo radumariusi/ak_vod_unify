@@ -65,8 +65,9 @@ class HomeViewModel @Inject constructor(
     ) { connected, resume, next, list, settings -> Snapshot(connected, resume, next, list, settings) }
         .mapLatest { s ->
             when {
-                !configured -> PersonalRows(PersonalState.NOT_CONFIGURED)
-                !s.connected -> PersonalRows(PersonalState.DISCONNECTED)
+                // „Continuă vizionarea” vine din AK Scrobbler: se arată și fără Trakt/SIMKL conectat.
+                s.resume.isEmpty() && !configured -> PersonalRows(PersonalState.NOT_CONFIGURED)
+                s.resume.isEmpty() && !s.connected -> PersonalRows(PersonalState.DISCONNECTED)
                 else -> coroutineScope {
                     suspend fun <E> build(items: List<E>, map: suspend (E) -> PersonalItem) =
                         items.take(ROW_LIMIT).map { async { map(it) } }.awaitAll()
