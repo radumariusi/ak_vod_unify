@@ -133,40 +133,52 @@ class WebLoginActivity : Activity() {
         super.onDestroy()
     }
 
-    /** Test Netflix: deschidem „Activitate de vizionare” cu ascultarea pornită, apoi raportăm. */
+    /**
+     * Netflix: deschidem „Watched” cu ascultarea pornită, citim ce a primit pagina (titlu + ora
+     * exactă a fiecărei vizionări), arătăm primele rânduri și le trimitem în AK VOD Unify, ca să
+     * completeze vizionările Netflix prinse fără titlu.
+     */
     private fun startNetflixCapture() {
         captureMode = true
         captureToken++
-        status.text = "TEST Netflix: deschid „Activitate de vizionare” și ascult ce primește pagina (~15 s)…"
-        web.loadUrl("https://www.netflix.com/viewingactivity")
+        status.text = "Netflix: deschid „Watched” și citesc vizionările (~10 s)…"
+        web.loadUrl(NetflixRecent.HISTORY_URL)
     }
 
     private fun scheduleCaptureReport() {
         val token = ++captureToken
-        handler.postDelayed({
-            if (token == captureToken && captureMode) web.evaluateJavascript(Scripts.NETFLIX_SHOW_MORE, null)
-        }, 6_000L)
-        handler.postDelayed({
-            if (token != captureToken || !captureMode) return@postDelayed
-            web.evaluateJavascript(Scripts.NETFLIX_CAPTURE_REPORT) { raw ->
+        var tries = 0
+        fun poll() {
+            if (token != captureToken || !captureMode) return
+            web.evaluateJavascript(Scripts.NETFLIX_HISTORY_COLLECT) { raw ->
+                if (token != captureToken || !captureMode) return@evaluateJavascript
+                val parsed = NetflixRecent.parseCollect(raw)
+                val items = parsed?.optJSONArray("items")
+                if ((items == null || items.length() == 0) && ++tries < CAPTURE_TRIES) {
+                    handler.postDelayed({ poll() }, 2_000L)
+                    return@evaluateJavascript
+                }
                 captureMode = false
-                status.text = "TEST2 Netflix · " + describeCapture(raw)
+                if (items == null || items.length() == 0) {
+                    status.text = "Netflix: nu am găsit vizionări în pagină (${parsed?.optString("diag") ?: raw?.take(200)})"
+                    return@evaluateJavascript
+                }
+                val result = JSONObject().put("route", BuildConfig.ROUTE).put("status", "ok").put("items", items)
+                thread { runCatching { NetflixRecent.send(applicationContext, result) } }
+                status.text = describeHistory(items)
             }
-        }, 12_000L)
+        }
+        handler.postDelayed({ poll() }, 2_000L)
     }
 
-    private fun describeCapture(raw: String?): String = runCatching {
-        val json = JSONObject(org.json.JSONTokener(raw).nextValue() as String)
-        val cap = json.optJSONArray("cap") ?: org.json.JSONArray()
-        val reqs = (0 until cap.length()).joinToString(" | ") { i ->
-            val c = cap.getJSONObject(i)
-            "${c.optString("u")} ${c.optInt("s")} ${c.optInt("n") / 1024}KB chei:${c.optString("k").replace("\"", "")} ⟨${c.optString("x").take(120)}⟩"
+    private fun describeHistory(items: org.json.JSONArray): String {
+        val fmt = java.text.SimpleDateFormat("dd.MM HH:mm", java.util.Locale.ROOT)
+        val first = (0 until minOf(items.length(), 4)).joinToString(" | ") { i ->
+            val it = items.getJSONObject(i)
+            "${fmt.format(java.util.Date(it.optLong("watchedAt")))} ${it.optString("title").take(60)}"
         }
-        val rows = json.optJSONArray("rows")
-        val sample = (0 until (rows?.length() ?: 0)).joinToString(" | ") { rows!!.getString(it).take(70) }
-        "pagina ${json.optString("url")} · ascultare: ${json.optBoolean("hook")} · cereri prinse: ${cap.length()} " +
-            (if (reqs.isNotEmpty()) "[$reqs] " else "") + "· rânduri cu dată: ${json.optInt("total")}" + (if (sample.isNotEmpty()) " · ex: $sample" else "")
-    }.getOrElse { "răspuns neașteptat: ${raw?.take(200)}" }
+        return "Netflix · ${items.length()} vizionări citite și trimise în AK VOD Unify: $first"
+    }
 
     private fun startImport() {
         if (service.id == "netflix") {
@@ -285,6 +297,7 @@ class WebLoginActivity : Activity() {
     companion object {
         const val EXTRA_SERVICE = "service"
         private const val FALLBACK_DELAY_MS = 8_000L
+        private const val CAPTURE_TRIES = 10
         private const val WATCHDOG_MS = 15_000L
         private const val DESKTOP_UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"

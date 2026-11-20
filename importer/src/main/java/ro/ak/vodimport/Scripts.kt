@@ -14,9 +14,11 @@ object Scripts {
           window.__akHook = true;
           window.__akCap = [];
           var keep = function (url) { return /graphql|viewed|viewing|activity|shakti|pathEvaluator|bookmark/i.test(String(url || "")); };
+          window.__akHist = [];
           var note = function (url, status, body) {
             try {
               var b = String(body || "");
+              if (b.indexOf("ProfileViewingHistoryRecord") >= 0 && window.__akHist.length < 30) window.__akHist.push(b);
               var i = b.search(/bookmark|watchedDate|viewedDate|dateStr|lastWatched|playbackPosition|progress/i);
               var keys = (b.match(/"(bookmark\w*|watched\w*|viewed\w*|date\w*|progress\w*|runtime|duration|title|seriesTitle|episodeTitle|lastModified\w*|timestamp)"/gi) || [])
                 .filter(function (v, k, a) { return a.indexOf(v) === k; }).slice(0, 15).join("");
@@ -44,32 +46,77 @@ object Scripts {
         })();
     """.trimIndent()
 
-    /** Test Netflix: apasă „Show more” ca pagina să mai ceară o dată lista (o prindem sigur). */
-    val NETFLIX_SHOW_MORE = """
+    /**
+     * Netflix „Watched” (/settings/viewed): din răspunsurile graphql prinse de [NETFLIX_CAPTURE_HOOK]
+     * scoate fiecare ProfileViewingHistoryRecord: ora exactă (lastWatchedTimeMs) și titlul.
+     * Nu știm forma exactă a obiectului video, deci îl citim generic: titlul lui, serialul
+     * (obiect „Show”), sezonul (obiect „Season”) și numărul episodului. Sincron; JSON {items, diag}.
+     */
+    val NETFLIX_HISTORY_COLLECT = """
         (function () {
-          var b = Array.prototype.slice.call(document.querySelectorAll("button, a, [role=button]")).filter(function (e) {
-            return /show more|load more|see more|mai mult|afișează mai|afiseaza mai/i.test(e.innerText || "");
-          })[0];
-          if (b) b.click();
-          return b ? "click" : "fara buton";
-        })()
-    """.trimIndent()
-
-    /** Test Netflix: ce s-a prins (cereri + rânduri cu dată din pagină), ca JSON. */
-    val NETFLIX_CAPTURE_REPORT = """
-        (function () {
-          var cap = window.__akCap || [];
-          var dateRe = /\b\d{1,2}[\/.]\d{1,2}[\/.]\d{2,4}\b|\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.? \d{1,2},? \d{4}\b|\b\d{1,2} (ian|feb|mar|apr|mai|iun|iul|aug|sep|oct|noi|dec)[a-z]*\.? \d{4}\b/i;
-          var els = document.querySelectorAll("li, tr, [role=row], [data-uia*=row], [class*=row]");
-          var rows = [], total = 0;
-          for (var i = 0; i < els.length; i++) {
-            var t = (els[i].innerText || "").replace(/\s+/g, " ").trim();
-            if (t.length > 6 && t.length < 200 && dateRe.test(t)) {
-              total++;
-              if (rows.length < 4) rows.push(t);
+          var out = { items: [], diag: "" }, seen = {}, sample = "";
+          var str = function (v) {
+            if (typeof v === "string") return v;
+            if (v && typeof v === "object") { if (typeof v.value === "string") return v.value; if (typeof v.text === "string") return v.text; }
+            return "";
+          };
+          var num = function (o, keys) {
+            for (var i = 0; i < keys.length; i++) { var n = Number(o && o[keys[i]]); if (n > 0 && n < 1000) return n; }
+            return 0;
+          };
+          var find = function (o, re, depth) {
+            if (!o || typeof o !== "object" || depth > 4) return null;
+            for (var k in o) {
+              var c = o[k];
+              if (!c || typeof c !== "object") continue;
+              if (re.test(String(c.__typename || "")) || (!c.__typename && re.test(k))) return c;
+              var d = find(c, re, depth + 1);
+              if (d) return d;
             }
+            return null;
+          };
+          var add = function (rec) {
+            var at = Number(rec.lastWatchedTimeMs || rec.lastWatchedTime || rec.watchedTimeMs || 0);
+            var v = rec.video || find(rec, /video|episode|movie/i, 0) || {};
+            if (!sample) sample = JSON.stringify(v).slice(0, 300);
+            var type = String(v.__typename || "");
+            var name = str(v.title) || str(v.displayTitle) || str(v.name);
+            var showObj = find(v, /^show$|parentshow|series/i, 0);
+            var seasonObj = find(v, /^season$|parentseason/i, 0);
+            var show = showObj ? (str(showObj.title) || str(showObj.displayTitle) || str(showObj.name)) : "";
+            var sNum = seasonObj ? num(seasonObj, ["number", "seasonNumber", "seq", "seasonSeq"]) : 0;
+            var sTitle = seasonObj ? (str(seasonObj.title) || str(seasonObj.shortName) || str(seasonObj.longName)) : "";
+            var isEp = /episode/i.test(type) || !!show;
+            var eNum = isEp ? num(v, ["number", "episodeNumber", "seq", "episodeSeq"]) : 0;
+            var id = String(v.videoId || v.id || "");
+            if (!at || !name) return;
+            var key = at + "|" + id + "|" + name;
+            if (seen[key]) return;
+            seen[key] = 1;
+            var season = sTitle || (sNum ? "Season " + sNum : "");
+            out.items.push({
+              series: isEp && show ? show : null,
+              season: isEp && season ? season : null,
+              episode: isEp && show ? name : null,
+              title: isEp && show ? show + (season ? ": " + season : "") + ": " + name : name,
+              date: at, watchedAt: at,
+              seasonNumber: sNum || null, episodeNumber: eNum || null,
+              id: id
+            });
+          };
+          var walk = function (o, depth) {
+            if (!o || typeof o !== "object" || depth > 12) return;
+            if (o.__typename === "ProfileViewingHistoryRecord") { add(o); return; }
+            for (var k in o) walk(o[k], depth + 1);
+          };
+          var bodies = window.__akHist || [], bad = 0;
+          for (var i = 0; i < bodies.length; i++) {
+            try { walk(JSON.parse(bodies[i]), 0); } catch (e) { bad++; }
           }
-          return JSON.stringify({ hook: !!window.__akHook, url: location.pathname, cap: cap.slice(0, 5), rows: rows, total: total });
+          out.items.sort(function (a, b) { return b.watchedAt - a.watchedAt; });
+          out.diag = "raspunsuri " + bodies.length + (bad ? " (" + bad + " ilizibile)" : "") + " · inregistrari " + out.items.length +
+            (out.items.length ? "" : " · video: " + sample);
+          return JSON.stringify(out);
         })()
     """.trimIndent()
 

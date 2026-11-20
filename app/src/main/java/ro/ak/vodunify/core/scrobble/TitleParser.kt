@@ -129,7 +129,11 @@ object TitleParser {
 
     private val NOISE_NORMALIZED by lazy { NOISE.map(::normalize).toSet() }
 
-    private fun stripYear(s: String) = s.replace(YEAR, "").trim { it in SEPARATORS }
+    private fun stripYear(s: String): String {
+        val t = s.replace(YEAR, "").trim { it in SEPARATORS }
+        // „The Office (U.S.)”: paranteza de la final face parte din titlu, n-o tăiem.
+        return if (t.count { it == '(' } > t.count { it == ')' }) "$t)" else t
+    }
 
     private fun year(s: String) = YEAR.find(s)?.groupValues?.get(1)?.toInt()
 
