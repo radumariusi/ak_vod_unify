@@ -46,6 +46,9 @@ data class Outgoing(
  * sistemului (aceeași bază ca `PlaybackState.getLastPositionUpdateTime()`).
  */
 class SessionTracker(val packageName: String, val appLabel: String) {
+    /** Pentru diagnostic: de ce NU am trimis (motiv, explicație). */
+    var onSkip: ((SendReason, String) -> Unit)? = null
+
     var media: MediaInfo? = null
         private set
     var state: PlayState = PlayState.OTHER
@@ -117,7 +120,14 @@ class SessionTracker(val packageName: String, val appLabel: String) {
     fun onTick(now: Long): List<Outgoing> {
         if (state != PlayState.PLAYING) return emptyList()
         if (lastSentAt != Long.MIN_VALUE && now - lastSentAt < TICK_INTERVAL_MS) return emptyList()
-        if (lastSentAt == Long.MIN_VALUE && (position(now) ?: 0) < MIN_POSITION_MS) return emptyList()
+        if (lastSentAt == Long.MIN_VALUE) {
+            val p = position(now)
+            if (p == null) {
+                onSkip?.invoke(SendReason.TICK, "poziție necunoscută (aplicația nu o trimite)")
+                return emptyList()
+            }
+            if (p < MIN_POSITION_MS) return emptyList()
+        }
         return listOfNotNull(emit(SendReason.TICK, position(now), now))
     }
 
@@ -130,20 +140,25 @@ class SessionTracker(val packageName: String, val appLabel: String) {
     }
 
     private fun emit(reason: SendReason, positionMs: Long?, now: Long, info: MediaInfo? = media): Outgoing? {
-        val m = info ?: return null
-        if (!m.hasTitle) return null
-        val pos = positionMs ?: return null
-        if (pos < MIN_POSITION_MS) return null
+        // Fără titlu trimitem oricum: AK VOD Unify îl păstrează ca „neidentificat” (aplicație + durată + minut).
+        val m = info ?: MediaInfo(emptyMap(), null)
+        val pos = positionMs ?: return skip(reason, "poziție necunoscută (aplicația nu o trimite)")
+        if (pos < MIN_POSITION_MS) return skip(reason, "poziție ${pos / 1000}s, sub ${MIN_POSITION_MS / 1000}s")
         val last = lastSentPositionMs
         if (last != null && lastSentReason != SendReason.TICK && reason != SendReason.TICK &&
             kotlin.math.abs(last - pos) < SAME_POSITION_MS
         ) {
-            return null
+            return skip(reason, "același minut ca trimiterea precedentă")
         }
         lastSentAt = now
         lastSentPositionMs = pos
         lastSentReason = reason
         return Outgoing(packageName, appLabel, reason, state, m, pos)
+    }
+
+    private fun skip(reason: SendReason, why: String): Outgoing? {
+        onSkip?.invoke(reason, why)
+        return null
     }
 
     companion object {
