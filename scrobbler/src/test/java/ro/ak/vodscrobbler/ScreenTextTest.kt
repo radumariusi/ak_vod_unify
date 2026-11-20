@@ -90,4 +90,25 @@ class ScreenTextTest {
         assertTrue(ScreenText.hasPlayButton(items("Reda episodul 3")))
         assertFalse(ScreenText.hasPlayButton(items("Stranger Things", "My List")))
     }
+
+    @Test
+    fun appleTvSeasonCommaEpisodeThenShowLast() {
+        val g = ScreenText.guess(
+            items("ATVE.ScreenReader.Loading", "S1, E1 · I’m Robbing the House on Christmas Eve While the Family’s at Mass, 12 12 12"),
+            "Apple TV",
+        )
+        assertEquals("12 12 12", g!!.title)
+        assertEquals("S1, E1 · I’m Robbing the House on Christmas Eve While the Family’s at Mass", g.subtitle)
+    }
+
+    @Test
+    fun seasonAloneIsNeverTheTitle() {
+        val g = ScreenText.guess(items("Severance", "S2, E3 Who Is Alive?"))
+        assertEquals("Severance", g!!.title)
+    }
+
+    @Test
+    fun resourceKeysAreIgnored() {
+        assertNull(ScreenText.guess(items("ATVE.ScreenReader.Loading")))
+    }
 }

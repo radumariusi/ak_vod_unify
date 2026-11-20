@@ -31,7 +31,7 @@ object ScreenText {
     private val TIME = Regex("""^[-−]?\d{1,2}:\d{2}(:\d{2})?(\s*/\s*[-−]?\d{1,2}:\d{2}(:\d{2})?)?$""")
     private val REMAINING = Regex("""(?i)^(\d+\s*(h|ore|oră|min|m|s)\b\s*)+(rămase|remaining|left)?$""")
     private val EPISODE = Regex(
-        """(?i)((?<![\p{L}\d])[ST]\d{1,2}\s*[:.\-]?\s*(E|Ep\.?\s?)\d{1,3}(?!\d))|""" +
+        """(?i)((?<![\p{L}\d])[ST]\d{1,2}\s*[:.,\-]?\s*(E|Ep\.?\s?)\d{1,3}(?!\d))|""" +
             """((season|sezonul|sezon)\s*\d{1,2})|((episode|episodul|episod|ep\.)\s*\d{1,3})|((?<![\p{L}\d])E\d{1,3}(?!\d))""",
     )
 
@@ -76,8 +76,15 @@ object ScreenText {
             // Totul pe o singură linie: „Serial S1:E3 Episod”.
             val m = EPISODE.find(ep)!!
             val inlineShow = ep.substring(0, m.range.first).trim { it in SEPARATORS }
+                .takeUnless { SEASON_ONLY.matches(it) }.orEmpty()
+            // Apple TV: „S1, E1 · Numele episodului, Serialul” (serialul e ultimul, după virgulă).
+            val tail = ep.substring(m.range.last + 1)
+            val trailingShow = tail.trim { it in SEPARATORS }
+                .takeIf { tail.trimStart().firstOrNull() in setOf('·', '•') && it.contains(", ") }?.substringAfterLast(", ")?.trim { it in SEPARATORS }
+                ?.takeIf { it.length in 2..60 && it.any(Char::isLetterOrDigit) && !EPISODE.containsMatchIn(it) }
             return when {
                 inlineShow.length > 1 -> ScreenGuess(inlineShow, ep.substring(m.range.first).trim())
+                trailingShow != null -> ScreenGuess(trailingShow, ep.substring(0, ep.length - trailingShow.length).trim { it in SEPARATORS })
                 show != null -> ScreenGuess(show.text, ep)
                 else -> null
             }
@@ -86,6 +93,9 @@ object ScreenText {
         // 3) Film: primul text rămas (de obicei titlul e primul pe ecranul de pauză).
         return ScreenGuess(clean.first().text, null)
     }
+
+    private val SEASON_ONLY = Regex("""(?i)^(S|T|season|sezonul|sezon)\s*\d{1,2}$""")
+    private val RESOURCE_KEY = Regex("""^[A-Z][A-Za-z]*(\.[A-Za-z]+){2,}$""")
 
     private const val SEPARATORS = " \t:;-–—·•|,\"'“”„«»()[]"
 
@@ -164,6 +174,7 @@ object ScreenText {
         if (t.count(Char::isLetter) < 2) return false
         if (TIME.matches(t) || REMAINING.matches(t)) return false
         if (t.endsWith("%")) return false
+        if (RESOURCE_KEY.matches(t)) return false // „ATVE.ScreenReader.Loading”
         return normalize(t) !in UI
     }
 

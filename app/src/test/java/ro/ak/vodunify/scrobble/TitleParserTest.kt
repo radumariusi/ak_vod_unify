@@ -98,4 +98,13 @@ class TitleParserTest {
         assertEquals(30 * 60_000L, ScrobbleRules.mergeEstimated(5 * 60_000L, 30 * 60_000L))
         assertEquals(5 * 60_000L, ScrobbleRules.mergeEstimated(5 * 60_000L, null))
     }
+
+    @Test
+    fun appleTvSeasonCommaEpisode() {
+        val g = TitleParser.guesses(mapOf("title" to "12 12 12", "display_subtitle" to "S1, E1 · I’m Robbing the House"), "Apple TV")
+        val first = g.first() as TitleGuess.NumberedEpisode
+        assertEquals("12 12 12", first.show)
+        assertEquals(1, first.season)
+        assertEquals(1, first.episode)
+    }
 }
