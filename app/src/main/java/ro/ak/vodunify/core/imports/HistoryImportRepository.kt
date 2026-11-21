@@ -155,9 +155,16 @@ class HistoryImportRepository @Inject constructor(
     }
 
     private suspend fun writeHistory(events: List<WatchEvent>, service: String) {
-        if (events.isEmpty()) return
+        // Aceeași vizionare deja salvată în aceeași zi (de AK Scrobbler, de un import anterior sau din
+        // CSV-ul aceluiași serviciu) contează o singură dată. Revizionările din alte zile rămân.
+        val fresh = events.filter { e ->
+            val ref = TrackingEntities.ref(e.media)
+            val (from, to) = ImportPlanner.dayBounds(e.watchedAt.toEpochMilli())
+            dao.countWatchesBetween(ref.mediaKey, ref.season, ref.episode, from, to) == 0
+        }
+        if (fresh.isEmpty()) return
         dao.insertHistory(
-            events.map { e ->
+            fresh.map { e ->
                 // Id determinist: aceeași vizionare reimportată nu apare de două ori.
                 TrackingEntities.history(e).copy(id = "$service|${e.media.itemKey}@${e.watchedAt.toEpochMilli()}")
             },

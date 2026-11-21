@@ -1,5 +1,8 @@
 package ro.ak.vodunify.core.imports
 
+import java.time.Instant
+import java.time.ZoneId
+
 /** Ce facem cu un element potrivit: istoric (văzut) sau punct de reluare. Pur, testabil. */
 object ImportPlanner {
     /** Peste 90% din durată = văzut. */
@@ -27,5 +30,13 @@ object ImportPlanner {
             p < MIN_PROGRESS -> Kind.Skip
             else -> Kind.Resume(p, position)
         }
+    }
+
+    /** Ziua (în fusul orar dat) în care cade [atMs]: [început, sfârșit] în ms. */
+    fun dayBounds(atMs: Long, zone: ZoneId = ZoneId.systemDefault()): Pair<Long, Long> {
+        val day = Instant.ofEpochMilli(atMs).atZone(zone).toLocalDate()
+        val start = day.atStartOfDay(zone).toInstant().toEpochMilli()
+        val end = day.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1
+        return start to end
     }
 }

@@ -100,4 +100,26 @@ class ImportParsingTest {
         assertEquals(1_420_000L, (r as ImportPlanner.Kind.Resume).positionMs)
         assertEquals(ImportPlanner.Kind.Skip, ImportPlanner.classify(5, 3000, null))
     }
+
+    @Test
+    fun numberedEpisodesComeFirst() {
+        // Netflix „Watched”: numele + numerele sezonului și episodului.
+        val nf = ImportParser.guesses(
+            ImportItem(series = "The Office (U.S.)", season = "Season 2", episode = "The Dundies", title = "x", seasonNumber = 2, episodeNumber = 1),
+        )
+        assertEquals(TitleGuess.NumberedEpisode("The Office (U.S.)", 2, 1, "The Dundies"), nf.first())
+        assertTrue(nf.contains(TitleGuess.SeasonNamedEpisode("The Office (U.S.)", 2, "The Dundies")))
+        // Prime: episodul are doar numărul în nume.
+        val pr = ImportParser.guesses(ImportItem(series = "The Boys", season = "Season 2", episode = "Episode 3", title = "x"))
+        assertEquals(listOf(TitleGuess.NumberedEpisode("The Boys", 2, 3, "Episode 3")), pr)
+    }
+
+    @Test
+    fun dayBounds() {
+        val zone = java.time.ZoneId.of("Europe/Bucharest")
+        val at = java.time.ZonedDateTime.of(2026, 11, 20, 23, 30, 0, 0, zone).toInstant().toEpochMilli()
+        val (from, to) = ImportPlanner.dayBounds(at, zone)
+        assertEquals(java.time.ZonedDateTime.of(2026, 11, 20, 0, 0, 0, 0, zone).toInstant().toEpochMilli(), from)
+        assertEquals(java.time.ZonedDateTime.of(2026, 11, 21, 0, 0, 0, 0, zone).toInstant().toEpochMilli() - 1, to)
+    }
 }

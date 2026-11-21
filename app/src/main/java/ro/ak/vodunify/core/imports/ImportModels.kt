@@ -29,6 +29,9 @@ data class ImportItem(
     /** Durata, în secunde. */
     val duration: Long? = null,
     val id: String? = null,
+    /** Numerele sezonului / episodului, când serviciul le dă separat (Netflix „Watched”). */
+    val seasonNumber: Int? = null,
+    val episodeNumber: Int? = null,
 )
 
 /** Un lot trimis de AK Import (sau citit din CSV). */

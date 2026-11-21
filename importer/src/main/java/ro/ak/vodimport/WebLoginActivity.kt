@@ -100,7 +100,13 @@ class WebLoginActivity : Activity() {
                 currentUrl = url
                 if (captureMode && isTrusted(url) && !isLoginPage(url)) {
                     view.evaluateJavascript(Scripts.NETFLIX_CAPTURE_HOOK, null)
-                    scheduleCaptureReport()
+                    scheduleNetflixImport()
+                    return
+                }
+                if (captureMode && isLoginPage(url)) {
+                    captureMode = false
+                    pendingImport = false
+                    status.text = "Nu ești conectat încă. Conectează-te, alege profilul, apoi apasă din nou „Importă istoricul”."
                     return
                 }
                 if (pendingImport && isHistoryPage(url)) {
@@ -134,50 +140,24 @@ class WebLoginActivity : Activity() {
     }
 
     /**
-     * Netflix: deschidem „Watched” cu ascultarea pornită, citim ce a primit pagina (titlu + ora
-     * exactă a fiecărei vizionări), arătăm primele rânduri și le trimitem în AK VOD Unify, ca să
-     * completeze vizionările Netflix prinse fără titlu.
+     * Netflix, tot istoricul profilului ales: deschidem „Watched” cu ascultarea pornită (pagina cere
+     * istoricul pagină cu pagină), apoi [Scripts.NETFLIX] cere și restul paginilor și trimite totul în
+     * AK VOD Unify: în istoric (importul inițial) și pentru potrivirea vizionărilor prinse de AK Scrobbler.
      */
     private fun startNetflixCapture() {
         captureMode = true
+        pendingImport = true
         captureToken++
-        status.text = "Netflix: deschid „Watched” și citesc vizionările (~10 s)…"
+        status.text = "Netflix: deschid „Watched” și citesc tot istoricul profilului ales (poate dura câteva minute)…"
         web.loadUrl(NetflixRecent.HISTORY_URL)
     }
 
-    private fun scheduleCaptureReport() {
+    /** Pornim scriptul după ce pagina „Watched” a apucat să ceară prima porție de istoric. */
+    private fun scheduleNetflixImport() {
         val token = ++captureToken
-        var tries = 0
-        fun poll() {
-            if (token != captureToken || !captureMode) return
-            web.evaluateJavascript(Scripts.NETFLIX_HISTORY_COLLECT) { raw ->
-                if (token != captureToken || !captureMode) return@evaluateJavascript
-                val parsed = NetflixRecent.parseCollect(raw)
-                val items = parsed?.optJSONArray("items")
-                if ((items == null || items.length() == 0) && ++tries < CAPTURE_TRIES) {
-                    handler.postDelayed({ poll() }, 2_000L)
-                    return@evaluateJavascript
-                }
-                captureMode = false
-                if (items == null || items.length() == 0) {
-                    status.text = "Netflix: nu am găsit vizionări în pagină (${parsed?.optString("diag") ?: raw?.take(200)})"
-                    return@evaluateJavascript
-                }
-                val result = JSONObject().put("route", BuildConfig.ROUTE).put("status", "ok").put("items", items)
-                thread { runCatching { NetflixRecent.send(applicationContext, result) } }
-                status.text = describeHistory(items)
-            }
-        }
-        handler.postDelayed({ poll() }, 2_000L)
-    }
-
-    private fun describeHistory(items: org.json.JSONArray): String {
-        val fmt = java.text.SimpleDateFormat("dd.MM HH:mm", java.util.Locale.ROOT)
-        val first = (0 until minOf(items.length(), 4)).joinToString(" | ") { i ->
-            val it = items.getJSONObject(i)
-            "${fmt.format(java.util.Date(it.optLong("watchedAt")))} ${it.optString("title").take(60)}"
-        }
-        return "Netflix · ${items.length()} vizionări citite și trimise în AK VOD Unify: $first"
+        handler.postDelayed({
+            if (token == captureToken && captureMode && pendingImport) runScript()
+        }, NETFLIX_START_DELAY_MS)
     }
 
     private fun startImport() {
@@ -258,7 +238,10 @@ class WebLoginActivity : Activity() {
         fun fail(message: String) {
             if (!trustedPage()) return
             lastBridgeAt = System.currentTimeMillis()
-            handler.post { status.text = "⚠️ $message" }
+            handler.post {
+                captureMode = false
+                status.text = "⚠️ $message"
+            }
         }
 
         @JavascriptInterface
@@ -272,19 +255,33 @@ class WebLoginActivity : Activity() {
                     val profile = json.optString("profile")
                     items.length() to Sender.send(this@WebLoginActivity, service.id, profile, items)
                 }
+                if (service.id == "netflix") sendNetflixRecent(payload)
                 handler.post {
+                    captureMode = false
                     result.onSuccess { (count, sent) ->
                         when (sent) {
                             is Sender.Result.Sent -> {
-                                val msg = "$count titluri trimise în AK VOD Unify"
+                                val msg = "$count vizionări trimise în AK VOD Unify"
                                 saveStatus(msg)
-                                status.text = "✅ $msg. Le găsește în TMDb în fundal (vezi Setări → Istoric din servicii)."
+                                val diag = runCatching { JSONObject(payload).optString("diag") }.getOrNull().orEmpty()
+                                status.text = "✅ $msg. Le găsește în TMDb în fundal (vezi Setări → Istoric din servicii)." +
+                                    (if (diag.isNotBlank()) " [$diag]" else "")
                             }
                             is Sender.Result.Failed -> status.text = "⚠️ ${sent.message}"
                         }
                     }.onFailure { status.text = "⚠️ Răspuns neașteptat: ${it.message}" }
                 }
             }
+        }
+    }
+
+    /** Cele mai noi vizionări Netflix ajung și la potrivirea vizionărilor fără titlu prinse de AK Scrobbler. */
+    private fun sendNetflixRecent(payload: String) {
+        runCatching {
+            val items = JSONObject(payload).optJSONArray("items") ?: return
+            val recent = org.json.JSONArray()
+            for (i in 0 until minOf(items.length(), NETFLIX_RECENT_MAX)) recent.put(items.get(i))
+            NetflixRecent.send(applicationContext, JSONObject().put("route", BuildConfig.ROUTE).put("status", "ok").put("items", recent))
         }
     }
 
@@ -297,7 +294,8 @@ class WebLoginActivity : Activity() {
     companion object {
         const val EXTRA_SERVICE = "service"
         private const val FALLBACK_DELAY_MS = 8_000L
-        private const val CAPTURE_TRIES = 10
+        private const val NETFLIX_START_DELAY_MS = 4_000L
+        private const val NETFLIX_RECENT_MAX = 200
         private const val WATCHDOG_MS = 15_000L
         private const val DESKTOP_UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
