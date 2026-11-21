@@ -132,6 +132,7 @@ fun PosterCard(item: CatalogItem, modifier: Modifier = Modifier, rowKey: String 
             modifier = Modifier.size(spec.posterWidth, spec.posterHeight),
             restoreKey = "$rowKey|${item.mediaKey}",
             onFocused = { backdrop?.focus(FocusedTitle.of(item)) },
+            onLongClick = { actions.titleMenu(item) },
         ) {
             Box(Modifier.fillMaxSize()) {
                 NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)

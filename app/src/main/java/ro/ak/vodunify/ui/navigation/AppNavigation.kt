@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -78,6 +79,8 @@ import ro.ak.vodunify.ui.search.SearchScreen
 import ro.ak.vodunify.ui.settings.SettingsScreen
 import ro.ak.vodunify.ui.studio.StudioScreen
 import ro.ak.vodunify.ui.theme.FocusBorder
+import ro.ak.vodunify.ui.components.TitleMenuHost
+import ro.ak.vodunify.ui.components.TitleMenuViewModel
 
 @Composable
 fun AppNavigation() {
@@ -86,8 +89,10 @@ fun AppNavigation() {
     val current = backStack?.destination?.route
     val isTopLevel = current == null || TopDestination.entries.any { it.route == current }
 
+    val titleMenu: TitleMenuViewModel = hiltViewModel()
     val actions = remember(nav) {
         CatalogActions(
+            titleMenu = titleMenu::open,
             openTitle = { kind, id -> nav.navigate(Routes.title(kind, id)) },
             openPerson = { id -> nav.navigate(Routes.person(id)) },
             openStudio = { kind, id -> nav.navigate(Routes.studio(kind, id)) },
@@ -123,6 +128,8 @@ fun AppNavigation() {
             dismissButton = { OutlinedButton(onClick = { exitPrompt = false }) { Text("Rămâi") } },
         )
     }
+
+    TitleMenuHost(titleMenu, onOpen = { kind, id -> nav.navigate(Routes.title(kind, id)) })
 
     CompositionLocalProvider(
         LocalCatalogActions provides actions,

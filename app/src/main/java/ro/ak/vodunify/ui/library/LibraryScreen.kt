@@ -41,8 +41,8 @@ import ro.ak.vodunify.ui.components.layoutSpec
 import ro.ak.vodunify.ui.navigation.LocalCatalogActions
 
 /**
- * Biblioteca personală: titlurile din toate sursele conectate, reconciliate, cu file pe
- * stare (în curs / următorul episod / de văzut / văzute) și filtru pe sursă.
+ * Lista mea: ce vrei să vezi, ce ai în curs (filme neterminate, seriale începute) și ce ai văzut,
+ * amestecate („Toate”) sau pe file, cu filtru pe sursă. La seriale: progresul pe episoade.
  * Filele și filtrele sunt FilterChip-uri: merg cu D-pad (focus + OK) și cu touch.
  */
 @Composable
@@ -62,7 +62,7 @@ fun LibraryScreen(viewModel: LibraryViewModel = hiltViewModel()) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Bibliotecă", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    Text("Lista mea", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                     if (status is SyncStatus.Running) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                     if (state.connected && ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED) {
                         OutlinedButton(onClick = viewModel::syncNow, enabled = status !is SyncStatus.Running) { Text("Sincronizează") }
@@ -71,7 +71,7 @@ fun LibraryScreen(viewModel: LibraryViewModel = hiltViewModel()) {
                 (status as? SyncStatus.Failed)?.let {
                     Text(it.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
-                ChipRow(LibraryTab.entries.map { it to it.label }, selected = state.filter.tab, onSelect = viewModel::selectTab)
+                ChipRow(LibraryTab.visible.map { it to it.label }, selected = state.filter.tab, onSelect = viewModel::selectTab)
                 if (state.sources.size > 1 || state.filter.source != null) {
                     val options = listOf<Pair<String?, String>>(null to "Toate sursele") + state.sources.map { it.id to it.label }
                     ChipRow(

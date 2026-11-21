@@ -16,6 +16,6 @@ enum class TopDestination(val route: String, val label: String, val icon: ImageV
     HOME("home", "Acasă", Icons.Filled.Home),
     SEARCH("search", "Caută", Icons.Filled.Search),
     CALENDAR("calendar", "Calendar", Icons.Filled.DateRange),
-    LIBRARY("library", "Bibliotecă", Icons.AutoMirrored.Filled.List),
+    LIBRARY("library", "Lista mea", Icons.AutoMirrored.Filled.List),
     SETTINGS("settings", "Setări", Icons.Filled.Settings),
 }

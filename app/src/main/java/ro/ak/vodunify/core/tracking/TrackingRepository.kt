@@ -264,6 +264,14 @@ class TrackingRepository @Inject constructor(
         return targets.size
     }
 
+    /** Pe fiecare serial: câte episoade ai văzut și ultimul (din istoricul local). */
+    val seriesSummaries: Flow<Map<String, SeriesSummary>> =
+        dao.latestWatches().map { LocalProgress.summaries(it.visible { e -> e.source }) }.flowOn(Dispatchers.Default)
+
+    /** Progresul pe serial din istoricul local. [seasonCounts]: sezon → episoade (din TMDb). */
+    suspend fun localShowProgress(show: MediaRef, seasonCounts: Map<Int, Int>): ShowProgress =
+        LocalProgress.show(show, dao.historyFor(show.titleKey).first().visible { it.source }, seasonCounts, LOCAL_SOURCE)
+
     /** Progresul pe serial din prima sursă conectată care îl știe. */
     suspend fun showProgress(show: MediaRef): ShowProgress? {
         for (c in connected(Capability.UP_NEXT_READ)) {

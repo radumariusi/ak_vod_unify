@@ -293,6 +293,22 @@ class CalendarViewModel @Inject constructor(
         }
     }
 
+    /** Adaugă filmul / serialul în Lista mea (De văzut). */
+    fun addToList(item: CalendarItem) {
+        val type = if (item.isMovie) MediaType.MOVIE else MediaType.SHOW
+        val media = MediaRef(type, ExternalIds(tmdb = item.tmdbId), item.episode?.showName ?: item.title)
+        viewModelScope.launch {
+            _message.value = try {
+                tracking.setInWatchlist(media, true)
+                "„${media.title}” adăugat în Lista mea"
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                "Eroare: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
+
     /** Apăsare lungă: deschide „Alege unde vezi” pentru episod sau film. */
     fun chooseWhere(item: CalendarItem) {
         viewModelScope.launch {

@@ -181,6 +181,7 @@ fun CalendarScreen(
                         onFollow = viewModel::toggleFollow,
                         onHide = viewModel::hide,
                         onWatched = viewModel::markWatched,
+                        onList = viewModel::addToList,
                     )
                     state.mode == CalendarMode.WEEK -> WeekList(state.days, state.visible, weekList, noun, open, chooseWhere)
                     state.mode == CalendarMode.UPCOMING -> WeekList(state.days, state.visible, weekList, noun, open, chooseWhere, skipEmpty = true)
