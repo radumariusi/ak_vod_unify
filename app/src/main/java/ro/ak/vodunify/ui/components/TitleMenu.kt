@@ -81,6 +81,11 @@ class TitleMenuViewModel @Inject constructor(
         if (watched) "„${i.title}” marcat ca nevăzut" else "„${i.title}” marcat ca văzut"
     }
 
+    fun removeFromContinue() = act { i, _ ->
+        tracking.removeFromContinueWatching(i.mediaKey)
+        "„${i.title}” scos din Continuă vizionarea"
+    }
+
     private fun act(block: suspend (CatalogItem, TitleTrackState?) -> String) {
         val i = _item.value ?: return
         val s = state.value
@@ -124,6 +129,11 @@ fun TitleMenuHost(viewModel: TitleMenuViewModel, onOpen: (TitleKind, Long) -> Un
                 val inList = state?.inWatchlist == true
                 Button(onClick = viewModel::toggleList, modifier = Modifier.fillMaxWidth().focusRequester(first)) {
                     Text(if (inList) "Scoate din Lista mea" else "+ Lista mea (De văzut)")
+                }
+                if (state?.resume != null) {
+                    OutlinedButton(onClick = viewModel::removeFromContinue, modifier = Modifier.fillMaxWidth()) {
+                        Text("Scoate din Continuă vizionarea")
+                    }
                 }
                 if (i.kind == TitleKind.MOVIE) {
                     OutlinedButton(onClick = viewModel::toggleWatched, modifier = Modifier.fillMaxWidth()) {

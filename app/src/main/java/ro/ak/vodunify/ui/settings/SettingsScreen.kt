@@ -52,6 +52,7 @@ import ro.ak.vodunify.ui.components.OutlinedButton
 import ro.ak.vodunify.ui.components.TextButton
 import ro.ak.vodunify.ui.components.layoutSpec
 import ro.ak.vodunify.ui.theme.Accent
+import ro.ak.vodunify.ui.components.readable
 
 /** Categoriile setărilor (stânga pe TV / tabletă, listă pe telefon). */
 private enum class SettingsCategory(val title: String, val subtitle: String) {
@@ -233,7 +234,7 @@ private fun CatalogCategory(viewModel: SettingsViewModel) {
         )
         Spacer(Modifier.height(4.dp))
         OutlinedButton(onClick = viewModel::clearCatalogCache) { Text("Golește cache-ul catalogului") }
-        cacheMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        cacheMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.readable()) }
         Text(
             "Acest produs folosește API-ul TMDb, dar nu este aprobat sau certificat de TMDb. " +
                 "Disponibilitatea pe servicii de streaming este furnizată de JustWatch.",
@@ -261,7 +262,7 @@ private fun UpdatePanel(
             is UpdateState.Available -> {
                 Text("Versiune nouă: ${state.update.versionName}", fontWeight = FontWeight.SemiBold)
                 if (state.update.notes.isNotBlank()) {
-                    Text(state.update.notes.take(600), style = MaterialTheme.typography.bodySmall)
+                    Text(state.update.notes.take(600), style = MaterialTheme.typography.bodySmall, modifier = Modifier.readable())
                 }
                 Button(onClick = onInstall) { Text("Descarcă și instalează") }
             }

@@ -31,6 +31,7 @@ import ro.ak.vodunify.core.scrobble.ScrobbleRules
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import ro.ak.vodunify.ui.components.readable
 
 /** „AK Scrobbler”: ce a citit aplicația însoțitoare din Netflix, Prime, SkyShowtime etc. */
 @OptIn(ExperimentalLayoutApi::class)
@@ -58,6 +59,7 @@ fun ScrobblerSection(viewModel: ScrobblerSettingsViewModel = hiltViewModel()) {
                     if (ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED) " Publicarea în Trakt/SIMKL urmează profilul de mai sus." else "",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.readable(),
             )
             Text(
                 if (installed) "✅ AK Scrobbler e instalat" else "❌ AK Scrobbler nu e instalat: ia ak-scrobbler-….apk din același release",
@@ -82,6 +84,7 @@ fun ScrobblerSection(viewModel: ScrobblerSettingsViewModel = hiltViewModel()) {
                     "⏳ $unresolved vizionări încă fără titlu recunoscut: le păstrez și le completez automat.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.readable(),
                 )
             }
             Text(
@@ -89,9 +92,10 @@ fun ScrobblerSection(viewModel: ScrobblerSettingsViewModel = hiltViewModel()) {
                     "Conectează-te o dată la Netflix în AK Import (RO sau US, unde e contul tău).",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.readable(),
             )
             netflix.forEach { line ->
-                Text("Netflix · $line", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Netflix · $line", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.readable())
             }
             Text("Primite recent", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 6.dp))
             if (log.isEmpty()) {
@@ -99,9 +103,10 @@ fun ScrobblerSection(viewModel: ScrobblerSettingsViewModel = hiltViewModel()) {
                     "Nimic încă. Pornește ceva în Netflix (sau altă aplicație), pune pauză, apoi revino aici.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.readable(),
                 )
             } else {
-                log.take(15).forEach { LogLine(it) }
+                log.take(40).forEach { LogLine(it) }
             }
         }
     }
@@ -122,6 +127,7 @@ private fun LogLine(e: ScrobbleLogEntry) {
         "$time · ${e.app} · ${e.matched ?: e.raw} · $position · $reason → ${result?.label ?: e.result}",
         style = MaterialTheme.typography.bodySmall,
         color = if (result == ScrobbleResult.UNMATCHED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.readable(),
     )
     if (e.matched != null && e.matched != e.raw) {
         Text(

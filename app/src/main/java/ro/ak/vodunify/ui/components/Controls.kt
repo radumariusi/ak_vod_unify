@@ -15,6 +15,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import ro.ak.vodunify.ui.theme.FocusBorder
 import androidx.compose.material3.Button as M3Button
 import androidx.compose.material3.FilterChip as M3FilterChip
 import androidx.compose.material3.IconButton as M3IconButton
@@ -84,7 +85,7 @@ fun OutlinedButton(
             disabledContainerColor = c.surfaceVariant.copy(alpha = 0.4f),
             disabledContentColor = c.onSurfaceVariant.copy(alpha = 0.6f),
         ),
-        border = BorderStroke(1.dp, if (focused) c.secondary else c.outline),
+        border = if (focused) BorderStroke(2.dp, FocusBorder) else BorderStroke(1.dp, c.outline),
         contentPadding = contentPadding,
         interactionSource = interaction,
         content = content,

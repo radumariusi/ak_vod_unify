@@ -42,6 +42,7 @@ import ro.ak.vodunify.ui.components.layoutSpec
 import ro.ak.vodunify.ui.components.openUrl
 import java.text.DateFormat
 import java.util.Date
+import ro.ak.vodunify.ui.components.readable
 
 /** Cardul unui cont (Trakt, SIMKL, WeTrakr): conectare cu cod, stare sincronizare, deconectare. */
 @Composable
@@ -68,6 +69,7 @@ fun AccountCard(connector: DeviceAuthConnector, viewModel: AccountsViewModel) {
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = if (acc != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.readable(),
                 )
             }
             when {
@@ -83,9 +85,10 @@ fun AccountCard(connector: DeviceAuthConnector, viewModel: AccountsViewModel) {
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.readable(),
                     )
                     syncState?.lastError?.let {
-                        Text("Ultima eroare: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        Text("Ultima eroare: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.readable())
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Button(onClick = viewModel::syncNow, enabled = status !is SyncStatus.Running) { Text("Sincronizează acum") }
@@ -108,6 +111,7 @@ private fun LoginFlow(connector: DeviceAuthConnector, login: LoginState, viewMod
                     "Primești un cod pe care îl introduci pe site-ul ${connector.displayName}.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.readable(),
             )
             if (connector.id == "wetrakr") {
                 Text(
@@ -115,6 +119,7 @@ private fun LoginFlow(connector: DeviceAuthConnector, login: LoginState, viewMod
                         "Lista „De văzut” se citește, dar nu se poate modifica de aici.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.readable(),
                 )
             }
             Button(onClick = { viewModel.startLogin(connector) }) { Text("Conectează ${connector.displayName}") }
@@ -163,6 +168,7 @@ private fun CodePanel(connector: DeviceAuthConnector, code: DeviceCode, onCancel
                 "3. Apasă „Yes” / „Allow”. Aplicația se conectează singură. Expiră în ${remaining / 60}:${"%02d".format(remaining % 60)}.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.readable(),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { context.openUrl(code.verificationUrl) }, modifier = Modifier.focusRequester(focus)) { Text("Deschide pagina") }
@@ -189,5 +195,5 @@ private fun MissingKeys(connector: DeviceAuthConnector) {
                 "3. Construiește un APK nou (Actions → Release APK) și actualizează aplicația."
         else -> "Cheile pentru ${connector.displayName} se adaugă ca secrete în GitHub, apoi se construiește un APK nou."
     }
-    Text(steps, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(steps, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.readable())
 }

@@ -291,6 +291,9 @@ class TrackingRepository @Inject constructor(
 
     suspend fun clearSource(source: String) = dao.clearSource(source)
 
+    /** Scoate titlul (filmul sau tot serialul) din „Continuă vizionarea”; revine dacă îl pornești din nou. */
+    suspend fun removeFromContinueWatching(mediaKey: String) = dao.deleteResumeFor(mediaKey)
+
     // ---------- Fără trackeri externi: „Văzut” și „De văzut” se țin doar în baza locală ----------
 
     private suspend fun setWatchedLocally(media: MediaRef, watched: Boolean): Int {

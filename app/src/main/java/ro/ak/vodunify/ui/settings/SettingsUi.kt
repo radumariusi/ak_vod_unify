@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import ro.ak.vodunify.ui.components.readable
 
 /** Card de setări cu titlu (aspectul comun al secțiunilor). */
 @Composable
@@ -30,5 +31,5 @@ fun SettingsCard(title: String, content: @Composable () -> Unit) {
 
 @Composable
 fun SettingHint(text: String) {
-    Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.readable())
 }

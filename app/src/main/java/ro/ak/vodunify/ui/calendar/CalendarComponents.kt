@@ -1,5 +1,11 @@
 package ro.ak.vodunify.ui.calendar
 
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.semantics.contentDescription
+import ro.ak.vodunify.ui.components.PosterLabel
+import ro.ak.vodunify.ui.components.AppIconBadge
+import ro.ak.vodunify.ui.components.CinemaBadge
 import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
@@ -125,21 +131,36 @@ fun PressableCard(
     }
 }
 
+/** Siglele de pe postere (pachetele aplicațiilor instalate), date de ecranul Calendar. */
+val LocalCalendarIcons = staticCompositionLocalOf { CalendarIcons() }
+
+/**
+ * Posterul din calendar, ca restul posterelor din aplicație: fără titlu scris. Sus, sigla platformei tale pe care
+ * îl găsești (sau a playerului standard, dacă nu e pe platformele tale) ori sigla de cinema US / RO; jos, episodul
+ * și ora României (la filme, ora sau tipul lansării). „✓” = văzut.
+ */
 @Composable
 private fun Poster(item: CalendarItem, modifier: Modifier) {
+    val icons = LocalCalendarIcons.current
     Box(modifier.clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surface)) {
         if (item.posterUrl != null) {
             AsyncImage(model = item.posterUrl, contentDescription = item.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         } else {
             Text(item.title, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(6.dp))
         }
+        val top = Modifier.align(Alignment.TopStart).padding(4.dp)
+        when {
+            item.cinema != null -> CinemaBadge(item.cinema, top)
+            else -> {
+                val pkg = item.watchAppId?.let { icons.apps[it] } ?: icons.player
+                pkg?.let { AppIconBadge(it, top) }
+            }
+        }
         if (item.watched) {
-            Text(
-                "✓ Văzut",
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.White,
-                modifier = Modifier.align(Alignment.TopStart).background(Color(0xCC1B5E20)).padding(horizontal = 4.dp, vertical = 2.dp),
-            )
+            PosterLabel("✓", Modifier.align(Alignment.TopEnd).padding(4.dp))
+        }
+        if (item.posterLabel.isNotBlank()) {
+            PosterLabel(item.posterLabel, Modifier.align(Alignment.BottomStart).padding(4.dp))
         }
     }
 }
@@ -235,27 +256,12 @@ fun WeekList(
                             PressableCard(
                                 onClick = { onOpen(item) },
                                 onLongClick = { onWatch(item) },
-                                modifier = Modifier.width(spec.posterWidth + 10.dp).alpha(if (item.passed) 1f else 0.5f),
+                                modifier = Modifier
+                                    .size(spec.posterWidth, spec.posterHeight)
+                                    .alpha(if (item.passed) 1f else 0.5f)
+                                    .semantics { contentDescription = "${item.title}, ${item.subtitle}, ${item.time}, ${item.where}" },
                             ) {
-                                Column {
-                                    Poster(item, Modifier.fillMaxWidth().height(spec.posterHeight))
-                                    Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                        Text(item.title, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text(
-                                            (if (item.isMovie) item.subtitle else item.subtitle.substringBefore(" · ")) + " · " + item.time,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        Text(
-                                            item.where,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
-                                }
+                                Poster(item, Modifier.fillMaxSize())
                             }
                         }
                     }
@@ -297,8 +303,15 @@ fun MonthGrid(
         modifier = Modifier.fillMaxSize(),
     ) {
         item(key = "weekdays") {
-            Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-                weekDays.forEach { Text(it, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f)) }
+            Row(horizontalArrangement = Arrangement.spacedBy(gap), modifier = Modifier.fillMaxWidth()) {
+                weekDays.forEach {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f).padding(start = 6.dp),
+                    )
+                }
             }
         }
         weeks.forEach { monday ->
@@ -309,7 +322,7 @@ fun MonthGrid(
                         val dayItems = if (inMonth) byDay[day].orEmpty() else emptyList()
                         Column(
                             verticalArrangement = Arrangement.spacedBy(3.dp),
-                            modifier = Modifier.weight(1f).heightIn(min = if (spec.isCompact) 120.dp else 190.dp).alpha(if (inMonth) 1f else 0.35f),
+                            modifier = Modifier.weight(1f).height(if (spec.isCompact) 112.dp else 150.dp).alpha(if (inMonth) 1f else 0.35f),
                         ) {
                             PressableCard(onClick = { onOpenDay(day) }, onLongClick = { onOpenDay(day) }, modifier = Modifier.fillMaxWidth()) {
                                 Text(
@@ -329,7 +342,7 @@ fun MonthGrid(
                                     Text(
                                         (if (item.watched) "✓ " else "") + item.shortLabel,
                                         style = MaterialTheme.typography.bodySmall,
-                                        maxLines = 2,
+                                        maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.padding(horizontal = 5.dp, vertical = 3.dp),
                                     )

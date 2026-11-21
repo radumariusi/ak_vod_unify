@@ -22,6 +22,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ro.ak.vodunify.core.publish.PublishMode
 import ro.ak.vodunify.ui.navigation.LocalCatalogActions
+import ro.ak.vodunify.ui.components.readable
 
 /** Setările „Publicare progres”: profilul activ, modul și destinațiile lui. */
 @OptIn(ExperimentalLayoutApi::class)
@@ -43,6 +44,7 @@ fun PublishSection(viewModel: PublishSettingsViewModel = hiltViewModel()) {
                     "Nu marchează nimic ca văzut și nu pornește sesiuni de vizionare false.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.readable(),
             )
 
             Text("Profil activ", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 6.dp))
@@ -66,7 +68,7 @@ fun PublishSection(viewModel: PublishSettingsViewModel = hiltViewModel()) {
                     )
                 }
             }
-            Text(profile.mode.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(profile.mode.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.readable())
 
             Text("Destinații pentru „${profile.name}”", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 6.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -82,6 +84,7 @@ fun PublishSection(viewModel: PublishSettingsViewModel = hiltViewModel()) {
                 "Nuvio citește reluarea din Trakt: bifează Trakt dacă vrei ca Nuvio să pornească de unde ai rămas.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.readable(),
             )
             OutlinedButton(onClick = actions.openDiagnostics, modifier = Modifier.padding(top = 6.dp)) {
                 Text("Diagnostic rute")

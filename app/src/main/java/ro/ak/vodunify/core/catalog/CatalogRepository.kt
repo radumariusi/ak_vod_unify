@@ -133,6 +133,34 @@ class CatalogRepository @Inject constructor(
         )
     }
 
+    /** Titlul cu datele de lansare (pentru „Noutăți” și „În curând” din Acasă); se reîmprospătează la 6 ore. */
+    suspend fun releases(kind: TitleKind, id: Long, settings: CatalogSettings): TitleReleases {
+        val dto = tmdb.get("${kind.path}/$id", mapOf("language" to settings.apiLanguage), TmdbTitleDetails.serializer(), TmdbClient.DEFAULT_TTL)
+        val isMovie = kind == TitleKind.MOVIE
+        val item = CatalogItem(
+            id = dto.id,
+            kind = kind,
+            title = TmdbMappers.displayTitle(
+                if (isMovie) dto.title else dto.name,
+                if (isMovie) dto.originalTitle else dto.originalName,
+                settings.language,
+            ),
+            year = TmdbMappers.year(if (isMovie) dto.releaseDate else dto.firstAirDate),
+            overview = dto.overview.orEmpty(),
+            posterUrl = TmdbImages.poster(dto.posterPath),
+            backdropUrl = TmdbImages.backdrop(dto.backdropPath),
+            rating = dto.voteAverage?.takeIf { it > 0 },
+            episodeCount = dto.numberOfEpisodes,
+        )
+        fun air(e: ro.ak.vodunify.core.tmdb.TmdbEpisodeRef?) = e?.let { EpisodeAir(it.seasonNumber, it.episodeNumber, it.name, it.airDate) }
+        return TitleReleases(
+            item = item,
+            releaseDate = if (isMovie) dto.releaseDate?.takeIf { it.isNotBlank() } else null,
+            lastEpisode = air(dto.lastEpisodeToAir),
+            nextEpisode = air(dto.nextEpisodeToAir),
+        )
+    }
+
     // ---------- Detalii ----------
 
     suspend fun details(kind: TitleKind, id: Long, settings: CatalogSettings): TitleDetails {
@@ -371,6 +399,18 @@ class CatalogRepository @Inject constructor(
     }
 
     // ---------- Căutare ----------
+
+    /** Genurile pentru filme sau pentru seriale (Descoperă). */
+    suspend fun genresFor(kind: TitleKind, settings: CatalogSettings): List<Genre> =
+        tmdb.get("genre/${kind.path}/list", mapOf("language" to settings.apiLanguage), TmdbGenreList.serializer(), TmdbClient.LONG_TTL)
+            .genres.map { Genre(it.id, it.name.replaceFirstChar { c -> c.uppercase() }) }.sortedBy { it.name }
+
+    /** Descoperă: /discover cu toate filtrele, o pagină. */
+    suspend fun discoverTitles(filters: DiscoverFilters, settings: CatalogSettings, page: Int): SearchPage {
+        val r = list("discover/${filters.kind.path}", DiscoverQuery.params(filters, page, settings.apiLanguage))
+        val items = TmdbMappers.items(r.results, settings.language, filters.kind)
+        return SearchPage(items.map { SearchResult.Title(it) }, r.page, minOf(r.totalPages, 500))
+    }
 
     suspend fun genres(settings: CatalogSettings): List<Genre> = coroutineScope {
         val params = mapOf("language" to settings.apiLanguage)

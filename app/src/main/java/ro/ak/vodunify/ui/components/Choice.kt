@@ -42,6 +42,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import ro.ak.vodunify.ui.theme.FocusBorder
 import androidx.compose.ui.window.Dialog
 
 /** O opțiune dintr-o listă de alegere. [enabled] = false: afișată (ex. „neinstalat”), dar nu se poate alege. */
@@ -195,7 +196,7 @@ fun <T> Dropdown(
         shape = MaterialTheme.shapes.small,
         color = if (focused) c.secondary else c.surfaceVariant.copy(alpha = 0.85f),
         contentColor = if (focused) c.onSecondary else c.onSurface,
-        border = BorderStroke(1.dp, if (focused) c.secondary else c.outline),
+        border = if (focused) BorderStroke(2.dp, FocusBorder) else BorderStroke(1.dp, c.outline),
         interactionSource = interaction,
         modifier = modifier
             .then(if (fillWidth) Modifier.fillMaxWidth().widthIn(max = 640.dp) else Modifier)

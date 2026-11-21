@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -144,7 +145,7 @@ private fun LibraryCard(item: LibraryItem) {
     // Fără text sub poster (ca peste tot): episodul / progresul stă pe poster.
     FocusCard(
         onClick = { item.tmdbId?.let { actions.openTitle(item.kind, it) } },
-        modifier = Modifier.size(spec.posterWidth, spec.posterHeight),
+        modifier = Modifier.wrapContentSize().size(spec.posterWidth, spec.posterHeight),
         restoreKey = "library|${item.key}",
     ) {
         Box(Modifier.fillMaxSize().semantics { contentDescription = listOf(item.title, item.subtitle).filter { it.isNotBlank() }.joinToString(", ") }) {

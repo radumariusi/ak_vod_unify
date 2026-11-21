@@ -25,6 +25,7 @@ import ro.ak.vodunify.ui.components.Button
 import ro.ak.vodunify.ui.components.FilterChip
 import ro.ak.vodunify.ui.components.OutlinedButton
 import ro.ak.vodunify.ui.components.TextButton
+import ro.ak.vodunify.ui.components.readable
 
 /** Backup pe Google Drive: conectare cu cod (ca la TV), backup acum / zilnic, restaurare. */
 @Composable
@@ -65,7 +66,7 @@ fun BackupSection(viewModel: BackupViewModel = hiltViewModel()) {
                     if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                 }
                 OnOffDropdown("Backup automat zilnic", auto, viewModel::setAuto)
-                status?.let { Text("Ultimul: $it", style = MaterialTheme.typography.bodySmall) }
+                status?.let { Text("Ultimul: $it", style = MaterialTheme.typography.bodySmall, modifier = Modifier.readable()) }
                 files?.let { list ->
                     Text("Copii pe Drive", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 8.dp))
                     if (list.isEmpty()) SettingHint("Nicio copie încă.")
@@ -82,7 +83,7 @@ fun BackupSection(viewModel: BackupViewModel = hiltViewModel()) {
                 TextButton(onClick = viewModel::disconnect) { Text("Deconectează Google Drive") }
             }
         }
-        message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.readable()) }
     }
 
     confirm?.let { f ->

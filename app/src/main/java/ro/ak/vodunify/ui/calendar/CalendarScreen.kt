@@ -2,6 +2,8 @@ package ro.ak.vodunify.ui.calendar
 
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -18,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import ro.ak.vodunify.ui.components.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -89,6 +92,8 @@ fun CalendarScreen(
     val chooseWhere: (CalendarItem) -> Unit = viewModel::chooseWhere
     var showFilters by rememberSaveable { mutableStateOf(false) }
 
+    val icons by viewModel.icons.collectAsStateWithLifecycle()
+    CompositionLocalProvider(LocalCalendarIcons provides icons) {
     Column(Modifier.fillMaxSize()) {
         Column(
             Modifier.padding(horizontal = spec.screenPadding).fillMaxWidth(),
@@ -103,10 +108,7 @@ fun CalendarScreen(
                 OutlinedButton(onClick = { showFilters = true }) { Text("Filtre") }
                 OutlinedButton(onClick = viewModel::reload) { Text("Reîncarcă") }
             }
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedButton(onClick = viewModel::previous) { Text("◀") }
                 Text(
                     when (state.mode) {
@@ -118,7 +120,7 @@ fun CalendarScreen(
                     style = MaterialTheme.typography.titleLarge,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = if (spec.isCompact) Modifier else Modifier.widthIn(min = 320.dp),
+                    modifier = Modifier.weight(1f, fill = false),
                 )
                 OutlinedButton(onClick = viewModel::next) { Text("▶") }
                 OutlinedButton(onClick = viewModel::goToToday) { Text("Azi") }
@@ -155,6 +157,7 @@ fun CalendarScreen(
                 }
             }
         }
+    }
     }
     WatchChooserHost(chooser)
 }

@@ -2,6 +2,7 @@ package ro.ak.vodunify.ui.settings
 
 import ro.ak.vodunify.ui.components.OnOffDropdown
 import ro.ak.vodunify.ui.components.Dropdown
+import ro.ak.vodunify.ui.components.TextInput
 import android.Manifest
 import android.os.Build
 import android.widget.Toast
@@ -44,6 +45,7 @@ import ro.ak.vodunify.core.calendar.model.QualityThresholds
 import ro.ak.vodunify.core.calendar.model.SavedShow
 import ro.ak.vodunify.core.calendar.model.StreamingCatalog
 import java.util.Locale
+import ro.ak.vodunify.ui.components.readable
 
 /** Setări → Calendar (din AK VOD Calendar). */
 @OptIn(ExperimentalLayoutApi::class)
@@ -147,7 +149,7 @@ private fun Label(text: String) {
 
 @Composable
 private fun Hint(text: String) {
-    Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.readable())
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -192,13 +194,12 @@ private fun OmdbKeyField(s: CalendarSettings, viewModel: CalendarSettingsViewMod
         },
     )
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        OutlinedTextField(
+        TextInput(
             value = text,
             onValueChange = { text = it },
-            singleLine = true,
-            label = { Text("Cheie OMDb") },
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            modifier = Modifier.widthIn(max = 320.dp),
+            label = "Cheie OMDb",
+            onDone = { viewModel.setOmdbKey(text) },
+            modifier = Modifier.widthIn(max = 360.dp),
         )
         OutlinedButton(onClick = { viewModel.setOmdbKey(text) }) { Text("Salvează") }
     }

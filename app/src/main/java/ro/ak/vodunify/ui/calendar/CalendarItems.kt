@@ -11,6 +11,7 @@ import ro.ak.vodunify.core.calendar.format.timeLabel
 import ro.ak.vodunify.core.calendar.format.whereToWatch
 import ro.ak.vodunify.core.calendar.model.EpisodeEntry
 import ro.ak.vodunify.core.calendar.model.MovieEntry
+import ro.ak.vodunify.core.calendar.model.MovieReleaseKind
 import java.time.LocalDate
 
 /** Un rând din calendar, comun pentru episoade și filme, ca ecranul să fie unul singur. */
@@ -34,6 +35,12 @@ data class CalendarItem(
     val shortLabel: String,
     val episode: EpisodeEntry? = null,
     val movie: MovieEntry? = null,
+    /** Eticheta de jos de pe poster: „S02E05 · 21:00” (ora României) sau ora / tipul la filme. */
+    val posterLabel: String = "",
+    /** Serviciul tău (id din calendar, ex. „netflix”) pe care îl găsești; null = nu e pe platformele tale. */
+    val watchAppId: String? = null,
+    /** „US” / „RO” la lansările în cinema (sigla de cinema de pe poster). */
+    val cinema: String? = null,
 )
 
 fun EpisodeEntry.toItem(watched: Boolean) = CalendarItem(
@@ -57,6 +64,8 @@ fun EpisodeEntry.toItem(watched: Boolean) = CalendarItem(
     watched = watched,
     shortLabel = "$showName $code",
     episode = this,
+    posterLabel = "$code · ${timeLabel(this)}",
+    watchAppId = watchOn?.id,
 )
 
 fun MovieEntry.toItem(watched: Boolean) = CalendarItem(
@@ -80,4 +89,15 @@ fun MovieEntry.toItem(watched: Boolean) = CalendarItem(
     watched = watched,
     shortLabel = "$title (${movieKindLabel(this)})",
     movie = this,
+    posterLabel = when (kind) {
+        MovieReleaseKind.CINEMA_US, MovieReleaseKind.CINEMA_RO -> if (limited) "Limitat" else ""
+        MovieReleaseKind.DIGITAL -> "Digital ${region.code}"
+        MovieReleaseKind.STREAMING -> movieTimeLabel(this)
+    },
+    watchAppId = watchOn?.id,
+    cinema = when (kind) {
+        MovieReleaseKind.CINEMA_US -> "US"
+        MovieReleaseKind.CINEMA_RO -> "RO"
+        else -> null
+    },
 )

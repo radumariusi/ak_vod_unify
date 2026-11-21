@@ -42,7 +42,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /** Id-ul aplicației din Calendar → id-ul serviciului din registrul aplicației (Setări → Aplicații și servicii). */
-private val CALENDAR_TO_SERVICE = mapOf(
+internal val CALENDAR_TO_SERVICE = mapOf(
     "netflix" to "netflix",
     "max" to "hbomax",
     "disney" to "disney",
