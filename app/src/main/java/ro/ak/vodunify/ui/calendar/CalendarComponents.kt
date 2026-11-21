@@ -148,7 +148,7 @@ private fun Poster(item: CalendarItem, modifier: Modifier) {
         } else {
             Text(item.title, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(6.dp))
         }
-        val top = Modifier.align(Alignment.TopStart).padding(4.dp)
+        val top = Modifier.align(Alignment.TopEnd).padding(4.dp)
         when {
             item.cinema != null -> CinemaBadge(item.cinema, top)
             else -> {
@@ -157,7 +157,7 @@ private fun Poster(item: CalendarItem, modifier: Modifier) {
             }
         }
         if (item.watched) {
-            PosterLabel("✓", Modifier.align(Alignment.TopEnd).padding(4.dp))
+            PosterLabel("✓", Modifier.align(Alignment.TopStart).padding(4.dp))
         }
         if (item.posterLabel.isNotBlank()) {
             PosterLabel(item.posterLabel, Modifier.align(Alignment.BottomStart).padding(4.dp))

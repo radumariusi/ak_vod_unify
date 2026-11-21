@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -127,7 +128,7 @@ private fun HomeContent(
         // fiecare rând cu focus urcă întreg sub hero (derulare cu pivot). Hero-ul se micșorează cât să încapă
         // un rând întreg de postere dedesubt.
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            val heroHeight = minOf(maxHeight * 0.52f, 240.dp, maxHeight - spec.posterHeight - 76.dp).coerceAtLeast(140.dp)
+            val heroHeight = minOf(maxHeight * 0.52f, 240.dp, maxHeight - spec.posterHeight - 92.dp).coerceAtLeast(140.dp)
             Column(Modifier.fillMaxSize()) {
                 Hero(
                     catalog.hero,
@@ -135,7 +136,7 @@ private fun HomeContent(
                     Modifier.fillMaxWidth().height(heroHeight),
                     compact = heroHeight < 200.dp,
                 )
-                PivotScroll(pivot = 46.dp) {
+                PivotScroll(pivot = 60.dp) {
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize().focusRequester(listFocus),
@@ -213,14 +214,18 @@ private fun Hero(
         Column(
             Modifier
                 .align(Alignment.BottomStart)
+                .fillMaxHeight()
                 .padding(horizontal = spec.screenPadding, vertical = 8.dp)
                 .widthIn(max = 620.dp)
                 .fillMaxWidth(if (spec.isCompact) 1f else 0.6f),
-            verticalArrangement = Arrangement.spacedBy(5.dp),
+            // Totul stă jos în hero; sigla ia doar cât loc rămâne (se micșorează, nu iese tăiată pe sus,
+            // de ex. cu textul mărit din setările televizorului).
+            verticalArrangement = Arrangement.spacedBy(5.dp, Alignment.Bottom),
         ) {
             TitleLogo(
                 shown.title,
                 logo,
+                modifier = Modifier.weight(1f, fill = false),
                 height = if (compact) 44.dp else 60.dp,
                 textStyle = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall,
             )

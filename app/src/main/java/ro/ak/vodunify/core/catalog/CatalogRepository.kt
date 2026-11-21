@@ -22,6 +22,7 @@ import ro.ak.vodunify.core.prefs.Market
 import ro.ak.vodunify.core.tmdb.TmdbSeasonDetails
 import ro.ak.vodunify.core.tmdb.TmdbStudioDetails
 import ro.ak.vodunify.core.tmdb.TmdbTitleDetails
+import ro.ak.vodunify.core.tmdb.TmdbWatchProviders
 import ro.ak.vodunify.core.tmdb.TmdbUnauthorizedException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -131,6 +132,54 @@ class CatalogRepository @Inject constructor(
             rating = dto.voteAverage?.takeIf { it > 0 },
             episodeCount = dto.numberOfEpisodes,
         )
+    }
+
+    /** Unde e titlul (RO și US), fără restul detaliilor: pentru sigla de pe postere. Păstrat 7 zile. */
+    suspend fun watchAvailability(kind: TitleKind, id: Long): List<MarketAvailability> {
+        val providers = tmdb.get("${kind.path}/$id/watch/providers", emptyMap(), TmdbWatchProviders.serializer(), TmdbClient.LONG_TTL)
+        return Market.entries.map { TmdbMappers.availability(it, providers.results[it.code]) }
+    }
+
+    /**
+     * „În curând” pentru toată lumea, nu doar din Lista mea: filmele populare care se lansează în următoarele
+     * [movieDays] zile (data premierei mondiale) și serialele populare cu episod nou în următoarele [tvDays] zile.
+     */
+    suspend fun upcomingPopular(settings: CatalogSettings, movieDays: Long, tvDays: Long): List<TitleReleases> = supervisorScope {
+        val today = java.time.LocalDate.now()
+        val lang = settings.apiLanguage
+        val movies = async {
+            val r = list(
+                "discover/movie",
+                mapOf(
+                    "language" to lang,
+                    "primary_release_date.gte" to today.plusDays(1).toString(),
+                    "primary_release_date.lte" to today.plusDays(movieDays).toString(),
+                    "sort_by" to "popularity.desc",
+                ),
+            )
+            val dates = r.results.associate { it.id to it.releaseDate }
+            TmdbMappers.items(r.results, settings.language, TitleKind.MOVIE).map {
+                TitleReleases(item = it, releaseDate = dates[it.id]?.takeIf { d -> d.isNotBlank() }, lastEpisode = null, nextEpisode = null)
+            }
+        }
+        val shows = async {
+            val r = list(
+                "discover/tv",
+                mapOf(
+                    "language" to lang,
+                    "air_date.gte" to today.toString(),
+                    "air_date.lte" to today.plusDays(tvDays).toString(),
+                    "sort_by" to "popularity.desc",
+                ),
+            )
+            // Episodul următor vine din detaliile serialului (păstrate în cache).
+            TmdbMappers.items(r.results, settings.language, TitleKind.TV).take(20).map { item ->
+                async { runCatching { releases(TitleKind.TV, item.id, settings) }.getOrNull() }
+            }.awaitAll().filterNotNull()
+        }
+        val m = runCatching { movies.await() }.getOrDefault(emptyList())
+        val t = runCatching { shows.await() }.getOrDefault(emptyList())
+        m + t
     }
 
     /** Titlul cu datele de lansare (pentru „Noutăți” și „În curând” din Acasă); se reîmprospătează la 6 ore. */

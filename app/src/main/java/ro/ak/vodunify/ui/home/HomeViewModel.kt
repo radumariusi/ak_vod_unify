@@ -95,6 +95,12 @@ class HomeViewModel @Inject constructor(
             }
             coroutineScope {
                 val followed = async { followed(s) }
+                val popular = async {
+                    if (!catalog.isConfigured) emptyList()
+                    else runCatching {
+                        catalog.upcomingPopular(s.settings, HomeSections.SOON_MOVIE_DAYS, POPULAR_EPISODE_DAYS)
+                    }.getOrDefault(emptyList()).map { FollowedTitle(it, null) }
+                }
                 val resume = s.resume.take(ROW_LIMIT * 2).map { e ->
                     async { PersonalMapper.resume(e, art(PersonalMapper.kind(e.ref), e.ref.tmdbId, s.settings)) }
                 }.awaitAll()
@@ -102,14 +108,20 @@ class HomeViewModel @Inject constructor(
                 val f = followed.await()
                 val movies = f.filter { it.releases.item.kind == TitleKind.MOVIE }
                 val shows = f.filter { it.releases.item.kind == TitleKind.TV }
+                val p = popular.await()
+                val popularMovies = p.filter { it.releases.item.kind == TitleKind.MOVIE }
+                val popularShows = p.filter { it.releases.item.kind == TitleKind.TV }
                 PersonalRows(
                     PersonalState.CONNECTED,
                     continueMovies = resume.filter { it.kind == TitleKind.MOVIE }.take(ROW_LIMIT),
                     continueShows = resume.filter { it.kind == TitleKind.TV }.take(ROW_LIMIT),
                     newMovies = HomeSections.newMovies(movies, today).take(ROW_LIMIT),
                     newEpisodes = HomeSections.newEpisodes(shows, today).take(ROW_LIMIT),
-                    soonMovies = HomeSections.soonMovies(movies, today).take(ROW_LIMIT),
-                    soonEpisodes = HomeSections.soonEpisodes(shows, today).take(ROW_LIMIT),
+                    // Întâi ce e din Lista mea, apoi ce e popular, ca rândul să nu fie gol.
+                    soonMovies = (HomeSections.soonMovies(movies, today) + HomeSections.soonMovies(popularMovies, today))
+                        .distinctBy { it.key }.take(ROW_LIMIT),
+                    soonEpisodes = (HomeSections.soonEpisodes(shows, today) + HomeSections.soonEpisodes(popularShows, today))
+                        .distinctBy { it.key }.take(ROW_LIMIT),
                 )
             }
         }
@@ -218,5 +230,6 @@ class HomeViewModel @Inject constructor(
 
         /** Câte titluri din Lista mea verificăm pentru noutăți (cele mai recente întâi). */
         const val FOLLOW_LIMIT = 120
+        const val POPULAR_EPISODE_DAYS = 14L
     }
 }

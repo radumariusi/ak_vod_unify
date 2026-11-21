@@ -97,8 +97,8 @@ fun ScrobblerSection(viewModel: ScrobblerSettingsViewModel = hiltViewModel()) {
             netflix.forEach { line ->
                 Text("Netflix · $line", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.readable())
             }
-            Text("Primite recent", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 6.dp))
             if (log.isEmpty()) {
+                Text("Primite recent", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 6.dp))
                 Text(
                     "Nimic încă. Pornește ceva în Netflix (sau altă aplicație), pune pauză, apoi revino aici.",
                     style = MaterialTheme.typography.bodySmall,
@@ -106,7 +106,9 @@ fun ScrobblerSection(viewModel: ScrobblerSettingsViewModel = hiltViewModel()) {
                     modifier = Modifier.readable(),
                 )
             } else {
-                log.take(40).forEach { LogLine(it) }
+                Expandable("Primite recent", summary = "${log.size.coerceAtMost(40)} înregistrări") {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) { log.take(40).forEach { LogLine(it) } }
+                }
             }
         }
     }

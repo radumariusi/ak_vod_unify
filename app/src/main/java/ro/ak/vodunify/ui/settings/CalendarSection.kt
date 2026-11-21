@@ -87,7 +87,7 @@ fun CalendarSection(viewModel: CalendarSettingsViewModel = hiltViewModel()) {
             Label("Note IMDb (opțional, cheie OMDb)")
             OmdbKeyField(s, viewModel)
 
-            Label("Categorii")
+            Expandable("Categorii", summary = "${s.hiddenCategories.size} ascunse din ${ContentFilter.entries.size}") {
             ContentFilter.entries.forEach { c ->
                 Dropdown(
                     label = c.label,
@@ -96,6 +96,7 @@ fun CalendarSection(viewModel: CalendarSettingsViewModel = hiltViewModel()) {
                     optionLabel = { if (it) "Ascunse" else "Afișate" },
                     onSelect = { hide -> if (hide != (c in s.hiddenCategories)) viewModel.toggleCategory(c) },
                 )
+            }
             }
             Hint("Ce urmărești apare mereu, chiar dacă e într-o categorie ascunsă.")
 
@@ -209,10 +210,11 @@ private fun OmdbKeyField(s: CalendarSettings, viewModel: CalendarSettingsViewMod
 @Composable
 private fun SavedList(title: String, items: List<SavedShow>, action: String, onAction: (Int) -> Unit) {
     if (items.isEmpty()) return
-    Label("$title (${items.size})")
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        items.forEach { item ->
-            OutlinedButton(onClick = { onAction(item.id) }) { Text("${item.name} · $action") }
+    Expandable(title, summary = "${items.size}") {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            items.forEach { item ->
+                OutlinedButton(onClick = { onAction(item.id) }) { Text("${item.name} · $action") }
+            }
         }
     }
 }

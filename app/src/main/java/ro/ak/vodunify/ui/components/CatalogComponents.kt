@@ -159,6 +159,7 @@ fun PosterCard(item: CatalogItem, modifier: Modifier = Modifier, rowKey: String 
             item.rating?.takeIf { it > 0 }?.let {
                 RatingChip(it, Modifier.align(Alignment.TopStart).padding(4.dp))
             }
+            PlatformBadge(item.kind, item.id, Modifier.align(Alignment.TopEnd).padding(4.dp))
         }
     }
 }

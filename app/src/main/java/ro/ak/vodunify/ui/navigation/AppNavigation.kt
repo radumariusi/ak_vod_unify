@@ -1,5 +1,8 @@
 package ro.ak.vodunify.ui.navigation
 
+import ro.ak.vodunify.core.catalog.TitleKind
+import ro.ak.vodunify.core.playback.PosterBadge
+import ro.ak.vodunify.ui.components.LocalPosterBadge
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -132,7 +135,11 @@ fun AppNavigation() {
 
     TitleMenuHost(titleMenu, onOpen = { kind, id -> nav.navigate(Routes.title(kind, id)) })
 
+    val badgesModel: PosterBadgesViewModel = hiltViewModel()
+    val posterBadge: suspend (TitleKind, Long) -> PosterBadge? = remember(badgesModel) { { kind, id -> badgesModel.badge(kind, id) } }
+
     CompositionLocalProvider(
+        LocalPosterBadge provides posterBadge,
         LocalCatalogActions provides actions,
         LocalBackdrop provides backdrop,
         LocalFocusRestore provides restore,
