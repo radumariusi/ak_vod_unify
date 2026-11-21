@@ -100,8 +100,9 @@ class ScreenReaderService : AccessibilityService() {
     }.getOrNull()
 
     /**
-     * Cititor de ecran pornit doar când în față nu e o aplicație din [NO_READER_PREFIXES].
-     * [front] necunoscut: păstrăm starea, iar la pornirea serviciului alegem „oprit” (sigur pentru Netflix).
+     * Cititor de ecran pornit doar cât în față e o aplicație din [READER_PREFIXES]. Pentru restul
+     * (Netflix, YouTube…) e oprit: văzând un cititor de ecran, ele citesc cu voce butoanele.
+     * [front] necunoscut: păstrăm starea, iar la pornirea serviciului alegem „oprit”.
      */
     private fun updateReaderMode(front: String?) {
         if (!isTv) return
@@ -109,7 +110,7 @@ class ScreenReaderService : AccessibilityService() {
             if (readerMode == null) setReaderMode(false, "aplicația din față necunoscută")
             return
         }
-        setReaderMode(!NO_READER_PREFIXES.any { front.startsWith(it) }, front)
+        setReaderMode(READER_PREFIXES.any { front.startsWith(it) }, front)
     }
 
     /** Mod „cititor de ecran” (Apple TV își arată textele doar așa) pornit / oprit. */
@@ -205,8 +206,11 @@ class ScreenReaderService : AccessibilityService() {
     }.getOrDefault(pkg)
 
     private companion object {
-        /** Aplicații pentru care NU pornim modul cititor de ecran (ar vorbi). */
-        val NO_READER_PREFIXES = listOf("com.netflix.")
+        /**
+         * Singurele aplicații pentru care pornim modul cititor de ecran: Apple TV își arată titlul
+         * doar așa; Nuvio și DebridStream au mers (fără voce) cu el pornit și nu le schimbăm.
+         */
+        val READER_PREFIXES = listOf("com.apple.atve.", "com.nuvio", "app.nuvio", "com.debridstream")
 
         const val SETTLE_MS = 700L
         const val POLL_MS = 4_000L
