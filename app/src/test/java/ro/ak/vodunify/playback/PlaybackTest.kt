@@ -99,9 +99,9 @@ class PlaybackTest {
         )
         val settings = PlaybackSettings(Market.RO, serviceMarkets = mapOf("hbomax" to Market.US), defaultPlayer = "stremio")
         val all = WatchOptionsBuilder.available(availability, settings, emptySet())
-        assertEquals(setOf("Max (US)", "Netflix (RO)", "Peacock (US)"), all.map { it.label }.toSet())
+        assertEquals(setOf("HBO Max (US)", "Netflix (RO)", "Peacock (US)"), all.map { it.label }.toSet())
         val o = WatchOptionsBuilder.build(availability, settings, setOf(TargetApp.NUVIO, TargetApp.STREMIO, TargetApp.HBO_MAX))
-        assertEquals(listOf("Max (US)"), o.services.map { it.label })
+        assertEquals(listOf("HBO Max (US)"), o.services.map { it.label })
         assertEquals(listOf(TargetApp.STREMIO, TargetApp.NUVIO), o.players)
     }
 
@@ -122,7 +122,7 @@ class PlaybackTest {
             setOf(TargetApp.NUVIO),
         )
         assertTrue(o.services.isEmpty())
-        assertEquals(listOf("Max (US)"), o.elsewhere.map { it.label })
+        assertEquals(listOf("HBO Max (US)"), o.elsewhere.map { it.label })
         assertNull(o.recommendedService)
         assertEquals(TargetApp.NUVIO, o.recommendedPlayer)
 
