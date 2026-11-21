@@ -1,5 +1,6 @@
 package ro.ak.vodunify.core.calendar.engine
 
+import ro.ak.vodunify.core.calendar.cinema.RoCinemaRelease
 import ro.ak.vodunify.core.calendar.model.CalendarSettings
 import ro.ak.vodunify.core.calendar.model.MovieRelease
 import ro.ak.vodunify.core.calendar.model.MovieReleaseKind
@@ -35,7 +36,11 @@ object MovieReleasePlanner {
     private const val THEATRICAL = 3
     private const val DIGITAL = 4
 
-    fun releases(details: MovieDetailsDto, settings: CalendarSettings): List<MovieRelease> {
+    /**
+     * [roCinema]: the film in a Romanian cinema program (Cinema City, Orange Film). Its
+     * premiere wins over TMDb's Romanian cinema date, which is often missing or out of date.
+     */
+    fun releases(details: MovieDetailsDto, settings: CalendarSettings, roCinema: RoCinemaRelease? = null): List<MovieRelease> {
         val byCountry: Map<String, List<ReleaseDateDto>> = details.releaseDates?.results.orEmpty()
             .groupBy({ it.country.uppercase() }, { it.releaseDates })
             .mapValues { (_, lists) -> lists.flatten() }
@@ -50,6 +55,8 @@ object MovieReleasePlanner {
             val wide = entries(region).earliest(THEATRICAL)
             val limited = entries(region).earliest(LIMITED)
             when {
+                region == Region.RO && roCinema != null ->
+                    out += MovieRelease(kind, region, roCinema.date, source = roCinema.source)
                 wide != null -> out += MovieRelease(kind, region, wide)
                 limited != null -> out += MovieRelease(kind, region, limited, limited = true)
             }

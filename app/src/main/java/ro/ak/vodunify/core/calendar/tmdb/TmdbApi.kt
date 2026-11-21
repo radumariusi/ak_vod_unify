@@ -38,6 +38,9 @@ interface TmdbApi {
     /** Movie details with `release_dates`, `watch/providers` and `external_ids` appended. */
     suspend fun movieDetails(movieId: Int): MovieDetailsDto
 
+    /** Movie search by title (and year, when known), to find a film from a Romanian cinema program. */
+    suspend fun searchMovie(query: String, year: Int?): PagedResponse<MovieSummaryDto>
+
 }
 
 

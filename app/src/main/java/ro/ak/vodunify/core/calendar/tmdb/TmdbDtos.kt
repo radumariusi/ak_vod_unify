@@ -188,8 +188,28 @@ data class MovieDetailsDto(
     @SerialName("release_dates") val releaseDates: ReleaseDatesDto? = null,
     @SerialName("watch/providers") val watchProviders: WatchProvidersDto? = null,
     @SerialName("external_ids") val externalIds: ExternalIdsDto? = null,
+    val translations: TranslationsDto? = null,
 ) {
+    /** Every title the movie is known by: shown, original and translated (Romanian among them). */
+    val allTitles: List<String>
+        get() = (listOf(title, originalTitle) + translations?.translations.orEmpty().mapNotNull { it.data?.title })
+            .filter { it.isNotBlank() }
+            .distinct()
+
     /** Countries the movie comes from: `origin_country`, else the production countries. */
     val countries: List<String>
         get() = originCountry.ifEmpty { productionCountries.map { it.code } }.filter { it.isNotBlank() }
 }
+
+@Serializable
+data class TranslationsDto(val translations: List<TranslationDto> = emptyList())
+
+@Serializable
+data class TranslationDto(
+    @SerialName("iso_3166_1") val country: String = "",
+    @SerialName("iso_639_1") val language: String = "",
+    val data: TranslationDataDto? = null,
+)
+
+@Serializable
+data class TranslationDataDto(val title: String? = null)

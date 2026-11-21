@@ -1,6 +1,9 @@
 package ro.ak.vodunify.calendar
 
 import ro.ak.vodunify.core.calendar.anticipated.FixedAnticipatedMoviesSource
+import ro.ak.vodunify.core.calendar.cinema.RoCinemaProgram
+import ro.ak.vodunify.core.calendar.cinema.RoCinemaRelease
+import ro.ak.vodunify.core.calendar.cinema.RoCinemaSource
 import ro.ak.vodunify.core.calendar.engine.MovieCalendarRepository
 import ro.ak.vodunify.core.calendar.model.CalendarSettings
 import ro.ak.vodunify.core.calendar.model.ContentFilter
@@ -28,6 +31,7 @@ class MovieCalendarRepositoryTest {
     private val server = MockWebServer()
     private val day = LocalDate.of(2026, 11, 20)
     private val discoverQueries = mutableListOf<String>()
+    private val searches = mutableListOf<String>()
 
     @Before
     fun setUp() {
@@ -59,6 +63,13 @@ class MovieCalendarRepositoryTest {
                     path.endsWith("/movie/50") -> DIGITAL_BAD
                     path.endsWith("/movie/60") -> INDIAN
                     path.endsWith("/movie/70") -> CINEMA_UNKNOWN
+                    path.endsWith("/movie/80") -> ROCKY
+                    path.endsWith("/search/movie") -> {
+                        synchronized(searches) { searches += url.queryParameter("query").orEmpty() }
+                        if (url.queryParameter("query").orEmpty().contains("Rocky")) {
+                            """{"page":1,"total_pages":1,"total_results":1,"results":[{"id":80,"title":"I Play Rocky: Povestea din spatele legendei","original_title":"I Play Rocky","genre_ids":[18],"release_date":"2026-09-01","popularity":20}]}"""
+                        } else page()
+                    }
                     else -> return MockResponse().setResponseCode(404)
                 }
                 return MockResponse().setBody(body).setHeader("Content-Type", "application/json")
@@ -70,12 +81,44 @@ class MovieCalendarRepositoryTest {
     @After
     fun tearDown() = server.shutdown()
 
-    private fun repo(anticipated: Set<Int> = setOf(10, 40)) = MovieCalendarRepository(
+    private fun repo(anticipated: Set<Int> = setOf(10, 40), program: List<RoCinemaRelease>? = null) = MovieCalendarRepository(
         apiFactory = { key -> testTmdbApi(server.url("/3/").toString(), key) },
         imdbRatings = OmdbClient(OkHttpClient(), baseUrl = server.url("/omdb/").toString()),
         anticipatedSource = FixedAnticipatedMoviesSource(anticipated),
         today = { day },
+        roCinema = program?.let { list ->
+            RoCinemaProgram(listOf(object : RoCinemaSource {
+                override val name = "test"
+                override suspend fun releases(today: LocalDate) = list
+            }))
+        },
     )
+
+    @Test
+    fun `Romanian cinema program corrects TMDb's date and adds films TMDb missed`() = runTest {
+        val program = listOf(
+            // TMDb says 27.11 in Romania; Cinema City has it a week earlier.
+            RoCinemaRelease("Cinema Hyped", year = 2026, date = day, source = "Cinema City"),
+            // Not in TMDb's Romanian discover at all; Cinema City cuts the title.
+            RoCinemaRelease("I Play Rocky: Povestea din spatele legen", year = 2026, date = day, source = "Cinema City", truncated = true),
+        )
+        val result = repo(program = program).moviesBetween(day, day, settings(), "k")
+        val ro = result.entries.filter { it.kind == MovieReleaseKind.CINEMA_RO }.associateBy { it.title }
+
+        assertEquals("Cinema City", ro.getValue("Cinema Hyped").cinemaSource)
+        assertEquals(day, ro.getValue("Cinema Hyped").releaseDate)
+        assertEquals(null, ro.getValue("Cinema RO").cinemaSource) // not in the program: TMDb's date stays
+        val rocky = ro.getValue("I Play Rocky")
+        assertEquals("Cinema City", rocky.cinemaSource)
+        assertEquals(QualityVerdict.PASS_ANTICIPATED, rocky.verdict) // few votes, but it is in Romanian cinemas
+        assertFalse(rocky.isAnticipated)
+        assertTrue(searches.none { it.contains("Hyped") }) // discover already had it
+        assertTrue(searches.any { it.startsWith("I Play Rocky") && !it.endsWith("legen") })
+
+        // TMDb's 27.11 no longer shows: the real date is 20.11.
+        val nextWeek = repo(program = program).moviesBetween(day.plusDays(7), day.plusDays(7), settings(), "k")
+        assertTrue(nextWeek.entries.none { it.title == "Cinema Hyped" && it.kind == MovieReleaseKind.CINEMA_RO })
+    }
 
     private fun settings(netflix: Region? = Region.RO) = CalendarSettings().let { s ->
         if (netflix == null) s else s.updateApp("netflix") { it.copy(installed = true, region = netflix) }
@@ -164,10 +207,11 @@ class MovieCalendarRepositoryTest {
 
     companion object {
         private val GENRES = mapOf(10 to "[28]", 20 to "[18]", 30 to "[18]", 40 to "[53]", 50 to "[35]", 60 to "[18]", 70 to "[99]")
+        private val TITLES = mapOf(10 to "Cinema Hyped")
         private val LANGS = emptyMap<Int, String>() // the Indian movie only shows as Indian in its details
 
         fun page(vararg ids: Int) = """{"page":1,"total_pages":1,"total_results":${ids.size},"results":[${
-            ids.joinToString(",") { """{"id":$it,"title":"m$it","original_language":"${LANGS[it] ?: "en"}","genre_ids":${GENRES[it]},"popularity":${100 - it}}""" }
+            ids.joinToString(",") { """{"id":$it,"title":"${TITLES[it] ?: "m$it"}","original_language":"${LANGS[it] ?: "en"}","genre_ids":${GENRES[it]},"popularity":${100 - it}}""" }
         }]}"""
 
         private fun details(
@@ -203,5 +247,10 @@ class MovieCalendarRepositoryTest {
             .replace("\"original_language\":\"en\",\"origin_country\":[\"US\"]", "\"original_language\":\"hi\",\"origin_country\":[\"IN\"]")
 
         val CINEMA_UNKNOWN = details(70, "Cinema Unknown", country("US", 3 to "2026-11-20"), votes = 0, rating = 0.0)
+
+        val ROCKY = details(
+            80, "I Play Rocky", country("US", 3 to "2026-09-01"), votes = 5, rating = 7.0,
+            extra = ""","translations":{"translations":[{"iso_3166_1":"RO","iso_639_1":"ro","data":{"title":"I Play Rocky: Povestea din spatele legendei"}}]}""",
+        )
     }
 }

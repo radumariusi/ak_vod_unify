@@ -104,6 +104,7 @@ fun movieBadges(entry: MovieEntry): List<String> = buildList {
     if (entry.isAnticipated) add("Mult așteptat")
     if (entry.isFollowed) add("Urmărești")
     if (entry.limited) add("Lansare limitată")
+    entry.cinemaSource?.let { add("Dată confirmată: $it") }
 }
 
 fun movieReleaseLine(release: MovieRelease): String {
@@ -114,7 +115,11 @@ fun movieReleaseLine(release: MovieRelease): String {
         }
         MovieReleaseKind.DIGITAL -> "Digital ${release.region.code} (închiriere / cumpărare)"
         MovieReleaseKind.CINEMA_US -> "Cinema SUA" + if (release.limited) " (limitat)" else ""
-        MovieReleaseKind.CINEMA_RO -> "Cinema România" + if (release.limited) " (limitat)" else ""
+        MovieReleaseKind.CINEMA_RO -> "Cinema România" + when {
+            release.source != null -> " (${release.source})"
+            release.limited -> " (limitat)"
+            else -> ""
+        }
     }
     val year = if (release.date.year != RomaniaTime.today().year) " ${release.date.year}" else ""
     return "$what: " + dayLabel(release.date) + year

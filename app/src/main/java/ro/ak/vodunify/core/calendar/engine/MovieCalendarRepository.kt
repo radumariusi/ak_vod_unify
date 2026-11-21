@@ -2,6 +2,8 @@ package ro.ak.vodunify.core.calendar.engine
 
 import ro.ak.vodunify.core.calendar.anticipated.AnticipatedMoviesSource
 import ro.ak.vodunify.core.calendar.anticipated.TmdbAnticipatedMoviesSource
+import ro.ak.vodunify.core.calendar.cinema.RoCinemaProgram
+import ro.ak.vodunify.core.calendar.cinema.RoCinemaRelease
 import ro.ak.vodunify.core.calendar.filter.ContentClassifier
 import ro.ak.vodunify.core.calendar.model.CalendarSettings
 import ro.ak.vodunify.core.calendar.model.MovieCalendarResult
@@ -37,6 +39,11 @@ import java.time.LocalDate
  *    for the user's apps and regions, each turned into a moment in Romania time.
  * 4. The quality gate keeps movies above the rating thresholds and, while they
  *    have too few votes to judge, those on the anticipated list.
+ *
+ * Romanian cinema: when [roCinema] is set, the real Romanian cinema program (Cinema City,
+ * Orange Film) confirms or corrects TMDb's Romanian date, and films it lists in the period
+ * that TMDb's discover missed are looked up by title. A film in a Romanian cinema program
+ * counts as anticipated while it has too few votes.
  */
 class MovieCalendarRepository(
     private val apiFactory: (apiKey: String) -> TmdbApi,
@@ -46,6 +53,8 @@ class MovieCalendarRepository(
     private val pagesPerQuery: Int = 3,
     private val concurrency: Int = 8,
     private val today: () -> LocalDate = { RomaniaTime.today() },
+    private val roCinema: RoCinemaProgram? = null,
+    private val maxCinemaSearches: Int = 30,
 ) {
 
     suspend fun moviesBetween(
@@ -70,6 +79,17 @@ class MovieCalendarRepository(
             }
         }
 
+        val programDeferred = async {
+            if (roCinema == null || MovieReleaseKind.CINEMA_RO !in kinds) return@async emptyList()
+            try {
+                roCinema.load(today())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+
         val maxPages = if (from == to) pagesPerQueryForDay else pagesPerQuery
         val discovered = discoverQueries(settings).map { (region, types) ->
             async { discover(api, region, types, from, to, maxPages) }
@@ -81,7 +101,7 @@ class MovieCalendarRepository(
 
         var hiddenByUser = 0
         val hiddenByCategoryIds = mutableSetOf<Int>()
-        val kept = candidates.filter { movie ->
+        fun keep(movie: MovieSummaryDto): Boolean =
             when {
                 movie.adult -> false
                 settings.isMovieFollowed(movie.id) -> true
@@ -90,6 +110,17 @@ class MovieCalendarRepository(
                     .any { it in settings.hiddenCategories } -> false.also { hiddenByCategoryIds += movie.id }
                 else -> true
             }
+        val kept = candidates.filter { keep(it) }.toMutableList()
+
+        // Romanian cinema premieres in the period that TMDb's discover did not bring.
+        val program = programDeferred.await()
+        if (program.isNotEmpty()) {
+            val known = candidates.map { it.id }.toSet()
+            missingFromDiscover(program, candidates, from, to).take(maxCinemaSearches).map { release ->
+                async { searchFilm(api, release) }
+            }.awaitAll().filterNotNull().distinctBy { it.id }
+                .filter { it.id !in known && keep(it) }
+                .forEach { kept += it }
         }
         val anticipated = anticipatedDeferred.await()
         val useImdb = imdbRatings != null && omdbKey.isNotBlank()
@@ -100,7 +131,7 @@ class MovieCalendarRepository(
             async {
                 semaphore.withPermit {
                     try {
-                        Result.success(entriesForMovie(api, id, from, to, settings, anticipated, omdbKey.takeIf { useImdb }))
+                        Result.success(entriesForMovie(api, id, from, to, settings, anticipated, omdbKey.takeIf { useImdb }, program))
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -178,9 +209,11 @@ class MovieCalendarRepository(
         settings: CalendarSettings,
         anticipated: Set<Int>,
         omdbKey: String?,
+        program: List<RoCinemaRelease>,
     ): List<MovieEntry> {
         val details = api.movieDetails(movieId)
-        val all = MovieReleasePlanner.releases(details, settings)
+        val roCinema = if (program.isEmpty()) null else RoCinemaProgram.find(program, details.allTitles, yearOf(details.releaseDate))
+        val all = MovieReleasePlanner.releases(details, settings, roCinema)
         val inWindow = MovieReleasePlanner.calendarReleases(all, settings)
             .map { it to MovieReleasePlanner.moment(it) }
             .filter { (_, moment) -> moment.first.toLocalDate().let { !it.isBefore(from) && !it.isAfter(to) } }
@@ -195,7 +228,7 @@ class MovieCalendarRepository(
             tmdbRating = details.voteAverage,
             tmdbVotes = details.voteCount,
             imdb = imdb,
-            isAnticipated = isAnticipated,
+            isAnticipated = isAnticipated || roCinema != null,
             isFollowed = followed,
             t = settings.movieThresholds,
         )
@@ -219,6 +252,7 @@ class MovieCalendarRepository(
                 watchOn = release.service.takeIf { release.onMyApp },
                 watchRegion = release.region.takeIf { release.onMyApp },
                 limited = release.limited,
+                cinemaSource = release.source,
                 availability = availability,
                 tmdbRating = details.voteAverage,
                 tmdbVotes = details.voteCount,
@@ -237,7 +271,47 @@ class MovieCalendarRepository(
         }
     }
 
+    /** Program films opening in [from]..[to] that no discover candidate is. */
+    private fun missingFromDiscover(
+        program: List<RoCinemaRelease>,
+        candidates: List<MovieSummaryDto>,
+        from: LocalDate,
+        to: LocalDate,
+    ): List<RoCinemaRelease> = program
+        .filter { !it.date.isBefore(from) && !it.date.isAfter(to) }
+        .filter { r -> candidates.none { c -> RoCinemaProgram.find(listOf(r), listOf(c.title, c.originalTitle), yearOf(c.releaseDate)) != null } }
+
+    private val searchLimit = Semaphore(4)
+
+    /** The TMDb movie a program film is: search by its title, keep a result whose title matches. */
+    private suspend fun searchFilm(api: TmdbApi, release: RoCinemaRelease): MovieSummaryDto? = searchLimit.withPermit {
+        try {
+            val queries = buildList {
+                release.originalTitle?.let { add(RoCinemaProgram.searchQuery(it)) }
+                var t = RoCinemaProgram.searchQuery(release.title)
+                // A cut title can end in half a word: search without it.
+                if (release.truncated && t.contains(' ')) t = t.substringBeforeLast(' ').trimEnd(' ', ':', '-', ',')
+                add(t)
+            }.filter { it.length >= 2 }.distinct()
+            for (q in queries) {
+                for (year in listOf(release.year, null).distinct()) {
+                    val hit = api.searchMovie(q, year).results.firstOrNull { m ->
+                        !m.adult && RoCinemaProgram.find(listOf(release), listOf(m.title, m.originalTitle), yearOf(m.releaseDate)) != null
+                    }
+                    if (hit != null) return@withPermit hit
+                }
+            }
+            null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     companion object {
+        internal fun yearOf(date: String?): Int? = date?.takeIf { it.length >= 4 }?.substring(0, 4)?.toIntOrNull()
+
         /** By moment; on the same day cinema (no hour) goes after the timed releases, then by popularity. */
         val movieOrder: Comparator<MovieEntry> = compareBy<MovieEntry>(
             { it.releaseDate },

@@ -19,6 +19,9 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import ro.ak.vodunify.BuildConfig
+import ro.ak.vodunify.core.calendar.cinema.CinemaCityRoSource
+import ro.ak.vodunify.core.calendar.cinema.OrangeFilmSource
+import ro.ak.vodunify.core.calendar.cinema.RoCinemaProgram
 import ro.ak.vodunify.core.calendar.engine.EpisodeCalendarRepository
 import ro.ak.vodunify.core.calendar.engine.MovieCalendarRepository
 import ro.ak.vodunify.core.calendar.model.CalendarResult
@@ -76,6 +79,9 @@ class CalendarRepository @Inject constructor(
 ) {
     private val omdb = OmdbClient(http)
 
+    /** Programul real din cinematografele din România: Cinema City (cu o lună înainte) + Orange Film (săptămâna curentă). */
+    private val roCinema = RoCinemaProgram(listOf(CinemaCityRoSource(http), OrangeFilmSource(http)))
+
     private val fetch = object : TmdbFetch {
         override suspend fun <T> get(path: String, params: Map<String, String?>, serializer: KSerializer<T>, ttlMillis: Long): T =
             json.decodeFromString(serializer, tmdb.getRaw(path, params, ttlMillis))
@@ -89,7 +95,7 @@ class CalendarRepository @Inject constructor(
     }
 
     private fun movieRepo(language: String) = movieRepos.getOrPut(language) {
-        MovieCalendarRepository(apiFactory = { TmdbCalendarApi(fetch, language) }, imdbRatings = omdb)
+        MovieCalendarRepository(apiFactory = { TmdbCalendarApi(fetch, language) }, imdbRatings = omdb, roCinema = roCinema)
     }
 
     val isConfigured: Boolean get() = tmdb.isConfigured
