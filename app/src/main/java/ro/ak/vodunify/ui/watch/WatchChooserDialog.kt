@@ -43,18 +43,23 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ro.ak.vodunify.core.playback.LinkPrecision
-import ro.ak.vodunify.core.playback.MarketWarning
-import ro.ak.vodunify.core.playback.OfferType
 import ro.ak.vodunify.core.playback.ResumeInfo
 import ro.ak.vodunify.core.playback.ResumeState
 import ro.ak.vodunify.core.playback.ServiceOption
+import ro.ak.vodunify.core.playback.PlaybackRequest
+import ro.ak.vodunify.core.playback.TargetApp
+import ro.ak.vodunify.core.playback.WatchOptions
+import ro.ak.vodunify.ui.components.ChoiceDialog
+import ro.ak.vodunify.ui.components.ChoiceOption
 import ro.ak.vodunify.core.playback.formatPosition
 import ro.ak.vodunify.core.connector.ExternalTrackers
-import ro.ak.vodunify.core.publish.PublishMode
-import ro.ak.vodunify.ui.components.NetworkImage
 import ro.ak.vodunify.ui.components.layoutSpec
 
-/** Dialogul „Alege unde vezi”. Se afișează cât timp [WatchChooserViewModel.state] nu e null. */
+/**
+ * „Alege unde vezi”, ca listă (ca în AK VOD Hub): serviciile tale pe care e titlul (ex. „Netflix (RO)”),
+ * apoi playerele. Dacă nu e pe niciun serviciu al tău, arată unde se găsește (neinstalat) și playerele.
+ * La pornirea directă („Vezi”) lista nu apare deloc, decât dacă nu avem ce porni singuri.
+ */
 @Composable
 fun WatchChooserHost(viewModel: WatchChooserViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -67,232 +72,93 @@ fun WatchChooserHost(viewModel: WatchChooserViewModel) {
         }
     }
     val s = state ?: return
-    Dialog(onDismissRequest = viewModel::dismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        ChooserContent(s, viewModel)
-    }
-    if (s.editingMinute) {
-        SetMinuteDialog(
+    when {
+        s.editingMinute -> SetMinuteDialog(
             initialMs = s.resume.positionMs?.takeIf { s.resume.hasPosition } ?: 0L,
             runtimeMinutes = s.request.runtimeMinutes,
             onSave = viewModel::saveMinute,
             onDismiss = viewModel::closeSetMinute,
         )
-    }
-    s.confirm?.let { target ->
-        ResumeConfirmDialog(
-            appName = target.installed.app.displayName,
+        s.confirm != null -> ResumeConfirmDialog(
+            appName = s.confirm.installed.app.displayName,
             resume = s.resume,
             syncing = s.syncing,
             onOpenNow = viewModel::confirmOpenNow,
             onWait = viewModel::waitForSync,
             onDismiss = viewModel::cancelConfirm,
         )
+        s.direct -> Unit // pornire directă: se încarcă, apoi se deschide singur
+        s.loading || s.options == null -> Dialog(onDismissRequest = viewModel::dismiss) {
+            Box(Modifier.padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        }
+        else -> ChooserList(s, s.options, viewModel)
     }
 }
 
+private sealed interface ChooserAction {
+    data class Service(val option: ServiceOption) : ChooserAction
+    data class Player(val app: TargetApp) : ChooserAction
+    data object SetMinute : ChooserAction
+}
+
 @Composable
-private fun ChooserContent(s: ChooserState, vm: WatchChooserViewModel) {
-    val spec = layoutSpec()
-    val firstFocus = remember { FocusRequester() }
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface,
-        modifier = Modifier
-            .padding(if (spec.isCompact) 12.dp else 48.dp)
-            .widthIn(max = 760.dp)
-            .fillMaxWidth()
-            .heightIn(max = 900.dp),
-    ) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Alege unde vezi", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text(
-                if (s.request.type == ro.ak.vodunify.core.playback.PlaybackRequest.Type.EPISODE) "${s.request.title} · ${s.request.label}" else s.request.label,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+private fun ChooserList(s: ChooserState, options: WatchOptions, vm: WatchChooserViewModel) {
+    val entries = buildList {
+        options.services.forEachIndexed { i, opt ->
+            val app = opt.app
+            val detail = when {
+                app != null && opt.usesPreferredPlayer -> "Se deschide în ${app.displayName}"
+                else -> app?.let { s.launches[it]?.precision?.label } ?: LinkPrecision.APP.label
+            }
+            add(ChoiceOption(opt.label, detail, heading = if (i == 0) "Serviciile tale" else null) to ChooserAction.Service(opt))
+        }
+        options.elsewhere.forEachIndexed { i, opt ->
+            add(
+                ChoiceOption(
+                    opt.label,
+                    "Neinstalat · deschide magazinul",
+                    heading = if (i == 0) "Nu e pe serviciile tale. Se găsește pe:" else null,
+                ) to ChooserAction.Service(opt),
             )
-            ResumeChip(s.resume)
-            if (s.canSetMinute && !s.loading) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(onClick = vm::openSetMinute, enabled = !s.publishing) { Text("Setează minutul") }
-                    if (ExternalTrackers.ENABLED && s.publishMode != PublishMode.VIEW_ONLY && s.resume.hasPosition) {
-                        OutlinedButton(onClick = vm::publishNow, enabled = !s.publishing) { Text("Publică acum") }
-                    }
-                    if (s.publishing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                }
-                Hint(
-                    when {
-                        !ExternalTrackers.ENABLED -> "Minutul setat se salvează local, în „Continuă vizionarea”."
-                        else -> when (s.publishMode) {
-                        PublishMode.AUTOMATIC -> "Publicare automată: minutul setat se trimite în trackerele profilului."
-                        PublishMode.ON_DEMAND -> "Publicare la cerere: minutul rămâne local până apeși „Publică acum”."
-                        PublishMode.VIEW_ONLY -> "Doar vizualizare: minutul setat rămâne pe acest dispozitiv."
-                        }
-                    },
-                )
-            }
-
-            val options = s.options
-            if (s.loading || options == null) {
-                Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                return@Column
-            }
-            LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
-
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f, fill = false)) {
-                options.warning?.let { w -> item(key = "warn") { WarningCard(w) } }
-
-                item(key = "svc_title") { SectionLabel("Servicii de streaming (fiecare în biblioteca ta: RO sau US)") }
-                if (options.services.isEmpty()) {
-                    item(key = "svc_empty") { Hint("Nu e pe niciun serviciu din bibliotecile tale.") }
-                }
-                items(options.services, key = { "svc_${it.market}_${it.provider.id}" }) { opt ->
-                    val focus = if (opt == options.services.firstOrNull()) firstFocus else null
-                    ServiceRow(opt, opt.app?.let { s.launches[it]?.precision }, focus) { vm.chooseService(opt) }
-                }
-
-                item(key = "pl_title") { SectionLabel("Redă într-un player (standardul e primul)") }
-                if (options.players.isEmpty()) {
-                    item(key = "pl_empty") { Hint("Nu am găsit niciun player (Stremio, Nuvio, DebridStream, AK VoD Hub…) pe acest dispozitiv.") }
-                }
-                items(options.players, key = { "pl_${it.id}" }) { app ->
-                    val focus = if (options.services.isEmpty() && app == options.players.firstOrNull()) firstFocus else null
-                    ChoiceRow(
-                        title = s.launches[app]?.installed?.label ?: app.displayName,
-                        subtitle = s.launches[app]?.precision?.label ?: "Nu poate fi pornit",
-                        badge = if (app == options.players.firstOrNull()) "Standard" else null,
-                        logo = null,
-                        focusRequester = focus,
-                        enabled = s.launches[app] != null,
-                    ) { vm.choosePlayer(app) }
-                }
-                if (options.missingPlayers.isNotEmpty() && options.players.isNotEmpty()) {
-                    item(key = "pl_missing") { Hint("Neinstalate: " + options.missingPlayers.joinToString { it.displayName }) }
-                }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = vm::dismiss, modifier = if (options.services.isEmpty() && options.players.isEmpty()) Modifier.focusRequester(firstFocus) else Modifier) {
-                    Text("Închide")
-                }
-            }
+        }
+        options.players.forEachIndexed { i, app ->
+            val launch = s.launches[app]
+            add(
+                ChoiceOption(
+                    label = (launch?.installed?.label ?: app.displayName) + if (i == 0) " · standard" else "",
+                    detail = launch?.precision?.label ?: "Nu poate fi pornit",
+                    enabled = launch != null,
+                    heading = if (i == 0) "Redă într-un player" else null,
+                ) to ChooserAction.Player(app),
+            )
+        }
+        if (s.canSetMinute) {
+            add(ChoiceOption("Setează minutul…", "Poziția se salvează local, în „Continuă vizionarea”", heading = "Altele") to ChooserAction.SetMinute)
         }
     }
-}
-
-@Composable
-private fun ServiceRow(opt: ServiceOption, precision: LinkPrecision?, focus: FocusRequester?, onClick: () -> Unit) {
-    val app = opt.app
-    val subtitle = buildList {
-        add(opt.offer.label)
-        add(if (opt.market == ro.ak.vodunify.core.prefs.Market.US) "biblioteca US (VPN)" else "biblioteca RO")
-        when {
-            app == null -> add("fără integrare încă · vezi ofertele")
-            !opt.installed -> add("${app.displayName} nu e instalat · instalează")
-            else -> {
-                if (opt.usesPreferredPlayer) add("se deschide în ${app.displayName}")
-                add(precision?.label ?: LinkPrecision.APP.label)
-            }
+    val title = if (s.request.type == PlaybackRequest.Type.EPISODE) "${s.request.title} · ${s.request.label}" else s.request.label
+    val footer = buildList {
+        if (options.services.isEmpty() && options.elsewhere.isEmpty()) add("Nu e pe niciun serviciu de streaming din bibliotecile tale (RO / US).")
+        if (options.players.isEmpty()) add("Niciun player instalat (Stremio, Nuvio, DebridStream, AK VoD Hub…).")
+        s.resume.positionMs?.takeIf { s.resume.hasPosition }?.let { pos ->
+            add("Reiei de la ${formatPosition(pos)}" + (s.resume.source?.let { " ($it)" } ?: ""))
         }
-    }.joinToString(" · ")
-    ChoiceRow(
-        title = opt.provider.name,
-        subtitle = subtitle,
-        badge = when {
-            opt.usesPreferredPlayer -> "Preferat"
-            opt.offer == OfferType.RENT || opt.offer == OfferType.BUY -> null
-            opt.installed -> "Instalat"
-            else -> null
+    }.joinToString("\n").ifBlank { null }
+    ChoiceDialog(
+        title = "Unde vezi · $title",
+        options = entries.map { it.first },
+        selected = null,
+        onPick = { index ->
+            when (val action = entries[index].second) {
+                is ChooserAction.Service -> vm.chooseService(action.option)
+                is ChooserAction.Player -> vm.choosePlayer(action.app)
+                ChooserAction.SetMinute -> vm.openSetMinute()
+            }
         },
-        logo = opt.provider.logoUrl,
-        focusRequester = focus,
-        enabled = true,
-        dimmed = !opt.installed,
-        onClick = onClick,
+        onDismiss = vm::dismiss,
+        footer = footer,
+        dismissOnPick = false,
     )
-}
-
-@Composable
-private fun ChoiceRow(
-    title: String,
-    subtitle: String,
-    badge: String?,
-    logo: String?,
-    focusRequester: FocusRequester?,
-    enabled: Boolean,
-    dimmed: Boolean = false,
-    onClick: () -> Unit,
-) {
-    val interaction = remember { MutableInteractionSource() }
-    val focused by interaction.collectIsFocusedAsState()
-    Surface(
-        onClick = onClick,
-        enabled = enabled,
-        shape = RoundedCornerShape(10.dp),
-        color = if (focused) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-        border = if (focused) BorderStroke(3.dp, Color.White) else null,
-        interactionSource = interaction,
-        modifier = Modifier
-            .fillMaxWidth()
-            .let { m -> focusRequester?.let { m.focusRequester(it) } ?: m },
-    ) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            NetworkImage(logo, title, Modifier.size(44.dp), fallbackText = title.take(2))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    title,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = if (dimmed) MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified,
-                )
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            badge?.let {
-                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ResumeChip(resume: ResumeInfo) {
-    val color = when (resume.state) {
-        ResumeState.SYNCED -> Color(0xFF4CAF50)
-        ResumeState.LOCAL -> Color(0xFFBA68C8)
-        ResumeState.PENDING -> Color(0xFFFFB300)
-        ResumeState.ESTIMATED -> Color(0xFF64B5F6)
-        ResumeState.MANUAL -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    val text = buildString {
-        append(resume.state.label)
-        resume.positionMs?.takeIf { resume.hasPosition }?.let { append(" · ").append(formatPosition(it)) }
-        resume.source?.let { append(" · ").append(it) }
-    }
-    Surface(shape = RoundedCornerShape(50), color = color.copy(alpha = 0.18f), border = BorderStroke(1.dp, color)) {
-        Text(text, color = color, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
-    }
-}
-
-@Composable
-private fun WarningCard(w: MarketWarning) {
-    val text = when (w) {
-        is MarketWarning.NotInYourLibraries ->
-            "E pe ${w.services.take(4).joinToString()}, dar nu în bibliotecile pe care le folosești (RO/US, din Setări → " +
-                "Aplicații și servicii). Îl poți porni într-un player."
-        MarketWarning.NowhereStreaming -> "Nu apare pe niciun serviciu cu abonament în RO sau US. Poți încerca un player."
-    }
-    Surface(shape = RoundedCornerShape(10.dp), color = Color(0x33FFB300), border = BorderStroke(1.dp, Color(0xFFFFB300))) {
-        Text(text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp))
-    }
-}
-
-@Composable
-private fun SectionLabel(text: String) {
-    Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
-}
-
-@Composable
-private fun Hint(text: String) {
-    Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable

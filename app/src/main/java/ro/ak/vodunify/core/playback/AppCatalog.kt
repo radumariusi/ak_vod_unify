@@ -21,9 +21,9 @@ enum class StreamingService(
     PRIME_VIDEO("prime", "Prime Video", setOf(9, 10, 119, 2100), "primevideo", Market.RO),
     DISNEY_PLUS("disney", "Disney+", setOf(337, 390), "disneyplus", Market.RO),
     HBO_MAX("hbomax", "HBO Max", setOf(384, 1899, 1825), "hbomax", Market.RO),
-    SKYSHOWTIME("skyshowtime", "SkyShowtime", emptySet(), "skyshowtime", Market.RO),
+    SKYSHOWTIME("skyshowtime", "SkyShowtime", setOf(1773), "skyshowtime", Market.RO),
     APPLE_TV("appletv", "Apple TV", setOf(350), "appletv", Market.RO),
-    VOYO("voyo", "VOYO", emptySet(), "voyo", Market.RO),
+    VOYO("voyo", "VOYO", setOf(1859), "voyo", Market.RO),
     PEACOCK("peacock", "Peacock", setOf(386, 387), "peacock", Market.US),
     TUBI("tubi", "Tubi", setOf(73), "tubi", Market.US),
     PLUTO("pluto", "Pluto TV", setOf(300), "pluto", Market.US),
@@ -40,6 +40,10 @@ enum class StreamingService(
 
     companion object {
         fun byId(id: String): StreamingService? = entries.firstOrNull { it.id == id }
+
+        /** Serviciile „tale”: cele cu aplicația oficială instalată pe dispozitiv. */
+        fun owned(installed: Set<TargetApp>): List<StreamingService> =
+            entries.filter { s -> TargetApp.byId(s.appId)?.let { it in installed } == true }
 
         /**
          * Potrivire după id TMDb, apoi după nume (TMDb mai adaugă variante noi). Canalele vândute prin alt

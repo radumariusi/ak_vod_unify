@@ -2,6 +2,7 @@ package ro.ak.vodunify.core.catalog
 
 import ro.ak.vodunify.core.prefs.ContentLanguage
 import ro.ak.vodunify.core.prefs.Market
+import ro.ak.vodunify.core.tmdb.TmdbImage
 import ro.ak.vodunify.core.tmdb.TmdbImages
 import ro.ak.vodunify.core.tmdb.TmdbListItem
 import ro.ak.vodunify.core.tmdb.TmdbProvider
@@ -58,12 +59,32 @@ object TmdbMappers {
         buy = providers(region?.buy.orEmpty()),
     )
 
-    /** Piața selectată prima, apoi celelalte (RO/US). */
-    fun availabilityFor(details: TmdbTitleDetails, selected: Market): List<MarketAvailability> {
+    /** Disponibilitatea în RO și în US (fiecare serviciu se verifică apoi în biblioteca lui). */
+    fun availabilityFor(details: TmdbTitleDetails): List<MarketAvailability> {
         val results = details.watchProviders?.results.orEmpty()
-        return (listOf(selected) + Market.entries.filter { it != selected })
-            .map { availability(it, results[it.code]) }
+        return Market.entries.map { availability(it, results[it.code]) }
     }
+
+    /**
+     * Sigla titlului (ca în AK VOD Hub): întâi în limba aleasă, apoi engleză, apoi fără text / alte limbi,
+     * cea mai votată. Doar PNG: SVG-urile nu se pot desena fără decodor separat.
+     */
+    fun logoPath(logos: List<TmdbImage>, language: String): String? = logos
+        .filter { it.filePath.endsWith(".png", ignoreCase = true) }
+        .sortedWith(
+            compareBy<TmdbImage>(
+                {
+                    when (it.language) {
+                        language -> 0
+                        "en" -> 1
+                        null -> 2
+                        else -> 3
+                    }
+                },
+                { -(it.voteAverage ?: 0.0) },
+            ),
+        )
+        .firstOrNull()?.filePath
 
     /**
      * Serviciile principale dintr-o piață, după prioritatea TMDb pentru regiune.

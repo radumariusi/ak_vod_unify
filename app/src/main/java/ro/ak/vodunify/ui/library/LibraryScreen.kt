@@ -1,6 +1,13 @@
 package ro.ak.vodunify.ui.library
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import ro.ak.vodunify.ui.components.Dropdown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -45,6 +52,7 @@ import ro.ak.vodunify.ui.navigation.LocalCatalogActions
  * amestecate („Toate”) sau pe file, cu filtru pe sursă. La seriale: progresul pe episoade.
  * Filele și filtrele sunt FilterChip-uri: merg cu D-pad (focus + OK) și cu touch.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LibraryScreen(viewModel: LibraryViewModel = hiltViewModel()) {
     val spec = layoutSpec()
@@ -71,14 +79,27 @@ fun LibraryScreen(viewModel: LibraryViewModel = hiltViewModel()) {
                 (status as? SyncStatus.Failed)?.let {
                     Text(it.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
-                ChipRow(LibraryTab.visible.map { it to it.label }, selected = state.filter.tab, onSelect = viewModel::selectTab)
-                if (state.sources.size > 1 || state.filter.source != null) {
-                    val options = listOf<Pair<String?, String>>(null to "Toate sursele") + state.sources.map { it.id to it.label }
-                    ChipRow(
-                        options.map { (id, label) -> id to "$label (${state.counts[id] ?: 0})" },
-                        selected = state.filter.source,
-                        onSelect = viewModel::selectSource,
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Dropdown(
+                        label = null,
+                        value = state.filter.tab,
+                        options = LibraryTab.visible,
+                        optionLabel = { "Arată: ${it.label}" },
+                        onSelect = viewModel::selectTab,
+                        dialogTitle = "Ce arăți",
                     )
+                    if (state.sources.size > 1 || state.filter.source != null) {
+                        val options = listOf<String?>(null) + state.sources.map { it.id }
+                        val labels = state.sources.associate { it.id to it.label }
+                        Dropdown(
+                            label = null,
+                            value = state.filter.source,
+                            options = options,
+                            optionLabel = { id -> "Sursa: " + (if (id == null) "Toate" else labels[id] ?: id) + " (${state.counts[id] ?: 0})" },
+                            onSelect = viewModel::selectSource,
+                            dialogTitle = "Sursa",
+                        )
+                    }
                 }
                 Text(
                     when {
@@ -117,55 +138,41 @@ fun LibraryScreen(viewModel: LibraryViewModel = hiltViewModel()) {
 }
 
 @Composable
-private fun <T> ChipRow(options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(options, key = { it.first?.toString() ?: "all" }) { (value, label) ->
-            FilterChip(selected = value == selected, onClick = { onSelect(value) }, label = { Text(label) })
-        }
-    }
-}
-
-@Composable
 private fun LibraryCard(item: LibraryItem) {
     val spec = layoutSpec()
     val actions = LocalCatalogActions.current
-    Column(Modifier.width(spec.posterWidth)) {
-        FocusCard(
-            onClick = { item.tmdbId?.let { actions.openTitle(item.kind, it) } },
-            modifier = Modifier.size(spec.posterWidth, spec.posterHeight),
-            restoreKey = "library|${item.key}",
-        ) {
-            Box {
-                NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
-                if (item.showsProgress && item.progress != null) {
-                    LinearProgressIndicator(
-                        progress = { item.progress ?: 0f },
-                        modifier = Modifier.fillMaxWidth().height(4.dp).align(Alignment.BottomCenter),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = Color(0xAA000000),
-                        drawStopIndicator = {},
-                        gapSize = 0.dp,
-                    )
-                }
+    // Fără text sub poster (ca peste tot): episodul / progresul stă pe poster.
+    FocusCard(
+        onClick = { item.tmdbId?.let { actions.openTitle(item.kind, it) } },
+        modifier = Modifier.size(spec.posterWidth, spec.posterHeight),
+        restoreKey = "library|${item.key}",
+    ) {
+        Box(Modifier.fillMaxSize().semantics { contentDescription = listOf(item.title, item.subtitle).filter { it.isNotBlank() }.joinToString(", ") }) {
+            NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
+            if (item.subtitle.isNotBlank()) {
+                Text(
+                    item.subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 4.dp, end = 4.dp, bottom = 8.dp)
+                        .background(Color(0xCC000000), MaterialTheme.shapes.extraSmall)
+                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                )
+            }
+            if (item.showsProgress && item.progress != null) {
+                LinearProgressIndicator(
+                    progress = { item.progress ?: 0f },
+                    modifier = Modifier.fillMaxWidth().height(4.dp).align(Alignment.BottomCenter),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = Color(0xAA000000),
+                    drawStopIndicator = {},
+                    gapSize = 0.dp,
+                )
             }
         }
-        Spacer(Modifier.height(6.dp))
-        Text(item.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (item.subtitle.isNotBlank()) {
-            Text(
-                item.subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Text(
-            item.sources.joinToString(" · "),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.primary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }

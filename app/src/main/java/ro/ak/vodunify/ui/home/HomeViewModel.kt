@@ -21,6 +21,13 @@ import kotlinx.coroutines.sync.withPermit
 import ro.ak.vodunify.core.catalog.CatalogItem
 import ro.ak.vodunify.core.catalog.CatalogRepository
 import ro.ak.vodunify.core.catalog.HomeCatalog
+import ro.ak.vodunify.core.catalog.ServiceShelf
+import ro.ak.vodunify.core.playback.PlaybackPreferences
+import ro.ak.vodunify.core.playback.StreamingService
+import ro.ak.vodunify.core.playback.TargetResolver
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.first
 import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.core.connector.ExternalTrackers
 import ro.ak.vodunify.core.db.ResumePointEntity
@@ -41,16 +48,26 @@ import javax.inject.Inject
 class HomeViewModel @Inject constructor(
     private val catalog: CatalogRepository,
     private val tracking: TrackingRepository,
-    prefs: CatalogPreferences,
+    private val prefs: CatalogPreferences,
+    playbackPrefs: PlaybackPreferences,
+    private val resolver: TargetResolver,
 ) : ViewModel() {
 
     private val reload = MutableStateFlow(0)
 
-    val state: StateFlow<LoadState<HomeCatalog>> = combine(prefs.settings, reload) { s, _ -> s }
-        .flatMapLatest { settings ->
+    val state: StateFlow<LoadState<HomeCatalog>> = combine(prefs.settings, playbackPrefs.settings, reload) { s, p, _ -> s to p }
+        .flatMapLatest { (settings, playback) ->
             flow {
                 emit(LoadState.Loading)
-                emit(loadCatching { catalog.home(settings) })
+                emit(
+                    loadCatching {
+                        val installed = withContext(Dispatchers.IO) { runCatching { resolver.installedApps().keys }.getOrDefault(emptySet()) }
+                        val shelves = StreamingService.owned(installed).map {
+                            ServiceShelf(it.displayName, it.tmdbProviderIds, playback.marketOf(it))
+                        }
+                        catalog.home(settings, shelves)
+                    },
+                )
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LoadState.Loading)
@@ -113,6 +130,18 @@ class HomeViewModel @Inject constructor(
 
     init {
         viewModelScope.launch { tracking.syncIfStale() }
+    }
+
+    private val logoCache = ConcurrentHashMap<String, String>()
+
+    /** Sigla titlului cu focus (hero); "" în cache = titlul nu are siglă. */
+    suspend fun logo(kind: TitleKind, id: Long): String? {
+        val settings = prefs.settings.first()
+        val key = "${kind.path}:$id:${settings.logoLanguage}"
+        logoCache[key]?.let { return it.ifEmpty { null } }
+        val url = runCatching { catalog.logoUrl(kind, id, settings) }.getOrNull()
+        logoCache[key] = url.orEmpty()
+        return url
     }
 
     fun syncNow() {

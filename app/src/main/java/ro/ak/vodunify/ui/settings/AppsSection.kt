@@ -1,5 +1,6 @@
 package ro.ak.vodunify.ui.settings
 
+import ro.ak.vodunify.ui.components.Dropdown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -67,19 +68,15 @@ fun AppsSection(viewModel: PlaybackSettingsViewModel = hiltViewModel()) {
 
     SettingsCard("Servicii de streaming, pe biblioteci") {
         SettingHint(
-            "Unde e disponibil fiecare titlu aflăm din TMDb (date JustWatch), separat pentru România și SUA. " +
-                "Pune fiecare serviciu în biblioteca pe care o folosești: RO direct sau US prin VPN.",
+            "Fiecare titlu se caută doar în biblioteca serviciului: dacă treci Disney+ pe RO, verificăm catalogul " +
+                "Disney+ din România (date TMDb / JustWatch). Serviciile tale sunt cele instalate.",
         )
-        Market.entries.forEach { market ->
-            Text(
-                if (market == Market.US) "Biblioteca US (prin VPN)" else "Biblioteca RO",
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            val services = StreamingService.entries.filter { settings.marketOf(it) == market }
-            if (services.isEmpty()) SettingHint("Niciun serviciu.")
-            services.forEach { ServiceRow(it, settings, installed, viewModel) }
-        }
+        val (mine, others) = StreamingService.entries.partition { s -> TargetApp.byId(s.appId)?.let { it in installed } == true }
+        Text("Serviciile tale (instalate)", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+        if (mine.isEmpty()) SettingHint("Niciun serviciu instalat.")
+        mine.forEach { ServiceRow(it, settings, installed, viewModel) }
+        Text("Neinstalate", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+        others.forEach { ServiceRow(it, settings, installed, viewModel) }
     }
 
     SettingsCard("Playere") {
@@ -89,14 +86,9 @@ fun AppsSection(viewModel: PlaybackSettingsViewModel = hiltViewModel()) {
             TargetApp.players.filter { it.role == role }.sortedBy { it !in installed }.forEach { app ->
                 val isDefault = settings.defaultPlayerApp == app ||
                     (settings.defaultPlayer == null && TargetApp.players.firstOrNull { it in installed } == app)
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.weight(1f)) {
-                        Text(app.displayName + if (isDefault) " · Standard" else "", style = MaterialTheme.typography.bodyMedium)
-                        InstallLine(installed[app])
-                    }
-                    if (installed[app] != null && !isDefault) {
-                        FilterChip(selected = false, onClick = { viewModel.setDefaultPlayer(app) }, label = { Text("Fă standard") })
-                    }
+                Column(Modifier.fillMaxWidth()) {
+                    Text(app.displayName + if (isDefault) " · Standard" else "", style = MaterialTheme.typography.bodyMedium)
+                    InstallLine(installed[app])
                 }
             }
         }
@@ -153,14 +145,14 @@ private fun ServiceRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Market.entries.forEach { m ->
-                FilterChip(
-                    selected = settings.marketOf(service) == m,
-                    onClick = { viewModel.setServiceMarket(service, m) },
-                    label = { Text(if (m == Market.US) "US (VPN)" else "RO") },
-                )
-            }
-        }
+        Dropdown(
+            label = null,
+            value = settings.marketOf(service),
+            options = Market.entries,
+            optionLabel = { if (it == Market.US) "US (VPN)" else "RO" },
+            onSelect = { viewModel.setServiceMarket(service, it) },
+            dialogTitle = "Biblioteca pentru ${service.displayName}",
+            optionDetail = { if (it == Market.US) "Cauți titlurile în catalogul american, prin VPN" else "Catalogul din România" },
+        )
     }
 }

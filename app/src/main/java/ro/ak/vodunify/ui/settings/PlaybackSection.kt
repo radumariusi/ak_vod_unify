@@ -1,9 +1,6 @@
 package ro.ak.vodunify.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -18,14 +15,12 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ro.ak.vodunify.core.playback.StreamingService
 import ro.ak.vodunify.core.playback.TargetApp
-import ro.ak.vodunify.core.prefs.Market
-import ro.ak.vodunify.ui.components.FilterChip
+import ro.ak.vodunify.ui.components.Dropdown
 
 /**
- * „Redare”: biblioteca principală, playerul standard și unde se deschide fiecare serviciu.
- * La fiecare titlu poți alege oricând altă rețea sau alt player din „Alege unde vezi”.
+ * „Redare”: playerul standard și unde se deschide fiecare serviciu al tău, ca liste de alegere.
+ * La fiecare titlu poți alege oricând altă variantă din „Alege unde vezi”.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PlaybackSection(viewModel: PlaybackSettingsViewModel = hiltViewModel()) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -33,60 +28,41 @@ fun PlaybackSection(viewModel: PlaybackSettingsViewModel = hiltViewModel()) {
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshInstalled() }
 
     SettingsCard("Redare") {
-        Text("Biblioteca principală", fontWeight = FontWeight.Medium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Market.entries.forEach { m ->
-                FilterChip(
-                    selected = settings.playbackMarket == m,
-                    onClick = { viewModel.setPlaybackMarket(m) },
-                    label = { Text(if (m == Market.US) "SUA (prin VPN)" else m.label) },
-                )
-            }
-        }
-        SettingHint("Prima verificată când cauți unde e un titlu. Fiecare serviciu are biblioteca lui (RO sau US), în Aplicații și servicii.")
-
-        Text("Player standard", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 8.dp))
-        SettingHint("Pornește titlurile pe care nu le ai în niciun serviciu (sau doar în cealaltă bibliotecă).")
         val players = TargetApp.players.sortedBy { it !in installed }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            FilterChip(
-                selected = settings.defaultPlayer == null,
-                onClick = { viewModel.setDefaultPlayer(null) },
-                label = { Text("Primul instalat") },
-            )
-            players.forEach { app ->
-                FilterChip(
-                    selected = settings.defaultPlayer == app.id,
-                    onClick = { viewModel.setDefaultPlayer(app) },
-                    label = { Text(app.displayName + if (app in installed) "" else " (neinstalat)") },
-                )
-            }
-        }
+        val playerOptions = listOf<TargetApp?>(null) + players
+        Dropdown(
+            label = "Player standard",
+            value = settings.defaultPlayerApp?.takeIf { it in players },
+            options = playerOptions,
+            optionLabel = { it?.displayName ?: "Primul instalat" },
+            onSelect = viewModel::setDefaultPlayer,
+            optionDetail = { app -> if (app == null) null else if (app in installed) "Instalat" else "Neinstalat" },
+            optionEnabled = { app -> app == null || app in installed },
+        )
+        SettingHint("Pornește titlurile care nu sunt pe niciun serviciu al tău.")
 
-        Text("Serviciile se deschid în", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 8.dp))
-        SettingHint("Implicit aplicația oficială. Poți alege un player pentru un serviciu pe care nu-l ai.")
+        Text("Serviciile tale se deschid în", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 8.dp))
+        SettingHint("Implicit aplicația oficială. Poți alege un player pentru un serviciu.")
         val installedPlayers = players.filter { it in installed }
-        StreamingService.entries.forEach { service ->
+        val services = StreamingService.entries.filter { s ->
+            val official = TargetApp.byId(s.appId)
+            (official != null && official in installed) || settings.preferredApp(s) != official
+        }
+        if (services.isEmpty()) SettingHint("Niciun serviciu de streaming instalat.")
+        services.forEach { service ->
             val official = TargetApp.byId(service.appId) ?: return@forEach
             val current = settings.preferredApp(service)
             val options = (listOf(official) + installedPlayers + listOfNotNull(current.takeIf { it != official })).distinct()
-            Text(
-                "${service.displayName} · biblioteca ${settings.marketOf(service).code}",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 4.dp),
+            Dropdown(
+                label = "${service.displayName} (${settings.marketOf(service).code})",
+                value = current,
+                options = options,
+                optionLabel = { app ->
+                    (if (app == official) "Aplicația oficială" else app.displayName) + if (app in installed) "" else " (neinstalat)"
+                },
+                onSelect = { viewModel.setPreferred(service, it) },
+                dialogTitle = "${service.displayName} se deschide în",
             )
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                options.forEach { app ->
-                    FilterChip(
-                        selected = current == app,
-                        onClick = { viewModel.setPreferred(service, app) },
-                        label = {
-                            val name = if (app == official) "Aplicația oficială" else app.displayName
-                            Text(name + if (app in installed) "" else " (neinstalat)")
-                        },
-                    )
-                }
-            }
         }
     }
 }

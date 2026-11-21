@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.rememberLazyListState
-import ro.ak.vodunify.ui.components.FilterChip
+import ro.ak.vodunify.ui.components.ChoiceDialog
+import ro.ak.vodunify.ui.components.ChoiceOption
+import ro.ak.vodunify.ui.components.Dropdown
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import ro.ak.vodunify.ui.components.OutlinedButton
@@ -96,15 +98,10 @@ fun CalendarScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                CalendarTab.entries.forEach { t ->
-                    FilterChip(selected = state.tab == t, onClick = { viewModel.setTab(t) }, label = { Text(t.label) })
-                }
-                CalendarMode.entries.forEach { m ->
-                    FilterChip(selected = state.mode == m, onClick = { viewModel.setMode(m) }, label = { Text(m.label) })
-                }
-                if (spec.isCompact) {
-                    FilterChip(selected = showFilters, onClick = { showFilters = !showFilters }, label = { Text("Filtre") })
-                }
+                Dropdown(null, state.tab, CalendarTab.entries, { it.label }, viewModel::setTab, dialogTitle = "Arată")
+                Dropdown(null, state.mode, CalendarMode.entries, { it.label }, viewModel::setMode, dialogTitle = "Perioada")
+                OutlinedButton(onClick = { showFilters = true }) { Text("Filtre") }
+                OutlinedButton(onClick = viewModel::reload) { Text("Reîncarcă") }
             }
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -126,38 +123,7 @@ fun CalendarScreen(
                 OutlinedButton(onClick = viewModel::next) { Text("▶") }
                 OutlinedButton(onClick = viewModel::goToToday) { Text("Azi") }
             }
-            if (!spec.isCompact || showFilters) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    FilterChip(
-                        selected = state.onlyFollowed,
-                        onClick = viewModel::toggleOnlyFollowed,
-                        label = { Text("Doar ce urmăresc") },
-                    )
-                    FilterChip(
-                        selected = state.onlyMyApps,
-                        onClick = viewModel::toggleOnlyMyApps,
-                        label = { Text(if (state.tab == CalendarTab.MOVIES) "Streaming doar pe aplicațiile mele" else "Doar aplicațiile mele") },
-                    )
-                    FilterChip(
-                        selected = state.showRejected,
-                        onClick = viewModel::toggleShowRejected,
-                        label = { Text("Arată și ce nu trece pragurile") },
-                    )
-                    if (state.tab == CalendarTab.MOVIES) {
-                        MovieReleaseKind.entries.forEach { kind ->
-                            FilterChip(
-                                selected = kind in state.movieKinds,
-                                onClick = { viewModel.toggleMovieKind(kind) },
-                                label = { Text(kind.short) },
-                            )
-                        }
-                    }
-                    OutlinedButton(onClick = viewModel::reload) { Text("Reîncarcă") }
-                }
-            }
+            if (showFilters) CalendarFilters(state, viewModel) { showFilters = false }
             if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         }
 
@@ -169,7 +135,7 @@ fun CalendarScreen(
             )
             else -> {
                 Summary(state)
-                if (!state.hasMyApps) Info("Sfat: bifează în Setări → Calendar aplicațiile pe care le ai și țara fiecăreia.")
+                if (!state.hasMyApps) Info("Sfat: aplicațiile tale și biblioteca fiecăreia (RO / US) se iau din Setări → Aplicații și servicii.")
                 val noun = if (state.tab == CalendarTab.MOVIES) "filme" else "episoade"
                 when {
                     state.visible.isEmpty() -> Info("Nimic în perioada asta după filtrele tale.")
@@ -223,5 +189,41 @@ private fun Info(text: String) {
         style = MaterialTheme.typography.bodyLarge,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = layoutSpec().screenPadding, vertical = 12.dp),
+    )
+}
+
+/** Filtrele calendarului ca listă: fiecare rând comută filtrul (Pornit / Oprit), lista rămâne deschisă. */
+@Composable
+private fun CalendarFilters(state: CalendarUiState, viewModel: CalendarViewModel, onDismiss: () -> Unit) {
+    fun onOff(v: Boolean) = if (v) "Pornit" else "Oprit"
+    val kinds = if (state.tab == CalendarTab.MOVIES) MovieReleaseKind.entries else emptyList()
+    val options = buildList {
+        add(ChoiceOption("Doar ce urmăresc", onOff(state.onlyFollowed)))
+        add(
+            ChoiceOption(
+                if (state.tab == CalendarTab.MOVIES) "Streaming doar pe aplicațiile mele" else "Doar aplicațiile mele",
+                onOff(state.onlyMyApps),
+            ),
+        )
+        add(ChoiceOption("Arată și ce nu trece pragurile", onOff(state.showRejected)))
+        kinds.forEachIndexed { i, kind ->
+            add(ChoiceOption(kind.short, onOff(kind in state.movieKinds), heading = if (i == 0) "Tipuri de lansare" else null))
+        }
+    }
+    ChoiceDialog(
+        title = "Filtre",
+        options = options,
+        selected = null,
+        dismissOnPick = false,
+        onDismiss = onDismiss,
+        onPick = { index ->
+            when (index) {
+                0 -> viewModel.toggleOnlyFollowed()
+                1 -> viewModel.toggleOnlyMyApps()
+                2 -> viewModel.toggleShowRejected()
+                else -> kinds.getOrNull(index - 3)?.let(viewModel::toggleMovieKind)
+            }
+        },
+        footer = "OK comută filtrul. Înapoi închide lista.",
     )
 }

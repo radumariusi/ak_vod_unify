@@ -33,6 +33,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import coil.compose.AsyncImage
 import ro.ak.vodunify.core.catalog.CatalogItem
 import ro.ak.vodunify.core.catalog.PersonSummary
@@ -86,29 +90,42 @@ fun NetworkImage(
 
 fun formatRating(rating: Double?): String? = rating?.let { String.format(Locale.US, "★ %.1f", it) }
 
-/** Insigna TMDb de pe poster (ca în AK VOD Hub): sigla în culorile TMDb + nota. */
+/** Insigna TMDb de pe poster (ca în AK VOD Hub): sigla în culorile TMDb + nota, mică, să nu acopere posterul. */
 @Composable
 fun RatingChip(rating: Double, modifier: Modifier = Modifier) {
+    BrandRating("TMDB", Color(0xFF0D253F), Color(0xFF01D277), rating, modifier)
+}
+
+/** Nota IMDb, în culorile IMDb. */
+@Composable
+fun ImdbChip(rating: Double, modifier: Modifier = Modifier) {
+    BrandRating("IMDb", Color(0xFFF5C518), Color.Black, rating, modifier)
+}
+
+@Composable
+private fun BrandRating(label: String, background: Color, foreground: Color, rating: Double, modifier: Modifier) {
     Row(
         modifier
-            .background(Color(0xCC000000), RoundedCornerShape(4.dp))
-            .padding(horizontal = 3.dp, vertical = 1.dp),
+            .background(Color(0xCC000000), RoundedCornerShape(3.dp))
+            .padding(horizontal = 2.dp, vertical = 1.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Text(
-            "TMDB",
-            style = MaterialTheme.typography.labelSmall,
+            label,
+            fontSize = 9.sp,
+            lineHeight = 11.sp,
             fontWeight = FontWeight.Black,
-            color = Color(0xFF01D277),
+            color = foreground,
             maxLines = 1,
             modifier = Modifier
-                .background(Color(0xFF0D253F), RoundedCornerShape(3.dp))
-                .padding(horizontal = 3.dp),
+                .background(background, RoundedCornerShape(2.dp))
+                .padding(horizontal = 2.dp),
         )
         Text(
             String.format(Locale.US, "%.1f", rating),
-            style = MaterialTheme.typography.labelMedium,
+            fontSize = 10.sp,
+            lineHeight = 11.sp,
             fontWeight = FontWeight.SemiBold,
             color = Color.White,
             maxLines = 1,
@@ -117,42 +134,37 @@ fun RatingChip(rating: Double, modifier: Modifier = Modifier) {
 }
 
 /**
- * Posterul unui titlu (2:3), ca în AK VOD Hub: nota TMDb pe poster, numele centrat dedesubt pe două rânduri
- * fixe (cardurile au aceeași înălțime), focus cu mărire ușoară și contur alb. [rowKey] face cheia unică
- * pe ecran, ca focusul să revină pe acest card la întoarcerea din fișă.
+ * Posterul unui titlu (2:3), ca în AK VOD Hub: nota TMDb pe poster, fără text dedesubt (numele e pe poster și
+ * în hero), focus cu mărire ușoară și contur alb. [rowKey] face cheia unică pe ecran, ca focusul să revină
+ * pe acest card la întoarcerea din fișă.
  */
 @Composable
 fun PosterCard(item: CatalogItem, modifier: Modifier = Modifier, rowKey: String = "") {
     val spec = layoutSpec()
     val actions = LocalCatalogActions.current
     val backdrop = LocalBackdrop.current
-    Column(modifier.width(spec.posterWidth)) {
-        FocusCard(
-            onClick = { actions.openTitle(item.kind, item.id) },
-            modifier = Modifier.size(spec.posterWidth, spec.posterHeight),
-            restoreKey = "$rowKey|${item.mediaKey}",
-            onFocused = { backdrop?.focus(FocusedTitle.of(item)) },
-            onLongClick = { actions.titleMenu(item) },
-        ) {
-            Box(Modifier.fillMaxSize()) {
-                NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
-                item.rating?.takeIf { it > 0 }?.let {
-                    RatingChip(it, Modifier.align(Alignment.TopStart).padding(4.dp))
-                }
+    val longPress = LocalPosterLongPress.current
+    FocusCard(
+        onClick = { actions.openTitle(item.kind, item.id) },
+        modifier = modifier.size(spec.posterWidth, spec.posterHeight),
+        restoreKey = "$rowKey|${item.mediaKey}",
+        onFocused = { backdrop?.focus(FocusedTitle.of(item)) },
+        onLongClick = longPress ?: { actions.titleMenu(item) },
+    ) {
+        Box(Modifier.fillMaxSize().semantics { contentDescription = item.title }) {
+            NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
+            item.rating?.takeIf { it > 0 }?.let {
+                RatingChip(it, Modifier.align(Alignment.TopStart).padding(4.dp))
             }
         }
-        Text(
-            item.title,
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.Center,
-            minLines = 2,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
-        )
     }
 }
+
+/**
+ * Ce face apăsarea lungă pe un poster (titlul are deja focusul); null = meniul rapid al titlului.
+ * Acasă o folosește ca să sară la butoanele din hero (ca în AK VOD Hub).
+ */
+val LocalPosterLongPress = staticCompositionLocalOf<(() -> Unit)?> { null }
 
 /** Spațiul dintre carduri: destul cât cardul mărit la focus să nu atingă vecinii. */
 @Composable
@@ -175,15 +187,17 @@ fun TitleRow(title: String, items: List<CatalogItem>, modifier: Modifier = Modif
     }
 }
 
+/** Actor / membru al echipei, ca în AK VOD Hub: fotografie dreptunghiulară, numele și rolul dedesubt. */
 @Composable
 fun PersonCard(person: PersonSummary, modifier: Modifier = Modifier) {
     val actions = LocalCatalogActions.current
-    val size = if (layoutSpec().isTv) 110.dp else 84.dp
-    Column(modifier.width(size + 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    val tv = layoutSpec().isTv
+    val w = if (tv) 96.dp else 84.dp
+    Column(modifier.width(w + 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         FocusCard(
             onClick = { actions.openPerson(person.id) },
-            modifier = Modifier.size(size),
-            shape = CircleShape,
+            modifier = Modifier.size(w, w * 1.5f),
+            shape = RoundedCornerShape(8.dp),
             restoreKey = "person|${person.id}|${person.role}",
         ) {
             NetworkImage(person.profileUrl, person.name, Modifier.fillMaxSize(), fallbackText = initials(person.name))
@@ -191,22 +205,21 @@ fun PersonCard(person: PersonSummary, modifier: Modifier = Modifier) {
         Spacer(Modifier.height(6.dp))
         Text(
             person.name,
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 2,
+            style = MaterialTheme.typography.labelLarge,
+            maxLines = 1,
             textAlign = TextAlign.Center,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
         )
-        person.role?.takeIf { it.isNotBlank() }?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                textAlign = TextAlign.Center,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        Text(
+            person.role.orEmpty(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            textAlign = TextAlign.Center,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

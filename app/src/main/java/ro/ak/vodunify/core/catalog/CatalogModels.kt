@@ -98,13 +98,18 @@ data class TitleDetails(
     val crew: List<PersonSummary>,
     val studios: List<StudioRef>,
     val seasons: List<SeasonSummary>,
-    /** Prima intrare e piața selectată în Setări. */
+    /** RO și US; fiecare serviciu contează doar în biblioteca lui. */
     val availability: List<MarketAvailability>,
     val recommendations: List<CatalogItem>,
     val imdbId: String?,
     val trailerYoutubeKey: String?,
     val nextEpisode: String?,
+    /** Sigla titlului (TMDb logo); null = titlul se scrie cu text. */
+    val logoUrl: String? = null,
 )
+
+/** Un rând „Pe Netflix (RO)” din Acasă: serviciul tău, în biblioteca lui. */
+data class ServiceShelf(val name: String, val providerIds: Set<Int>, val market: Market)
 
 data class PersonDetails(
     val id: Long,
@@ -117,6 +122,8 @@ data class PersonDetails(
     val department: String?,
     val movies: List<CatalogItem>,
     val shows: List<CatalogItem>,
+    /** Filmografia, filme și seriale împreună, după popularitate. */
+    val credits: List<CatalogItem> = movies + shows,
 )
 
 data class StudioDetails(

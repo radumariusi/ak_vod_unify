@@ -30,6 +30,13 @@ import ro.ak.vodunify.core.catalog.Season
 import ro.ak.vodunify.core.catalog.TitleDetails
 import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.core.prefs.CatalogPreferences
+import ro.ak.vodunify.core.playback.PlaybackPreferences
+import ro.ak.vodunify.core.playback.TargetApp
+import ro.ak.vodunify.core.playback.TargetResolver
+import ro.ak.vodunify.core.playback.WatchOptions
+import ro.ak.vodunify.core.playback.WatchOptionsBuilder
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import ro.ak.vodunify.ui.components.LoadState
 import ro.ak.vodunify.ui.components.loadCatching
 import javax.inject.Inject
@@ -41,6 +48,8 @@ class DetailsViewModel @Inject constructor(
     private val catalog: CatalogRepository,
     private val tracking: TrackingRepository,
     prefs: CatalogPreferences,
+    playbackPrefs: PlaybackPreferences,
+    private val resolver: TargetResolver,
 ) : ViewModel() {
 
     val kind: TitleKind = TitleKind.fromPath(savedState.get<String>("kind")) ?: TitleKind.MOVIE
@@ -57,6 +66,22 @@ class DetailsViewModel @Inject constructor(
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LoadState.Loading)
+
+    /** Aplicațiile instalate (citite la deschiderea fișei și la revenirea în aplicație). */
+    private val installed = MutableStateFlow<Set<TargetApp>?>(null)
+
+    fun refreshInstalled() {
+        viewModelScope.launch {
+            installed.value = withContext(Dispatchers.IO) { runCatching { resolver.installedApps().keys }.getOrDefault(emptySet()) }
+        }
+    }
+
+    /** Unde vezi titlul: serviciile tale (în biblioteca fiecăruia), altfel unde se găsește + playerele. */
+    val watchOptions: StateFlow<WatchOptions?> = combine(state, playbackPrefs.settings, installed) { st, p, apps ->
+        val d = (st as? LoadState.Data)?.value ?: return@combine null
+        if (apps == null) return@combine null
+        WatchOptionsBuilder.build(d.availability, p, apps)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** Sezonul selectat (null = primul sezon normal, ales automat de UI). */
     private val selectedSeason = MutableStateFlow<Int?>(null)
@@ -81,6 +106,10 @@ class DetailsViewModel @Inject constructor(
 
     fun retry() {
         reload.value++
+    }
+
+    init {
+        refreshInstalled()
     }
 
     // ---------- De văzut / Văzut (local; plus trackerii externi când sunt activi) ----------
