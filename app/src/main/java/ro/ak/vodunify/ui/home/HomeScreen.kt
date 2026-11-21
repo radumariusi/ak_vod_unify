@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -213,14 +214,18 @@ private fun Hero(
         Column(
             Modifier
                 .align(Alignment.BottomStart)
+                .fillMaxHeight()
                 .padding(horizontal = spec.screenPadding, vertical = 8.dp)
                 .widthIn(max = 620.dp)
                 .fillMaxWidth(if (spec.isCompact) 1f else 0.6f),
-            verticalArrangement = Arrangement.spacedBy(5.dp),
+            // Totul stă jos în hero; sigla ia doar cât loc rămâne (se micșorează, nu iese tăiată pe sus,
+            // de ex. cu textul mărit din setările televizorului).
+            verticalArrangement = Arrangement.spacedBy(5.dp, Alignment.Bottom),
         ) {
             TitleLogo(
                 shown.title,
                 logo,
+                modifier = Modifier.weight(1f, fill = false),
                 height = if (compact) 44.dp else 60.dp,
                 textStyle = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall,
             )
