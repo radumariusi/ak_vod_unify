@@ -11,6 +11,9 @@ object TmdbImages {
     fun profile(path: String?) = url("w185", path)
     fun logo(path: String?) = url("w154", path)
 
+    /** Sigla unui titlu (logo-ul cu numele), destul de clară pe TV. */
+    fun titleLogo(path: String?) = url("w500", path)
+
     fun url(size: String, path: String?): String? =
         path?.takeIf { it.isNotBlank() }?.let { BASE + size + (if (it.startsWith("/")) it else "/$it") }
 }

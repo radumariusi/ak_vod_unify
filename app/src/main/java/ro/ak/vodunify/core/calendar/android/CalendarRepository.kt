@@ -1,5 +1,14 @@
 package ro.ak.vodunify.core.calendar.android
 
+import ro.ak.vodunify.core.playback.PlaybackPreferences
+import ro.ak.vodunify.core.playback.PlaybackSettings
+import ro.ak.vodunify.core.playback.StreamingService
+import ro.ak.vodunify.core.playback.TargetApp
+import ro.ak.vodunify.core.playback.TargetResolver
+import ro.ak.vodunify.core.calendar.model.Region
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -32,6 +41,18 @@ import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** Id-ul aplicației din Calendar → id-ul serviciului din registrul aplicației (Setări → Aplicații și servicii). */
+private val CALENDAR_TO_SERVICE = mapOf(
+    "netflix" to "netflix",
+    "max" to "hbomax",
+    "disney" to "disney",
+    "prime" to "prime",
+    "appletv" to "appletv",
+    "skyshowtime" to "skyshowtime",
+    "peacock" to "peacock",
+    "voyo" to "voyo",
+)
+
 /** Ce ai văzut deja, după trackere: episoade ("showId-sezon-episod") și filme (id TMDb). */
 data class WatchedSet(val episodes: Set<String> = emptySet(), val movies: Set<Int> = emptySet())
 
@@ -49,6 +70,8 @@ class CalendarRepository @Inject constructor(
     private val catalogPrefs: CatalogPreferences,
     private val tracking: TrackingRepository,
     private val trackingDao: TrackingDao,
+    private val playback: PlaybackPreferences,
+    private val resolver: TargetResolver,
     http: OkHttpClient,
 ) {
     private val omdb = OmdbClient(http)
@@ -72,7 +95,31 @@ class CalendarRepository @Inject constructor(
     val isConfigured: Boolean get() = tmdb.isConfigured
 
     /** Setările salvate + listele din trackere (urmărite automat). */
-    val settings: Flow<CalendarSettings> = combine(prefs.settings, tracking.library) { s, library ->
+    /**
+     * Aplicațiile tale și țara fiecăreia vin din setările generale (aplicațiile instalate + biblioteca RO/US a
+     * fiecărui serviciu, din Aplicații și servicii), nu dintr-o listă separată a Calendarului.
+     */
+    private val installedApps: Flow<Set<TargetApp>> =
+        flow { emit(runCatching { resolver.installedApps().keys }.getOrDefault(emptySet())) }.flowOn(Dispatchers.IO)
+
+    private fun withAppsFromPlayback(s: CalendarSettings, p: PlaybackSettings, installed: Set<TargetApp>): CalendarSettings =
+        CALENDAR_TO_SERVICE.entries.fold(s) { acc, (calendarId, serviceId) ->
+            val service = StreamingService.byId(serviceId) ?: return@fold acc
+            val app = TargetApp.byId(service.appId)
+            acc.updateApp(calendarId) {
+                it.copy(
+                    installed = app != null && app in installed,
+                    region = Region.fromCode(p.marketOf(service).code) ?: Region.RO,
+                )
+            }
+        }
+
+    val settings: Flow<CalendarSettings> = combine(
+        prefs.settings,
+        playback.settings,
+        installedApps,
+    ) { s, p, installed -> withAppsFromPlayback(s, p, installed) }
+        .combine(tracking.library) { s, library ->
         val shows = mutableListOf<SavedShow>()
         val movies = mutableListOf<SavedShow>()
         library.forEach { entry ->

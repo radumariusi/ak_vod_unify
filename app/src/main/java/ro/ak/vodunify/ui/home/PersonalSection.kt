@@ -36,6 +36,9 @@ import ro.ak.vodunify.core.connector.ExternalTrackers
 import ro.ak.vodunify.ui.components.DefaultScroll
 import ro.ak.vodunify.ui.components.FocusCard
 import ro.ak.vodunify.ui.components.FocusedTitle
+import ro.ak.vodunify.ui.components.LocalPosterLongPress
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import ro.ak.vodunify.ui.components.LocalBackdrop
 import ro.ak.vodunify.ui.components.rowSpacing
 import ro.ak.vodunify.ui.components.NetworkImage
@@ -159,80 +162,68 @@ private fun WideCard(item: PersonalItem, rowKey: String) {
     val spec = layoutSpec()
     val actions = LocalCatalogActions.current
     val backdrop = LocalBackdrop.current
-    Column(Modifier.width(spec.cardWidth)) {
-        FocusCard(
-            onClick = { item.tmdbId?.let { actions.openTitle(item.kind, it) } },
-            modifier = Modifier.size(spec.cardWidth, spec.cardHeight),
-            restoreKey = "$rowKey|${item.key}",
-            onFocused = {
-                val id = item.tmdbId
-                if (backdrop != null && id != null) {
-                    backdrop.focus(
-                        FocusedTitle(
-                            kind = item.kind,
-                            id = id,
-                            title = item.title,
-                            meta = item.subtitle.orEmpty(),
-                            overview = item.overview,
-                            backdropUrl = item.backdropUrl,
-                        ),
-                    )
-                }
-            },
-        ) {
-            Box(Modifier.fillMaxSize()) {
-                NetworkImage(item.backdropUrl ?: item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to Color(0xCC000000))),
+    val longPress = LocalPosterLongPress.current
+    FocusCard(
+        onClick = { item.tmdbId?.let { actions.openTitle(item.kind, it) } },
+        modifier = Modifier.size(spec.cardWidth, spec.cardHeight),
+        restoreKey = "$rowKey|${item.key}",
+        onFocused = { focusedTitle(item)?.let { backdrop?.focus(it) } },
+        // Același salt la butoanele din hero ca de pe postere.
+        onLongClick = longPress,
+    ) {
+        Box(Modifier.fillMaxSize().semantics { contentDescription = listOfNotNull(item.title, item.subtitle).joinToString(", ") }) {
+            NetworkImage(item.backdropUrl ?: item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to Color(0xCC000000))),
+            )
+            // Fără text sub card: episodul / procentul stă pe imagine, ca în AK VOD Hub.
+            item.subtitle?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 6.dp, end = 6.dp, bottom = 8.dp)
+                        .background(Color(0xCC000000), MaterialTheme.shapes.extraSmall)
+                        .padding(horizontal = 4.dp, vertical = 1.dp),
                 )
-                if (item.showsProgress || item.progress != null) {
-                    val p = item.progress
-                    if (p != null) {
+            }
+            if (item.showsProgress || item.progress != null) {
+                val p = item.progress
+                if (p != null) {
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomStart)
+                            .fillMaxWidth()
+                            .height(4.dp)
+                            .background(Color(0xAA000000)),
+                    ) {
                         Box(
                             Modifier
-                                .align(Alignment.BottomStart)
-                                .fillMaxWidth()
+                                .fillMaxWidth(p.coerceIn(0f, 1f))
                                 .height(4.dp)
-                                .background(Color(0xAA000000)),
-                        ) {
-                            Box(
-                                Modifier
-                                    .fillMaxWidth(p.coerceIn(0f, 1f))
-                                    .height(4.dp)
-                                    .background(MaterialTheme.colorScheme.primary),
-                            )
-                        }
-                    } else {
-                        Text(
-                            "?",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = Color.White,
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(6.dp)
-                                .background(Color(0xCC000000), MaterialTheme.shapes.extraSmall)
-                                .padding(horizontal = 5.dp, vertical = 1.dp),
+                                .background(MaterialTheme.colorScheme.primary),
                         )
                     }
                 }
             }
         }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            item.title,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            item.subtitle.orEmpty(),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
+}
+
+private fun focusedTitle(item: PersonalItem): FocusedTitle? {
+    val id = item.tmdbId ?: return null
+    return FocusedTitle(
+        kind = item.kind,
+        id = id,
+        title = item.title,
+        meta = item.subtitle.orEmpty(),
+        overview = item.overview,
+        backdropUrl = item.backdropUrl,
+    )
 }

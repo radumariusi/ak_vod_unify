@@ -120,6 +120,16 @@ data class TmdbVideo(
 data class TmdbVideoList(val results: List<TmdbVideo> = emptyList())
 
 @Serializable
+data class TmdbImage(
+    @SerialName("file_path") val filePath: String,
+    @SerialName("iso_639_1") val language: String? = null,
+    @SerialName("vote_average") val voteAverage: Double? = null,
+)
+
+@Serializable
+data class TmdbImageList(val logos: List<TmdbImage> = emptyList())
+
+@Serializable
 data class TmdbSeasonSummary(
     @SerialName("season_number") val seasonNumber: Int,
     val name: String? = null,
@@ -171,6 +181,7 @@ data class TmdbTitleDetails(
     @SerialName("watch/providers") val watchProviders: TmdbWatchProviders? = null,
     val recommendations: TmdbPage<TmdbListItem>? = null,
     val videos: TmdbVideoList? = null,
+    val images: TmdbImageList? = null,
 )
 
 @Serializable

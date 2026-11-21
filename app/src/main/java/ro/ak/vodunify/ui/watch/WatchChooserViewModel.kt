@@ -1,7 +1,5 @@
 package ro.ak.vodunify.ui.watch
 
-import android.content.Intent
-import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -45,8 +43,8 @@ data class ChooserState(
     /** Ținta validată pentru fiecare aplicație instalată. */
     val launches: Map<TargetApp, ResolvedLaunch> = emptyMap(),
     val resume: ResumeInfo = ResumeInfo.Manual,
-    /** Pagina JustWatch/TMDb cu toate ofertele din piața de redare. */
-    val offersLink: String? = null,
+    /** Pornire directă („Vezi”): nu arătăm lista decât dacă nu avem ce porni singuri. */
+    val direct: Boolean = false,
     /** Lansare care așteaptă confirmarea „Deschide acum / Așteaptă sincronizarea”. */
     val confirm: ResolvedLaunch? = null,
     val syncing: Boolean = false,
@@ -77,8 +75,11 @@ class WatchChooserViewModel @Inject constructor(
 
     private var loadJob: Job? = null
 
-    fun open(request: PlaybackRequest, availability: List<MarketAvailability>) {
-        _state.value = ChooserState(request)
+    /** Pornește direct pe serviciul tău (sau playerul standard); lista apare doar dacă nu se poate. */
+    fun play(request: PlaybackRequest, availability: List<MarketAvailability>) = open(request, availability, direct = true)
+
+    fun open(request: PlaybackRequest, availability: List<MarketAvailability>, direct: Boolean = false) {
+        _state.value = ChooserState(request, direct = direct)
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
             val settings = prefs.settings.first()
@@ -96,8 +97,17 @@ class WatchChooserViewModel @Inject constructor(
                     options = options,
                     launches = launches,
                     resume = resume,
-                    offersLink = availability.firstOrNull { a -> a.market == settings.playbackMarket }?.link,
                 )
+            }
+            if (direct) {
+                val service = options.recommendedService
+                val serviceApp = service?.app
+                val player = options.recommendedPlayer
+                when {
+                    service != null && serviceApp != null && launches.containsKey(serviceApp) -> chooseService(service)
+                    player != null && launches.containsKey(player) -> choosePlayer(player)
+                    else -> _state.update { it?.copy(direct = false) }
+                }
             }
         }
     }
@@ -116,7 +126,7 @@ class WatchChooserViewModel @Inject constructor(
         val s = _state.value ?: return
         val app = option.app
         when {
-            app == null -> openOffers(s)
+            app == null -> say("${option.service.displayName} nu are încă aplicație în AK VOD Unify")
             option.installed -> s.launches[app]?.let(::choose) ?: say("${app.displayName} nu poate fi pornit")
             else -> {
                 val store = resolver.storeIntent(app)
@@ -242,15 +252,9 @@ class WatchChooserViewModel @Inject constructor(
             if (pos != null) say("În ${target.installed.app.displayName}, reia de la ${formatPosition(pos)}")
             _state.value = null
         } else {
-            _state.value = s.copy(confirm = null)
+            _state.value = s.copy(confirm = null, direct = false)
             say("${target.installed.label} nu a putut fi deschis")
         }
-    }
-
-    private fun openOffers(s: ChooserState) {
-        val link = s.offersLink
-        if (link != null && resolver.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse(link)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))) return
-        say("Serviciul nu are încă integrare în aplicație")
     }
 
     private fun resolveAll(apps: Collection<InstalledApp>, request: PlaybackRequest): Map<TargetApp, ResolvedLaunch> =

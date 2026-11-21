@@ -1,6 +1,9 @@
 package ro.ak.vodunify.ui.search
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import ro.ak.vodunify.ui.components.Dropdown
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -133,51 +136,38 @@ private fun resultKey(r: SearchResult) = when (r) {
     is SearchResult.Person -> "person:${r.person.id}"
 }
 
+/** Filtrele ca liste de alegere (tip, gen, an), pe un rând: nu mai sunt zeci de butoane. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun Filters(filters: SearchFilters, genres: List<Genre>, years: List<Int>, viewModel: SearchViewModel) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(SearchType.entries, key = { it.name }) { type ->
-                FilterChip(
-                    selected = filters.type == type,
-                    onClick = { viewModel.onTypeChange(type) },
-                    label = { Text(type.label) },
-                )
-            }
-        }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Dropdown(
+            label = null,
+            value = filters.type,
+            options = SearchType.entries,
+            optionLabel = { "Tip: ${it.label}" },
+            onSelect = viewModel::onTypeChange,
+            dialogTitle = "Ce cauți",
+        )
         if (filters.type != SearchType.PERSON) {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                item(key = "any_genre") {
-                    FilterChip(
-                        selected = filters.genreId == null,
-                        onClick = { viewModel.onGenreChange(null) },
-                        label = { Text("Orice gen") },
-                    )
-                }
-                items(genres, key = { it.id }) { g ->
-                    FilterChip(
-                        selected = filters.genreId == g.id,
-                        onClick = { viewModel.onGenreChange(if (filters.genreId == g.id) null else g.id) },
-                        label = { Text(g.name) },
-                    )
-                }
-            }
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                item(key = "any_year") {
-                    FilterChip(
-                        selected = filters.year == null,
-                        onClick = { viewModel.onYearChange(null) },
-                        label = { Text("Orice an") },
-                    )
-                }
-                items(years, key = { it }) { y ->
-                    FilterChip(
-                        selected = filters.year == y,
-                        onClick = { viewModel.onYearChange(if (filters.year == y) null else y) },
-                        label = { Text(y.toString()) },
-                    )
-                }
-            }
+            val genreOptions = listOf<Genre?>(null) + genres
+            Dropdown(
+                label = null,
+                value = genreOptions.firstOrNull { it?.id == filters.genreId },
+                options = genreOptions,
+                optionLabel = { "Gen: " + (it?.name ?: "Oricare") },
+                onSelect = { viewModel.onGenreChange(it?.id) },
+                dialogTitle = "Genul",
+            )
+            val yearOptions = listOf<Int?>(null) + years
+            Dropdown(
+                label = null,
+                value = filters.year,
+                options = yearOptions,
+                optionLabel = { "An: " + (it?.toString() ?: "Oricare") },
+                onSelect = viewModel::onYearChange,
+                dialogTitle = "Anul",
+            )
         }
     }
 }

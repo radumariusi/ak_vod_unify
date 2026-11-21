@@ -1,5 +1,6 @@
 package ro.ak.vodunify.ui.settings
 
+import ro.ak.vodunify.ui.components.OnOffDropdown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -63,9 +64,7 @@ fun BackupSection(viewModel: BackupViewModel = hiltViewModel()) {
                     OutlinedButton(onClick = viewModel::refreshList, enabled = !busy) { Text("Arată copiile") }
                     if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = auto, onClick = { viewModel.setAuto(!auto) }, label = { Text("Backup automat zilnic") })
-                }
+                OnOffDropdown("Backup automat zilnic", auto, viewModel::setAuto)
                 status?.let { Text("Ultimul: $it", style = MaterialTheme.typography.bodySmall) }
                 files?.let { list ->
                     Text("Copii pe Drive", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 8.dp))

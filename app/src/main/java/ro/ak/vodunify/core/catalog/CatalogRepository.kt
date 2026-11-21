@@ -17,7 +17,8 @@ import ro.ak.vodunify.core.tmdb.TmdbListItem
 import ro.ak.vodunify.core.tmdb.TmdbNotConfiguredException
 import ro.ak.vodunify.core.tmdb.TmdbPage
 import ro.ak.vodunify.core.tmdb.TmdbPersonDetails
-import ro.ak.vodunify.core.tmdb.TmdbProviderList
+import ro.ak.vodunify.core.tmdb.TmdbImageList
+import ro.ak.vodunify.core.prefs.Market
 import ro.ak.vodunify.core.tmdb.TmdbSeasonDetails
 import ro.ak.vodunify.core.tmdb.TmdbStudioDetails
 import ro.ak.vodunify.core.tmdb.TmdbTitleDetails
@@ -41,16 +42,16 @@ class CatalogRepository @Inject constructor(
 
     // ---------- Acasă ----------
 
-    suspend fun home(settings: CatalogSettings): HomeCatalog = supervisorScope {
+    /** [shelves]: serviciile tale (instalate), fiecare cu biblioteca lui: un rând „Pe Netflix (RO)” pentru fiecare. */
+    suspend fun home(settings: CatalogSettings, shelves: List<ServiceShelf>): HomeCatalog = supervisorScope {
         val lang = settings.apiLanguage
         val l = settings.language
-        val region = settings.market.code
+        val region = Market.RO.code
 
         val trending = async { list("trending/all/week", mapOf("language" to lang)) }
         val movies = async { list("movie/popular", mapOf("language" to lang, "region" to region)) }
         val shows = async { list("tv/popular", mapOf("language" to lang)) }
         val topMovies = async { list("movie/top_rated", mapOf("language" to lang, "region" to region)) }
-        val providers = async { topServices(settings, 5) }
 
         val errors = mutableListOf<Throwable>()
         suspend fun <T> safe(block: suspend () -> T): T? = try {
@@ -71,11 +72,15 @@ class CatalogRepository @Inject constructor(
         safe { TmdbMappers.items(shows.await().results, l, TitleKind.TV) }?.let { rows += CatalogRow("shows", "Seriale populare", it) }
         safe { TmdbMappers.items(topMovies.await().results, l, TitleKind.MOVIE) }?.let { rows += CatalogRow("top_movies", "Filme apreciate", it) }
 
-        val serviceRows = safe { providers.await() }.orEmpty().map { provider ->
+        val serviceRows = shelves.filter { it.providerIds.isNotEmpty() }.map { shelf ->
             async {
                 safe {
-                    val (m, t) = serviceCatalog(provider.id, settings)
-                    CatalogRow("service_${provider.id}", "Pe ${provider.name} (${settings.market.code})", TmdbMappers.interleave(m, t))
+                    val (m, t) = serviceCatalog(shelf, settings)
+                    CatalogRow(
+                        "service_${shelf.name}_${shelf.market.code}",
+                        "Pe ${shelf.name} (${shelf.market.code})",
+                        TmdbMappers.interleave(m, t),
+                    )
                 }
             }
         }.awaitAll().filterNotNull()
@@ -89,23 +94,12 @@ class CatalogRepository @Inject constructor(
         )
     }
 
-    /** Serviciile de streaming principale din piața selectată (Netflix, Prime Video etc.). */
-    suspend fun topServices(settings: CatalogSettings, count: Int): List<ProviderInfo> {
-        val all = tmdb.get(
-            "watch/providers/movie",
-            mapOf("watch_region" to settings.market.code, "language" to settings.apiLanguage),
-            TmdbProviderList.serializer(),
-            TmdbClient.LONG_TTL,
-        )
-        return TmdbMappers.topProviders(all.results, settings.market, count)
-    }
-
-    private suspend fun serviceCatalog(providerId: Int, settings: CatalogSettings): Pair<List<CatalogItem>, List<CatalogItem>> =
+    private suspend fun serviceCatalog(shelf: ServiceShelf, settings: CatalogSettings): Pair<List<CatalogItem>, List<CatalogItem>> =
         coroutineScope {
             val params = mapOf(
                 "language" to settings.apiLanguage,
-                "watch_region" to settings.market.code,
-                "with_watch_providers" to providerId.toString(),
+                "watch_region" to shelf.market.code,
+                "with_watch_providers" to shelf.providerIds.joinToString("|"),
                 "with_watch_monetization_types" to "flatrate|free|ads",
                 "sort_by" to "popularity.desc",
             )
@@ -143,7 +137,7 @@ class CatalogRepository @Inject constructor(
 
     suspend fun details(kind: TitleKind, id: Long, settings: CatalogSettings): TitleDetails {
         val append = buildList {
-            add("credits"); add("watch/providers"); add("recommendations"); add("external_ids"); add("videos")
+            add("credits"); add("watch/providers"); add("recommendations"); add("external_ids"); add("videos"); add("images")
         }.joinToString(",")
         val dto = tmdb.get(
             "${kind.path}/$id",
@@ -151,6 +145,7 @@ class CatalogRepository @Inject constructor(
                 "language" to settings.apiLanguage,
                 "append_to_response" to append,
                 "include_video_language" to "ro,en,null",
+                "include_image_language" to logoLanguages(settings),
             ),
             TmdbTitleDetails.serializer(),
         )
@@ -228,14 +223,28 @@ class CatalogRepository @Inject constructor(
                         TmdbMappers.year(it.airDate),
                     )
                 },
-            availability = TmdbMappers.availabilityFor(dto, settings.market),
+            availability = TmdbMappers.availabilityFor(dto),
             recommendations = TmdbMappers.items(dto.recommendations?.results.orEmpty(), settings.language, kind),
             imdbId = dto.imdbId ?: dto.externalIds?.imdbId,
             trailerYoutubeKey = trailer,
             nextEpisode = dto.nextEpisodeToAir?.let { e ->
                 "Următorul episod: S${e.seasonNumber} E${e.episodeNumber}" + (e.airDate?.let { " · $it" } ?: "")
             },
+            logoUrl = TmdbImages.titleLogo(TmdbMappers.logoPath(dto.images?.logos.orEmpty(), settings.logoLanguage)),
         )
+    }
+
+    private fun logoLanguages(settings: CatalogSettings) = "${settings.logoLanguage},en,null"
+
+    /** Sigla unui titlu, pentru hero-ul din Acasă (cache lung: siglele nu se schimbă). Null = fără siglă. */
+    suspend fun logoUrl(kind: TitleKind, id: Long, settings: CatalogSettings): String? {
+        val images = tmdb.get(
+            "${kind.path}/$id/images",
+            mapOf("include_image_language" to logoLanguages(settings)),
+            TmdbImageList.serializer(),
+            TmdbClient.LONG_TTL,
+        )
+        return TmdbImages.titleLogo(TmdbMappers.logoPath(images.logos, settings.logoLanguage))
     }
 
     private fun jobLabel(job: String?) = when (job) {
@@ -335,6 +344,7 @@ class CatalogRepository @Inject constructor(
             department = dto.knownForDepartment,
             movies = items.filter { it.kind == TitleKind.MOVIE },
             shows = items.filter { it.kind == TitleKind.TV },
+            credits = items,
         )
     }
 

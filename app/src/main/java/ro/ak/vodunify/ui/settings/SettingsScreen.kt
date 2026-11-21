@@ -1,5 +1,6 @@
 package ro.ak.vodunify.ui.settings
 
+import ro.ak.vodunify.ui.components.Dropdown
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -55,7 +56,7 @@ import ro.ak.vodunify.ui.theme.Accent
 /** Categoriile setărilor (stânga pe TV / tabletă, listă pe telefon). */
 private enum class SettingsCategory(val title: String, val subtitle: String) {
     APP("Aplicație", "Versiune, actualizări, aplicațiile AK"),
-    CATALOG("Catalog", "Limba și piața TMDb"),
+    CATALOG("Catalog", "Limba titlurilor și descrierilor"),
     APPS("Aplicații și servicii", "Ce citim din fiecare, biblioteci RO/US, playere"),
     PLAYBACK("Redare", "Player standard, unde se deschid serviciile"),
     SCROBBLER("AK Scrobbler", "Continuă vizionarea, automat"),
@@ -212,28 +213,24 @@ private fun CatalogCategory(viewModel: SettingsViewModel) {
             color = if (viewModel.tmdbConfigured) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
         )
         Spacer(Modifier.height(4.dp))
-        Text("Limba titlurilor și descrierilor", fontWeight = FontWeight.Medium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ContentLanguage.entries.forEach { lang ->
-                FilterChip(
-                    selected = catalog.language == lang,
-                    onClick = { viewModel.setLanguage(lang) },
-                    label = { Text(lang.label) },
-                )
-            }
-        }
-        SettingHint("Română: titluri traduse unde există (descrierile lipsă se iau în engleză). Original: titlul original al producției.")
-        Spacer(Modifier.height(4.dp))
-        Text("Piața (disponibilitate și cataloage pe servicii)", fontWeight = FontWeight.Medium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Market.entries.forEach { m ->
-                FilterChip(
-                    selected = catalog.market == m,
-                    onClick = { viewModel.setMarket(m) },
-                    label = { Text("${m.label} (${m.code})") },
-                )
-            }
-        }
+        Dropdown(
+            label = "Titluri și descrieri",
+            value = catalog.language,
+            options = ContentLanguage.entries,
+            optionLabel = { it.label },
+            onSelect = viewModel::setLanguage,
+            optionDetail = {
+                when (it) {
+                    ContentLanguage.ROMANIAN -> "Traduse unde există; descrierile lipsă se iau în engleză"
+                    ContentLanguage.ENGLISH -> "Titluri și descrieri în engleză"
+                    ContentLanguage.ORIGINAL -> "Titlul original al producției, descrieri în engleză"
+                }
+            },
+        )
+        SettingHint(
+            "Disponibilitatea pe servicii nu mai depinde de o piață aici: fiecare serviciu se caută în biblioteca lui " +
+                "(RO sau US), din Aplicații și servicii.",
+        )
         Spacer(Modifier.height(4.dp))
         OutlinedButton(onClick = viewModel::clearCatalogCache) { Text("Golește cache-ul catalogului") }
         cacheMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }

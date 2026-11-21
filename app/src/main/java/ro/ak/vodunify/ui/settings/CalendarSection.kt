@@ -1,5 +1,7 @@
 package ro.ak.vodunify.ui.settings
 
+import ro.ak.vodunify.ui.components.OnOffDropdown
+import ro.ak.vodunify.ui.components.Dropdown
 import android.Manifest
 import android.os.Build
 import android.widget.Toast
@@ -70,25 +72,10 @@ fun CalendarSection(viewModel: CalendarSettingsViewModel = hiltViewModel()) {
                 return@Column
             }
 
-            Label("Aplicațiile tale și țara fiecăreia")
             Hint(
-                "Bifează aplicațiile pe care le ai. Țara (RO / US) decide ora la care apare un episod și dacă e pe aplicația ta. " +
-                    "Apasă pe țară ca s-o schimbi.",
+                "Aplicațiile tale și țara fiecăreia (ora de apariție, „doar pe aplicațiile mele”) vin din Aplicații și " +
+                    "servicii: serviciile instalate, fiecare în biblioteca lui (RO sau US).",
             )
-            StreamingCatalog.all.forEach { app ->
-                val user = s.apps.firstOrNull { it.appId == app.id } ?: return@forEach
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = user.installed,
-                        onClick = { viewModel.setAppInstalled(app.id, !user.installed) },
-                        label = { Text(if (user.installed) "✓ ${app.name}" else app.name) },
-                    )
-                    if (user.installed) {
-                        OutlinedButton(onClick = { viewModel.toggleAppRegion(app.id) }) { Text("Țara: ${user.region.label} (${user.region.code})") }
-                    }
-                }
-            }
-            OutlinedButton(onClick = viewModel::detectApps) { Text("Detectează aplicațiile instalate") }
 
             Label("Praguri pentru seriale")
             ThresholdEditor(s.thresholds, newLabel = "Seriale noi doar dacă sunt „mult așteptate”", onChange = viewModel::updateShowThresholds)
@@ -98,51 +85,43 @@ fun CalendarSection(viewModel: CalendarSettingsViewModel = hiltViewModel()) {
             Label("Note IMDb (opțional, cheie OMDb)")
             OmdbKeyField(s, viewModel)
 
-            Label("Categorii ascunse")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                ContentFilter.entries.forEach { c ->
-                    FilterChip(
-                        selected = c in s.hiddenCategories,
-                        onClick = { viewModel.toggleCategory(c) },
-                        label = { Text(if (c in s.hiddenCategories) "Ascuns: ${c.label}" else c.label) },
-                    )
-                }
+            Label("Categorii")
+            ContentFilter.entries.forEach { c ->
+                Dropdown(
+                    label = c.label,
+                    value = c in s.hiddenCategories,
+                    options = listOf(false, true),
+                    optionLabel = { if (it) "Ascunse" else "Afișate" },
+                    onSelect = { hide -> if (hide != (c in s.hiddenCategories)) viewModel.toggleCategory(c) },
+                )
             }
             Hint("Ce urmărești apare mereu, chiar dacă e într-o categorie ascunsă.")
 
             Label("Notificări și canalul „Azi apare”")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                NotificationMode.entries.forEach { mode ->
-                    FilterChip(
-                        selected = s.notifications.mode == mode,
-                        onClick = {
-                            viewModel.setNotificationMode(mode)
-                            if (mode != NotificationMode.OFF && Build.VERSION.SDK_INT >= 33 && !viewModel.canNotify()) {
-                                permission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                            }
-                        },
-                        label = { Text(mode.label) },
-                    )
-                }
-            }
+            Dropdown(
+                label = "Notificări",
+                value = s.notifications.mode,
+                options = NotificationMode.entries,
+                optionLabel = { it.label },
+                onSelect = { mode ->
+                    viewModel.setNotificationMode(mode)
+                    if (mode != NotificationMode.OFF && Build.VERSION.SDK_INT >= 33 && !viewModel.canNotify()) {
+                        permission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                },
+            )
             if (s.notifications.mode != NotificationMode.OFF) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(onClick = { viewModel.shiftNotificationHour(-1) }) { Text("−") }
-                    Text("Ora: %02d:00 (ora României)".format(s.notifications.hour))
-                    OutlinedButton(onClick = { viewModel.shiftNotificationHour(1) }) { Text("+") }
-                }
-                FilterChip(
-                    selected = s.notifications.includeMovies,
-                    onClick = viewModel::toggleIncludeMovies,
-                    label = { Text("Include și filmele") },
+                Dropdown(
+                    label = "Ora (ora României)",
+                    value = s.notifications.hour,
+                    options = (0..23).toList(),
+                    optionLabel = { "%02d:00".format(it) },
+                    onSelect = { h -> viewModel.shiftNotificationHour(h - s.notifications.hour) },
                 )
+                OnOffDropdown("Include și filmele", s.notifications.includeMovies, { if (it != s.notifications.includeMovies) viewModel.toggleIncludeMovies() }, on = "Da", off = "Nu")
             }
             if (viewModel.tvChannelSupported) {
-                FilterChip(
-                    selected = s.tvChannel,
-                    onClick = viewModel::toggleTvChannel,
-                    label = { Text("Canalul „Azi apare” pe ecranul principal TV") },
-                )
+                OnOffDropdown("Canalul „Azi apare” pe ecranul TV", s.tvChannel, { if (it != s.tvChannel) viewModel.toggleTvChannel() })
             }
             OutlinedButton(onClick = viewModel::showTodayNow) { Text("Arată acum ce apare azi") }
             Hint(
@@ -175,15 +154,16 @@ private fun Hint(text: String) {
 @Composable
 private fun ThresholdEditor(t: QualityThresholds, newLabel: String, onChange: ((QualityThresholds) -> QualityThresholds) -> Unit) {
     val ro = Locale.forLanguageTag("ro-RO")
-    Stepper("IMDb ≥ %.1f".format(ro, t.minImdbRating)) { d -> onChange { it.copy(minImdbRating = (it.minImdbRating + d * 0.5).coerceIn(0.0, 9.5)) } }
-    Stepper("Voturi IMDb ≥ ${t.minImdbVotes}") { d -> onChange { it.copy(minImdbVotes = step(it.minImdbVotes, d, listOf(0, 500, 1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000))) } }
-    Stepper("TMDb ≥ %.1f".format(ro, t.minTmdbRating)) { d -> onChange { it.copy(minTmdbRating = (it.minTmdbRating + d * 0.5).coerceIn(0.0, 9.5)) } }
-    Stepper("Voturi TMDb ≥ ${t.minTmdbVotes}") { d -> onChange { it.copy(minTmdbVotes = step(it.minTmdbVotes, d, listOf(0, 50, 100, 200, 300, 500, 1_000, 2_000, 5_000))) } }
-    FilterChip(
-        selected = t.newShowsOnlyIfAnticipated,
-        onClick = { onChange { it.copy(newShowsOnlyIfAnticipated = !it.newShowsOnlyIfAnticipated) } },
-        label = { Text(newLabel) },
-    )
+    val ratings = (0..19).map { it * 0.5 }
+    fun rating(v: Double) = if (v <= 0.0) "Oricare" else "≥ %.1f".format(ro, v)
+    fun votes(v: Int) = if (v <= 0) "Oricâte" else "≥ $v"
+    Dropdown("Notă IMDb", ratings.minByOrNull { kotlin.math.abs(it - t.minImdbRating) } ?: 0.0, ratings, ::rating, { v -> onChange { it.copy(minImdbRating = v) } })
+    val imdbVotes = (listOf(0, 500, 1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000) + t.minImdbVotes).distinct().sorted()
+    Dropdown("Voturi IMDb", t.minImdbVotes, imdbVotes, ::votes, { v -> onChange { it.copy(minImdbVotes = v) } })
+    Dropdown("Notă TMDb", ratings.minByOrNull { kotlin.math.abs(it - t.minTmdbRating) } ?: 0.0, ratings, ::rating, { v -> onChange { it.copy(minTmdbRating = v) } })
+    val tmdbVotes = (listOf(0, 50, 100, 200, 300, 500, 1_000, 2_000, 5_000) + t.minTmdbVotes).distinct().sorted()
+    Dropdown("Voturi TMDb", t.minTmdbVotes, tmdbVotes, ::votes, { v -> onChange { it.copy(minTmdbVotes = v) } })
+    OnOffDropdown(newLabel, t.newShowsOnlyIfAnticipated, { v -> onChange { it.copy(newShowsOnlyIfAnticipated = v) } }, on = "Da", off = "Nu")
 }
 
 private fun step(current: Int, delta: Int, ladder: List<Int>): Int {

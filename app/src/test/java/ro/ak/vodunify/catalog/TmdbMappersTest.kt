@@ -80,12 +80,12 @@ class TmdbMappersTest {
             }}}
             """.trimIndent(),
         )
-        val av = TmdbMappers.availabilityFor(details, Market.US)
-        assertEquals(listOf(Market.US, Market.RO), av.map { it.market })
-        assertEquals(listOf("Netflix", "Max"), av[0].flatrate.map { it.name })
-        assertEquals(1, av[0].rent.size)
-        assertTrue(av[0].buy.isEmpty())
-        assertEquals(Market.RO, TmdbMappers.availabilityFor(details, Market.RO).first().market)
+        val av = TmdbMappers.availabilityFor(details)
+        assertEquals(listOf(Market.RO, Market.US), av.map { it.market })
+        assertEquals(listOf("Netflix", "Max"), av[1].flatrate.map { it.name })
+        assertEquals(1, av[1].rent.size)
+        assertTrue(av[1].buy.isEmpty())
+        assertEquals(listOf("Netflix"), av[0].flatrate.map { it.name })
     }
 
     @Test fun topProvidersUseRegionPriorityAndDropAdTiers() {
@@ -101,5 +101,17 @@ class TmdbMappersTest {
 
     @Test fun interleaves() {
         assertEquals(listOf(1, 10, 2, 20, 3), TmdbMappers.interleave(listOf(1, 2, 3), listOf(10, 20)))
+    }
+
+    @Test fun picksTitleLogoByLanguage() {
+        val logos = listOf(
+            ro.ak.vodunify.core.tmdb.TmdbImage("/a.png", "en", 5.0),
+            ro.ak.vodunify.core.tmdb.TmdbImage("/b.svg", "ro", 9.0),
+            ro.ak.vodunify.core.tmdb.TmdbImage("/c.png", "ro", 1.0),
+            ro.ak.vodunify.core.tmdb.TmdbImage("/d.png", null, 9.0),
+        )
+        assertEquals("/c.png", TmdbMappers.logoPath(logos, "ro"))
+        assertEquals("/a.png", TmdbMappers.logoPath(logos, "en"))
+        assertNull(TmdbMappers.logoPath(emptyList(), "ro"))
     }
 }

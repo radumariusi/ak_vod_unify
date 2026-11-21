@@ -241,7 +241,7 @@ private fun TopBar(
 
 @Composable
 private fun Brand(compact: Boolean) {
-    Row(verticalAlignment = Alignment.Bottom) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             "AK VOD",
             style = if (compact) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge,
@@ -283,27 +283,33 @@ private fun NavTab(
         border = if (focused) BorderStroke(FocusBorderWidth, FocusBorder) else null,
         interactionSource = interaction,
     ) {
-        Column(
-            Modifier.padding(horizontal = if (iconOnly) 10.dp else 15.dp, vertical = 6.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            if (iconOnly) {
-                Icon(dest.icon, contentDescription = dest.label, modifier = Modifier.size(22.dp))
-            } else {
-                Text(
-                    dest.label,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+        // Textul stă centrat pe verticală; indicatorul roșu e desenat peste marginea de jos, fără să-l împingă în sus.
+        Box(contentAlignment = Alignment.Center) {
+            Box(
+                Modifier.padding(horizontal = if (iconOnly) 10.dp else 15.dp, vertical = 9.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (iconOnly) {
+                    Icon(dest.icon, contentDescription = dest.label, modifier = Modifier.size(22.dp))
+                } else {
+                    Text(
+                        dest.label,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                    )
+                }
+            }
+            // Un singur indicator: doar pe fila activă (focusul are conturul lui).
+            if (active) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 2.dp)
+                        .width(if (iconOnly) 18.dp else 32.dp)
+                        .height(3.dp)
+                        .background(c.primary, MaterialTheme.shapes.extraSmall),
                 )
             }
-            Spacer(Modifier.height(4.dp))
-            // Un singur indicator: doar pe fila activă (focusul are conturul lui).
-            Box(
-                Modifier
-                    .width(if (iconOnly) 18.dp else 32.dp)
-                    .height(3.dp)
-                    .background(if (active) c.primary else Color.Transparent, MaterialTheme.shapes.extraSmall),
-            )
         }
     }
 }

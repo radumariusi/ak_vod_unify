@@ -8,8 +8,6 @@ import ro.ak.vodunify.core.catalog.MarketAvailability
 import ro.ak.vodunify.core.catalog.ProviderInfo
 import ro.ak.vodunify.core.playback.LinkBuilder
 import ro.ak.vodunify.core.playback.LinkPrecision
-import ro.ak.vodunify.core.playback.MarketWarning
-import ro.ak.vodunify.core.playback.OfferType
 import ro.ak.vodunify.core.playback.PlaybackRequest
 import ro.ak.vodunify.core.playback.PlaybackSettings
 import ro.ak.vodunify.core.playback.ResumeEstimator
@@ -75,37 +73,35 @@ class PlaybackTest {
     private fun avail(m: Market, flat: List<ProviderInfo> = emptyList(), rent: List<ProviderInfo> = emptyList()) =
         MarketAvailability(m, null, flat, emptyList(), rent, emptyList())
 
-    @Test fun buildsOptionsWithPreferenceAndDedup() {
+    @Test fun showsOnlyYourServicesWhenAvailableThere() {
         val availability = listOf(
-            avail(Market.RO, flat = listOf(p(8, "Netflix"), p(4444, "Voyo")), rent = listOf(p(10, "Amazon Video"), p(8, "Netflix"))),
-            avail(Market.US, flat = listOf(p(9, "Amazon Prime Video"))),
+            avail(Market.RO, flat = listOf(p(8, "Netflix"), p(4444, "Voyo")), rent = listOf(p(10, "Amazon Video"))),
+            avail(Market.US, flat = listOf(p(9, "Amazon Prime Video"), p(337, "Disney Plus"))),
         )
-        val settings = PlaybackSettings(Market.RO, mapOf("netflix" to "stremio"))
-        val o = WatchOptionsBuilder.build(availability, settings, setOf(TargetApp.STREMIO, TargetApp.NUVIO))
-        assertNull(o.warning)
-        assertEquals(listOf("Netflix", "Voyo", "Amazon Video"), o.services.map { it.provider.name })
+        val settings = PlaybackSettings(Market.RO, mapOf("netflix" to "stremio"), serviceMarkets = mapOf("disney" to Market.US))
+        val o = WatchOptionsBuilder.build(availability, settings, setOf(TargetApp.STREMIO, TargetApp.NUVIO, TargetApp.DISNEY_PLUS))
+        // Netflix (deschis în Stremio) și Disney+ (US) sunt ale tale; Voyo neinstalat nu apare, închirierea nu contează.
+        assertEquals(listOf("Netflix (RO)", "Disney+ (US)"), o.services.map { it.label })
+        assertTrue(o.elsewhere.isEmpty())
         val netflix = o.services.first()
         assertEquals(TargetApp.STREMIO, netflix.app)
         assertTrue(netflix.installed && netflix.usesPreferredPlayer)
-        assertEquals(OfferType.RENT, o.services.last().offer)
         assertEquals(netflix, o.recommendedService)
+        assertNull(o.recommendedPlayer)
         assertEquals(listOf(TargetApp.NUVIO, TargetApp.STREMIO), o.players)
         assertTrue(TargetApp.DEBRID_STREAM in o.missingPlayers && TargetApp.STREMIO !in o.missingPlayers)
     }
 
-    @Test fun usesEachServiceLibraryAndDefaultPlayer() {
+    @Test fun usesEachServiceLibraryOnly() {
         val availability = listOf(
             avail(Market.RO, flat = listOf(p(1899, "Max"), p(8, "Netflix"))),
             avail(Market.US, flat = listOf(p(1899, "Max"), p(8, "Netflix"), p(386, "Peacock"))),
         )
         val settings = PlaybackSettings(Market.RO, serviceMarkets = mapOf("hbomax" to Market.US), defaultPlayer = "stremio")
+        val all = WatchOptionsBuilder.available(availability, settings, emptySet())
+        assertEquals(setOf("Max (US)", "Netflix (RO)", "Peacock (US)"), all.map { it.label }.toSet())
         val o = WatchOptionsBuilder.build(availability, settings, setOf(TargetApp.NUVIO, TargetApp.STREMIO, TargetApp.HBO_MAX))
-        val byName = o.services.associate { it.provider.name to it.market }
-        assertEquals(Market.US, byName["Max"])
-        assertEquals(Market.RO, byName["Netflix"])
-        assertEquals(Market.US, byName["Peacock"])
-        assertEquals(3, o.services.size)
-        assertEquals("Max", o.recommendedService?.provider?.name)
+        assertEquals(listOf("Max (US)"), o.services.map { it.label })
         assertEquals(listOf(TargetApp.STREMIO, TargetApp.NUVIO), o.players)
     }
 
@@ -119,18 +115,24 @@ class PlaybackTest {
         assertTrue(o.services.single().installed)
     }
 
-    @Test fun warnsOnMarketMismatch() {
+    @Test fun notOnYourServicesListsWhereItIsAndOffersPlayer() {
         val o = WatchOptionsBuilder.build(
             listOf(avail(Market.RO, rent = listOf(p(10, "Amazon Video"))), avail(Market.US, flat = listOf(p(1899, "Max")))),
-            PlaybackSettings(Market.RO),
+            PlaybackSettings(Market.RO, serviceMarkets = mapOf("hbomax" to Market.US)),
+            setOf(TargetApp.NUVIO),
+        )
+        assertTrue(o.services.isEmpty())
+        assertEquals(listOf("Max (US)"), o.elsewhere.map { it.label })
+        assertNull(o.recommendedService)
+        assertEquals(TargetApp.NUVIO, o.recommendedPlayer)
+
+        // HBO Max e setat pe RO, iar titlul e doar în US: nu apare deloc.
+        val ro = WatchOptionsBuilder.build(
+            listOf(avail(Market.RO), avail(Market.US, flat = listOf(p(1899, "Max")))),
+            PlaybackSettings(),
             emptySet(),
         )
-        val w = o.warning as MarketWarning.NotInYourLibraries
-        assertEquals(listOf("Max"), w.services)
-        assertNull(o.recommendedService)
-
-        val none = WatchOptionsBuilder.build(listOf(avail(Market.RO), avail(Market.US)), PlaybackSettings(), emptySet())
-        assertEquals(MarketWarning.NowhereStreaming, none.warning)
+        assertTrue(ro.services.isEmpty() && ro.elsewhere.isEmpty())
     }
 
     @Test fun resumeEstimates() {

@@ -1,6 +1,14 @@
 package ro.ak.vodunify.ui.home
 
-import androidx.compose.animation.Crossfade
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.focus.onFocusChanged
+import ro.ak.vodunify.core.catalog.TitleKind
+import ro.ak.vodunify.ui.components.LocalPosterLongPress
+import ro.ak.vodunify.ui.components.TitleLogo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -75,35 +83,56 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
             item { ErrorPanel(s.error, onRetry = viewModel::retry) }
             item { personalRows() }
         }
-        is LoadState.Data -> HomeContent(s.value, personalRows)
+        is LoadState.Data -> HomeContent(s.value, personalRows, viewModel::logo)
     }
 }
 
 @Composable
-private fun HomeContent(catalog: HomeCatalog, personalRows: @Composable () -> Unit) {
+private fun HomeContent(
+    catalog: HomeCatalog,
+    personalRows: @Composable () -> Unit,
+    loadLogo: suspend (TitleKind, Long) -> String?,
+) {
     val spec = layoutSpec()
     val heroFocus = remember { FocusRequester() }
     val restore = LocalFocusRestore.current
+    var heroFocused by remember { mutableStateOf(false) }
 
     // Pe TV punem focusul inițial pe butonul principal, ca D-pad-ul să aibă de unde porni;
     // la întoarcerea dintr-o fișă focusul revine pe cardul deschis (vezi FocusRestore).
     if (spec.isTv && catalog.hero.isNotEmpty()) {
         LaunchedEffect(Unit) { if (restore.pending == null) runCatching { heroFocus.requestFocus() } }
     }
+    // Din orice rând: Înapoi (sau OK ținut apăsat pe un poster) urcă direct la butoanele din hero, pentru
+    // titlul cu focus. Abia din hero, Înapoi întreabă dacă ieși din aplicație.
+    BackHandler(enabled = spec.isTv && !heroFocused) { runCatching { heroFocus.requestFocus() } }
+    val jumpToHero: () -> Unit = { runCatching { heroFocus.requestFocus() } }
 
     if (spec.isTv) {
         // Ca în AK VOD Hub: hero-ul stă fix sus și arată titlul cu focus; doar rândurile se derulează,
-        // fiecare rând cu focus urcă întreg sub hero (derulare cu pivot).
-        Column(Modifier.fillMaxSize()) {
-            Hero(catalog.hero, heroFocus, Modifier.fillMaxWidth().height(spec.heroHeight))
-            PivotScroll(pivot = 40.dp) {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 240.dp),
-                ) {
-                    item(key = "personal") { personalRows() }
-                    items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
-                    item(key = "attribution") { AttributionNote() }
+        // fiecare rând cu focus urcă întreg sub hero (derulare cu pivot). Hero-ul se micșorează cât să încapă
+        // un rând întreg de postere dedesubt.
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val heroHeight = minOf(maxHeight * 0.52f, 260.dp, maxHeight - spec.posterHeight - 76.dp).coerceAtLeast(150.dp)
+            Column(Modifier.fillMaxSize()) {
+                Hero(
+                    catalog.hero,
+                    heroFocus,
+                    loadLogo,
+                    Modifier.fillMaxWidth().height(heroHeight).onFocusChanged { heroFocused = it.hasFocus },
+                    compact = heroHeight < 210.dp,
+                )
+                CompositionLocalProvider(LocalPosterLongPress provides jumpToHero) {
+                    PivotScroll(pivot = 8.dp) {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(bottom = 240.dp),
+                        ) {
+                            item(key = "personal") { personalRows() }
+                            items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
+                            item(key = "attribution") { AttributionNote() }
+                        }
+                    }
                 }
             }
         }
@@ -114,7 +143,7 @@ private fun HomeContent(catalog: HomeCatalog, personalRows: @Composable () -> Un
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (catalog.hero.isNotEmpty()) {
-                item(key = "hero") { Hero(catalog.hero, heroFocus, Modifier.fillMaxWidth().height(spec.heroHeight)) }
+                item(key = "hero") { Hero(catalog.hero, heroFocus, loadLogo, Modifier.fillMaxWidth().height(spec.heroHeight)) }
             }
             item(key = "personal") { personalRows() }
             items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
@@ -125,10 +154,16 @@ private fun HomeContent(catalog: HomeCatalog, personalRows: @Composable () -> Un
 
 /**
  * Hero-ul din Acasă, ca în AK VOD Hub: fără cadru propriu, peste fundalul panoramic al ecranului.
- * Arată titlul cu focus (poster sau „Continuă”); până atunci, titlurile promovate, pe rând.
+ * Arată titlul cu focus (poster sau „Continuă”), cu sigla lui; până atunci, titlurile promovate, pe rând.
  */
 @Composable
-private fun Hero(items: List<CatalogItem>, focusRequester: FocusRequester, modifier: Modifier = Modifier) {
+private fun Hero(
+    items: List<CatalogItem>,
+    focusRequester: FocusRequester,
+    loadLogo: suspend (TitleKind, Long) -> String?,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+) {
     val spec = layoutSpec()
     val actions = LocalCatalogActions.current
     val backdrop = LocalBackdrop.current
@@ -146,49 +181,48 @@ private fun Hero(items: List<CatalogItem>, focusRequester: FocusRequester, modif
     LaunchedEffect(promoted?.id) {
         if (backdrop != null && backdrop.focused == null) backdrop.url = promoted?.backdropUrl
     }
+    // Sigla se cere după un focus stabil (nu la fiecare poster peste care treci).
+    val logo by produceState<String?>(null, shown.kind, shown.id) {
+        value = null
+        delay(250)
+        value = loadLogo(shown.kind, shown.id)
+    }
 
     Box(modifier) {
         if (backdrop == null) TitleBackdrop(shown.backdropUrl, Modifier.matchParentSize())
         Column(
             Modifier
                 .align(Alignment.BottomStart)
-                .padding(horizontal = spec.screenPadding, vertical = 10.dp)
-                .widthIn(max = 640.dp)
+                .padding(horizontal = spec.screenPadding, vertical = 8.dp)
+                .widthIn(max = 620.dp)
                 .fillMaxWidth(if (spec.isCompact) 1f else 0.6f),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
-            Crossfade(shown, label = "heroText") { item ->
-                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text(
-                        item.title,
-                        style = if (spec.isCompact || spec.isTv) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.headlineLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        maxLines = if (spec.isTv) 1 else 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        item.rating?.takeIf { it > 0 }?.let { RatingChip(it) }
-                        Text(
-                            item.meta,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    if (item.overview.isNotBlank()) {
-                        Text(
-                            item.overview,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onBackground,
-                            maxLines = if (spec.isCompact || spec.isTv) 2 else 3,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
+            TitleLogo(
+                shown.title,
+                logo,
+                height = if (compact) 44.dp else 60.dp,
+                textStyle = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                shown.rating?.takeIf { it > 0 }?.let { RatingChip(it) }
+                Text(
+                    shown.meta,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-            Spacer(Modifier.height(4.dp))
+            if (shown.overview.isNotBlank()) {
+                Text(
+                    shown.overview,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    maxLines = if (compact) 1 else 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Button(
                     onClick = { actions.openTitle(shown.kind, shown.id) },

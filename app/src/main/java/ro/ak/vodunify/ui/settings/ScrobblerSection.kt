@@ -1,5 +1,7 @@
 package ro.ak.vodunify.ui.settings
 
+import ro.ak.vodunify.ui.components.OnOffDropdown
+import ro.ak.vodunify.ui.components.Dropdown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -61,20 +63,20 @@ fun ScrobblerSection(viewModel: ScrobblerSettingsViewModel = hiltViewModel()) {
                 if (installed) "✅ AK Scrobbler e instalat" else "❌ AK Scrobbler nu e instalat: ia ak-scrobbler-….apk din același release",
                 color = if (installed) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
             )
+            OnOffDropdown("Primește vizionările", enabled, viewModel::setEnabled, on = "Da", off = "Oprit")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = enabled, onClick = { viewModel.setEnabled(true) }, label = { Text("Primește") })
-                FilterChip(selected = !enabled, onClick = { viewModel.setEnabled(false) }, label = { Text("Oprit") })
                 if (installed) {
                     OutlinedButton(onClick = { viewModel.launchIntent()?.let(context::startActivity) }) { Text("Deschide AK Scrobbler") }
                 }
                 if (log.isNotEmpty()) OutlinedButton(onClick = viewModel::clearLog) { Text("Golește jurnalul") }
             }
-            Text("Văzut de la", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 6.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ScrobbleRules.WATCHED_CHOICES.forEach { p ->
-                    FilterChip(selected = watchedPercent == p, onClick = { viewModel.setWatchedPercent(p) }, label = { Text("$p%") })
-                }
-            }
+            Dropdown(
+                label = "Marcat ca văzut de la",
+                value = watchedPercent,
+                options = ScrobbleRules.WATCHED_CHOICES,
+                optionLabel = { "$it%" },
+                onSelect = viewModel::setWatchedPercent,
+            )
             if (unresolved > 0) {
                 Text(
                     "⏳ $unresolved vizionări încă fără titlu recunoscut: le păstrez și le completez automat.",
