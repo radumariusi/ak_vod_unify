@@ -141,25 +141,25 @@ private fun ChooserContent(s: ChooserState, vm: WatchChooserViewModel) {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f, fill = false)) {
                 options.warning?.let { w -> item(key = "warn") { WarningCard(w) } }
 
-                item(key = "svc_title") { SectionLabel("Servicii oficiale · ${options.market.label} (${options.market.code})") }
+                item(key = "svc_title") { SectionLabel("Servicii de streaming (fiecare în biblioteca ta: RO sau US)") }
                 if (options.services.isEmpty()) {
-                    item(key = "svc_empty") { Hint("Niciun serviciu oficial în piața ta de redare.") }
+                    item(key = "svc_empty") { Hint("Nu e pe niciun serviciu din bibliotecile tale.") }
                 }
-                items(options.services, key = { "svc_${it.provider.id}" }) { opt ->
+                items(options.services, key = { "svc_${it.market}_${it.provider.id}" }) { opt ->
                     val focus = if (opt == options.services.firstOrNull()) firstFocus else null
                     ServiceRow(opt, opt.app?.let { s.launches[it]?.precision }, focus) { vm.chooseService(opt) }
                 }
 
-                item(key = "pl_title") { SectionLabel("Playere instalate") }
+                item(key = "pl_title") { SectionLabel("Redă într-un player (standardul e primul)") }
                 if (options.players.isEmpty()) {
-                    item(key = "pl_empty") { Hint("Nu am găsit Nuvio, Stremio sau DebridStream pe acest dispozitiv.") }
+                    item(key = "pl_empty") { Hint("Nu am găsit niciun player (Stremio, Nuvio, DebridStream, AK VoD Hub…) pe acest dispozitiv.") }
                 }
                 items(options.players, key = { "pl_${it.id}" }) { app ->
                     val focus = if (options.services.isEmpty() && app == options.players.firstOrNull()) firstFocus else null
                     ChoiceRow(
                         title = s.launches[app]?.installed?.label ?: app.displayName,
                         subtitle = s.launches[app]?.precision?.label ?: "Nu poate fi pornit",
-                        badge = if (app == options.recommendedPlayer) "Recomandat" else null,
+                        badge = if (app == options.players.firstOrNull()) "Standard" else null,
                         logo = null,
                         focusRequester = focus,
                         enabled = s.launches[app] != null,
@@ -183,6 +183,7 @@ private fun ServiceRow(opt: ServiceOption, precision: LinkPrecision?, focus: Foc
     val app = opt.app
     val subtitle = buildList {
         add(opt.offer.label)
+        add(if (opt.market == ro.ak.vodunify.core.prefs.Market.US) "biblioteca US (VPN)" else "biblioteca RO")
         when {
             app == null -> add("fără integrare încă · vezi ofertele")
             !opt.installed -> add("${app.displayName} nu e instalat · instalează")
@@ -226,8 +227,8 @@ private fun ChoiceRow(
         onClick = onClick,
         enabled = enabled,
         shape = RoundedCornerShape(10.dp),
-        color = if (focused) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-        border = if (focused) BorderStroke(2.dp, Color.White) else null,
+        color = if (focused) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+        border = if (focused) BorderStroke(3.dp, Color.White) else null,
         interactionSource = interaction,
         modifier = Modifier
             .fillMaxWidth()
@@ -274,10 +275,9 @@ private fun ResumeChip(resume: ResumeInfo) {
 @Composable
 private fun WarningCard(w: MarketWarning) {
     val text = when (w) {
-        is MarketWarning.OnlyElsewhere ->
-            "Nu e pe niciun serviciu cu abonament în ${w.playbackMarket.label}, piața conturilor tale. " +
-                "În ${w.otherMarket.label} e pe: ${w.services.take(4).joinToString()}. " +
-                "Acolo ai nevoie de un cont din ${w.otherMarket.code}; aplicația oficială poate să nu-l găsească."
+        is MarketWarning.NotInYourLibraries ->
+            "E pe ${w.services.take(4).joinToString()}, dar nu în bibliotecile pe care le folosești (RO/US, din Setări → " +
+                "Aplicații și servicii). Îl poți porni într-un player."
         MarketWarning.NowhereStreaming -> "Nu apare pe niciun serviciu cu abonament în RO sau US. Poți încerca un player."
     }
     Surface(shape = RoundedCornerShape(10.dp), color = Color(0x33FFB300), border = BorderStroke(1.dp, Color(0xFFFFB300))) {

@@ -202,6 +202,8 @@ fun WeekList(
     noun: String,
     onOpen: (CalendarItem) -> Unit,
     onWatch: (CalendarItem) -> Unit,
+    /** „Următoare”: zilele fără nimic nu se afișează. */
+    skipEmpty: Boolean = false,
 ) {
     val spec = layoutSpec()
     val byDay = items.groupBy { it.date }
@@ -213,6 +215,7 @@ fun WeekList(
     ) {
         days.forEach { day ->
             val entries = byDay[day].orEmpty()
+            if (skipEmpty && entries.isEmpty()) return@forEach
             item(key = "day-$day") {
                 Text(
                     dayLabel(day) + if (entries.isEmpty()) " · nimic" else " · ${entries.size} $noun",

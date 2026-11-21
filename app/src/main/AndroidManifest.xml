@@ -39,6 +39,10 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="market" />
         </intent>
+        <!-- Căutare în aplicație (AK VoD Hub, playere IPTV). -->
+        <intent>
+            <action android:name="android.intent.action.SEARCH" />
+        </intent>
         <!-- Detectare după nume pentru build-uri neoficiale (ex. DebridStream). -->
         <intent>
             <action android:name="android.intent.action.MAIN" />

@@ -116,6 +116,7 @@ fun CalendarScreen(
                         CalendarMode.DAY -> dayLabel(state.from)
                         CalendarMode.WEEK -> weekLabel(state.from, state.to)
                         CalendarMode.MONTH -> monthLabel(state.from)
+                        CalendarMode.UPCOMING -> "De la ${dayLabel(state.from)}, $UPCOMING_DAYS zile"
                     },
                     style = MaterialTheme.typography.titleLarge,
                     maxLines = 1,
@@ -130,6 +131,11 @@ fun CalendarScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
+                    FilterChip(
+                        selected = state.onlyFollowed,
+                        onClick = viewModel::toggleOnlyFollowed,
+                        label = { Text("Doar ce urmăresc") },
+                    )
                     FilterChip(
                         selected = state.onlyMyApps,
                         onClick = viewModel::toggleOnlyMyApps,
@@ -177,6 +183,7 @@ fun CalendarScreen(
                         onWatched = viewModel::markWatched,
                     )
                     state.mode == CalendarMode.WEEK -> WeekList(state.days, state.visible, weekList, noun, open, chooseWhere)
+                    state.mode == CalendarMode.UPCOMING -> WeekList(state.days, state.visible, weekList, noun, open, chooseWhere, skipEmpty = true)
                     else -> MonthGrid(state.from, state.to, state.visible, monthList, open, chooseWhere, viewModel::openDay)
                 }
             }
@@ -195,6 +202,7 @@ private fun Summary(state: CalendarUiState) {
         if (s.rejected > 0) add("${s.rejected} sub prag")
         if (s.hiddenByCategory > 0) add("${s.hiddenByCategory} din categorii ascunse")
         if (s.hiddenByUser > 0) add("${s.hiddenByUser} ascunse de tine")
+        if (state.onlyFollowed) add("doar ce urmărești")
         if (state.onlyMyApps && s.notOnMyApps > 0) add("${s.notOnMyApps} pe aplicații pe care nu le ai")
         add(if (s.usedImdb) "note IMDb (OMDb)" else "note TMDb")
         add("ține apăsat pentru „Alege unde vezi”")
