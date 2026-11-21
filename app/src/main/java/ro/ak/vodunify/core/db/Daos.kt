@@ -135,6 +135,13 @@ interface TrackingDao {
     @Query("SELECT * FROM watch_events WHERE mediaKey = :mediaKey ORDER BY watchedAt DESC")
     fun historyFor(mediaKey: String): Flow<List<WatchEventEntity>>
 
+    /** Câte vizionări ale aceluiași film / episod există deja (din orice sursă) în intervalul dat. */
+    @Query(
+        "SELECT COUNT(*) FROM watch_events WHERE mediaKey = :mediaKey AND season IS :season AND episode IS :episode " +
+            "AND watchedAt BETWEEN :from AND :to",
+    )
+    suspend fun countWatchesBetween(mediaKey: String, season: Int?, episode: Int?, from: Long, to: Long): Int
+
     // ---------- Scrierile aplicației (pentru reconciliere) ----------
     @Upsert
     suspend fun putOwnWrites(items: List<OwnWriteEntity>)

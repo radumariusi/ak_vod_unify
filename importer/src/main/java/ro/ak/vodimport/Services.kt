@@ -29,7 +29,7 @@ object Services {
             hosts = listOf("netflix.com"),
             script = Scripts.NETFLIX,
             experimental = false,
-            note = "Tot istoricul profilului ales, cu minutul unde ai rămas. Alege profilul după conectare.",
+            note = "Tot istoricul profilului ales (titlu + ora exactă), o singură dată, ca bază. Alege profilul după conectare.",
             runAnywhere = true,
         ),
         Service(
@@ -44,7 +44,7 @@ object Services {
             hosts = listOf("primevideo.com", "amazon.com", "amazon.co.uk", "amazon.de"),
             script = Scripts.PRIME,
             experimental = true,
-            note = "Experimental: citim pagina „Istoric vizionări” (filmele; episoadele doar dacă site-ul le arată). Fără minut.",
+            note = "Pagina „Istoric vizionări”: filme și episoade, cu data. Fără minut. Nou, încă neverificat pe TV.",
         ),
         unsupported("disney", "Disney+"),
         unsupported("hbomax", "HBO Max"),

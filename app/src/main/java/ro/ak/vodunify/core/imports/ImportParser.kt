@@ -18,6 +18,9 @@ object ImportParser {
     )
 
     /** Numărul sezonului din eticheta lui; 1 pentru mini-serii; null dacă nu e o etichetă de sezon. */
+    /** „Episode 3”, „Episodul 3”, „Ep. 3”: numele episodului e doar numărul lui. */
+    private val EPISODE_ONLY = Regex("""(?i)^(?:episode|episodul|episod|ep\.?|folge|episodio|épisode)\s*(\d{1,3})$""")
+
     fun seasonNumber(label: String?): Int? {
         val l = label?.trim().orEmpty()
         if (l.isEmpty()) return null
@@ -34,9 +37,13 @@ object ImportParser {
         if (series != null) {
             val episodeTitle = item.episode?.trim()?.takeIf { it.isNotEmpty() }
                 ?: item.title.removePrefix(series).trim { it == ':' || it.isWhitespace() }.takeIf { it.isNotEmpty() && it != item.title }
-            val season = seasonNumber(item.season)
+            val season = seasonNumber(item.season) ?: item.seasonNumber?.takeIf { it > 0 }
+            val numbered = item.episodeNumber?.takeIf { it > 0 }
+                ?: episodeTitle?.let { EPISODE_ONLY.matchEntire(it)?.groupValues?.get(1)?.toIntOrNull() }
             return buildList {
-                if (episodeTitle != null) {
+                // Numărul episodului (Netflix îl dă; Prime scrie uneori doar „Episode 3”): cea mai sigură potrivire.
+                if (numbered != null && season != null) add(TitleGuess.NumberedEpisode(series, season, numbered, episodeTitle))
+                if (episodeTitle != null && (numbered == null || !EPISODE_ONLY.matches(episodeTitle))) {
                     add(TitleGuess.SeasonNamedEpisode(series, season, episodeTitle))
                     // „S1:E3” în numele episodului.
                     addAll(TitleParser.guesses(mapOf("title" to episodeTitle, "artist" to series)).filterIsInstance<TitleGuess.NumberedEpisode>())
