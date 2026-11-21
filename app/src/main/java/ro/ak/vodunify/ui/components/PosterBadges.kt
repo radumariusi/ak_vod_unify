@@ -13,7 +13,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -26,6 +31,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
+import ro.ak.vodunify.core.catalog.TitleKind
+import ro.ak.vodunify.core.playback.PosterBadge
 
 private val BadgeBackground = Color(0xCC000000)
 
@@ -46,16 +53,27 @@ fun PosterLabel(text: String, modifier: Modifier = Modifier) {
     )
 }
 
-/** Sigla unei aplicații instalate (Netflix, Stremio…), luată din sistem; nimic dacă nu e instalată. */
+/**
+ * Sigla unei aplicații instalate (Netflix, Stremio…), luată din sistem. Dacă sistemul nu dă sigla, apare
+ * numele aplicației ([fallbackLabel]) în locul ei, ca să nu rămână posterul fără nimic.
+ */
 @Composable
-fun AppIconBadge(packageName: String, modifier: Modifier = Modifier) {
+fun AppIconBadge(packageName: String, modifier: Modifier = Modifier, fallbackLabel: String? = null) {
     val context = LocalContext.current
     val icon: ImageBitmap? = remember(packageName) {
-        runCatching {
-            context.packageManager.getApplicationIcon(packageName).toBitmap(96, 96).asImageBitmap()
-        }.getOrNull()
+        val pm = context.packageManager
+        runCatching { pm.getApplicationIcon(packageName).toBitmap(96, 96).asImageBitmap() }.getOrNull()
+            ?: runCatching { pm.getApplicationBanner(packageName)?.toBitmap(160, 90)?.asImageBitmap() }.getOrNull()
     }
-    if (icon == null) return
+    if (icon == null) {
+        val label = fallbackLabel ?: remember(packageName) {
+            runCatching {
+                context.packageManager.let { pm -> pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString() }
+            }.getOrNull()
+        }
+        label?.let { PosterLabel(it, modifier) }
+        return
+    }
     Box(
         modifier
             .size(24.dp)
@@ -64,6 +82,19 @@ fun AppIconBadge(packageName: String, modifier: Modifier = Modifier) {
     ) {
         Image(icon, contentDescription = null, modifier = Modifier.size(20.dp).clip(RoundedCornerShape(4.dp)))
     }
+}
+
+/** Cum află un poster sigla lui (platforma ta pe care e titlul sau playerul standard); dat de AppNavigation. */
+val LocalPosterBadge = staticCompositionLocalOf<(suspend (TitleKind, Long) -> PosterBadge?)?> { null }
+
+/** Sigla platformei / playerului pe un poster din catalog; nimic până se află (sau dacă nu e de unde). */
+@Composable
+fun PlatformBadge(kind: TitleKind, id: Long?, modifier: Modifier = Modifier) {
+    val source = LocalPosterBadge.current ?: return
+    if (id == null) return
+    var badge by remember(kind, id) { mutableStateOf<PosterBadge?>(null) }
+    LaunchedEffect(kind, id) { badge = runCatching { source(kind, id) }.getOrNull() }
+    badge?.let { AppIconBadge(it.packageName, modifier, fallbackLabel = it.label) }
 }
 
 /** Sigla de cinema: un ecran cu „US” sau „RO” înăuntru, aceeași pentru ambele țări. */

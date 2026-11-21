@@ -38,6 +38,7 @@ import ro.ak.vodunify.ui.components.FocusCard
 import ro.ak.vodunify.ui.components.FocusedTitle
 import ro.ak.vodunify.ui.components.PosterLabel
 import ro.ak.vodunify.ui.components.RatingChip
+import ro.ak.vodunify.ui.components.PlatformBadge
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import ro.ak.vodunify.ui.components.LocalBackdrop
@@ -252,6 +253,7 @@ private fun PersonalPoster(item: PersonalItem, rowKey: String) {
         Box(Modifier.fillMaxSize().semantics { contentDescription = listOfNotNull(item.title, item.subtitle).joinToString(", ") }) {
             NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
             item.rating?.takeIf { it > 0 }?.let { RatingChip(it, Modifier.align(Alignment.TopStart).padding(4.dp)) }
+            PlatformBadge(item.kind, item.tmdbId, Modifier.align(Alignment.TopEnd).padding(4.dp))
             item.subtitle?.takeIf { it.isNotBlank() }?.let {
                 PosterLabel(it, Modifier.align(Alignment.BottomStart).padding(4.dp))
             }

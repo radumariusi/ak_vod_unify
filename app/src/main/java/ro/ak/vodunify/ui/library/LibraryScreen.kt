@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import ro.ak.vodunify.ui.components.PlatformBadge
 import ro.ak.vodunify.ui.components.Dropdown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -150,6 +151,7 @@ private fun LibraryCard(item: LibraryItem) {
     ) {
         Box(Modifier.fillMaxSize().semantics { contentDescription = listOf(item.title, item.subtitle).filter { it.isNotBlank() }.joinToString(", ") }) {
             NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
+            PlatformBadge(item.kind, item.tmdbId, Modifier.align(Alignment.TopEnd).padding(4.dp))
             if (item.subtitle.isNotBlank()) {
                 Text(
                     item.subtitle,

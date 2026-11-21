@@ -45,7 +45,11 @@ fun AppsSection(viewModel: PlaybackSettingsViewModel = hiltViewModel()) {
     val proofs by viewModel.proofs.collectAsStateWithLifecycle()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshInstalled() }
 
-    SettingsCard("Continuă vizionarea: cum se citește fiecare aplicație") {
+    SettingsCard(
+        "Continuă vizionarea: cum se citește fiecare aplicație",
+        collapsible = true,
+        summary = "${TargetApp.entries.size} aplicații, ${installed.size} instalate",
+    ) {
         SettingHint(
             "AK Scrobbler confirmă singur o metodă când recunoaște o vizionare: ✓ cu data și titlul. " +
                 "„Netestat” = pornește ceva în aplicație câteva minute, apoi revino aici.",
@@ -67,7 +71,14 @@ fun AppsSection(viewModel: PlaybackSettingsViewModel = hiltViewModel()) {
         OutlinedButton(onClick = viewModel::refreshInstalled) { Text("Detectează din nou") }
     }
 
-    SettingsCard("Servicii de streaming, pe biblioteci") {
+    SettingsCard(
+        "Servicii de streaming, pe biblioteci",
+        collapsible = true,
+        summary = StreamingService.entries
+            .filter { s -> TargetApp.byId(s.appId)?.let { it in installed } == true }
+            .joinToString(", ") { "${it.displayName} (${settings.marketOf(it).code})" }
+            .ifEmpty { "Niciun serviciu instalat" },
+    ) {
         SettingHint(
             "Fiecare titlu se caută doar în biblioteca serviciului: dacă treci Disney+ pe RO, verificăm catalogul " +
                 "Disney+ din România (date TMDb / JustWatch). Serviciile tale sunt cele instalate.",
@@ -80,7 +91,13 @@ fun AppsSection(viewModel: PlaybackSettingsViewModel = hiltViewModel()) {
         others.forEach { ServiceRow(it, settings, installed, viewModel) }
     }
 
-    SettingsCard("Playere") {
+    SettingsCard(
+        "Playere",
+        collapsible = true,
+        summary = "Standard: " + (
+            (settings.defaultPlayerApp ?: TargetApp.players.firstOrNull { it in installed })?.displayName ?: "niciunul"
+            ),
+    ) {
         SettingHint("Aici pornesc titlurile pe care nu le ai în niciun serviciu. Standardul se schimbă din Redare.")
         listOf(AppRole.PLAYER, AppRole.IPTV).forEach { role ->
             Text(role.label, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
