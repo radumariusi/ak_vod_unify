@@ -97,7 +97,13 @@ class TmdbCalendarApi(
         )
 
     override suspend fun movieDetails(movieId: Int): MovieDetailsDto =
-        get("movie/$movieId", MovieDetailsDto.serializer(), detailsTtlMillis, mapOf("append_to_response" to "release_dates,watch/providers,external_ids"))
+        get("movie/$movieId", MovieDetailsDto.serializer(), detailsTtlMillis, mapOf("append_to_response" to "release_dates,watch/providers,external_ids,translations"))
+
+    override suspend fun searchMovie(query: String, year: Int?): PagedResponse<MovieSummaryDto> =
+        get(
+            "search/movie", PagedResponse.serializer(MovieSummaryDto.serializer()), detailsTtlMillis,
+            mapOf("query" to query, "year" to year?.toString(), "include_adult" to "false", "page" to "1"),
+        )
 
     private companion object {
         const val HOUR = 60 * 60 * 1000L

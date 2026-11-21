@@ -27,6 +27,8 @@ data class MovieRelease(
     val onMyApp: Boolean = false,
     /** Cinema only: a limited release (few cinemas), not a wide one. */
     val limited: Boolean = false,
+    /** Cinema RO only: the cinema program that confirms the date ("Cinema City", "Orange Film"); null = TMDb. */
+    val source: String? = null,
 )
 
 /** One movie release in the calendar, with its moment already in Romania time. */
@@ -52,6 +54,8 @@ data class MovieEntry(
     val watchOn: StreamingApp? = null,
     val watchRegion: Region? = null,
     val limited: Boolean = false,
+    /** Cinema RO: the Romanian cinema program that confirmed the date, null when it is TMDb's. */
+    val cinemaSource: String? = null,
     val availability: List<ProviderAvailability> = emptyList(),
     val tmdbRating: Double = 0.0,
     val tmdbVotes: Int = 0,
