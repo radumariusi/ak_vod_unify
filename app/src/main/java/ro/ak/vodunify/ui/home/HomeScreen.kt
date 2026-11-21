@@ -128,7 +128,7 @@ private fun HomeContent(
         // fiecare rând cu focus urcă întreg sub hero (derulare cu pivot). Hero-ul se micșorează cât să încapă
         // un rând întreg de postere dedesubt.
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            val heroHeight = minOf(maxHeight * 0.52f, 240.dp, maxHeight - spec.posterHeight - 76.dp).coerceAtLeast(140.dp)
+            val heroHeight = minOf(maxHeight * 0.52f, 240.dp, maxHeight - spec.posterHeight - 92.dp).coerceAtLeast(140.dp)
             Column(Modifier.fillMaxSize()) {
                 Hero(
                     catalog.hero,
@@ -136,7 +136,7 @@ private fun HomeContent(
                     Modifier.fillMaxWidth().height(heroHeight),
                     compact = heroHeight < 200.dp,
                 )
-                PivotScroll(pivot = 46.dp) {
+                PivotScroll(pivot = 60.dp) {
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize().focusRequester(listFocus),
