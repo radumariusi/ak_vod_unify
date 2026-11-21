@@ -135,6 +135,7 @@ class CatalogRepository @Inject constructor(
             posterUrl = TmdbImages.poster(dto.posterPath),
             backdropUrl = TmdbImages.backdrop(dto.backdropPath),
             rating = dto.voteAverage?.takeIf { it > 0 },
+            episodeCount = dto.numberOfEpisodes,
         )
     }
 

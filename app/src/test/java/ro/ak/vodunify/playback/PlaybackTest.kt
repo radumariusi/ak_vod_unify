@@ -61,8 +61,14 @@ class PlaybackTest {
         assertEquals(StreamingService.PRIME_VIDEO, StreamingService.fromProvider(119, "Amazon Prime Video"))
         assertEquals(StreamingService.HBO_MAX, StreamingService.fromProvider(5555, "Max"))
         assertEquals(StreamingService.DISNEY_PLUS, StreamingService.fromProvider(337, "Disney Plus"))
-        assertNull(StreamingService.fromProvider(4444, "Voyo"))
+        assertEquals(StreamingService.VOYO, StreamingService.fromProvider(4444, "Voyo"))
+        assertEquals(StreamingService.TUBI, StreamingService.fromProvider(4446, "Tubi TV"))
+        assertEquals(StreamingService.PEACOCK, StreamingService.fromProvider(4447, "Peacock Premium Plus"))
+        assertEquals(StreamingService.CURIOSITY, StreamingService.fromProvider(4448, "Curiosity Stream"))
+        assertEquals(StreamingService.ARTE, StreamingService.fromProvider(4449, "Arte"))
+        assertNull(StreamingService.fromProvider(4450, "Artemis Films"))
         assertNull(StreamingService.fromProvider(4445, "Paramount Plus Apple TV Channel"))
+        assertNull(StreamingService.fromProvider(1825, "HBO Max Amazon Channel"))
     }
 
     private fun p(id: Int, name: String) = ProviderInfo(id, name, null)
@@ -84,7 +90,23 @@ class PlaybackTest {
         assertEquals(OfferType.RENT, o.services.last().offer)
         assertEquals(netflix, o.recommendedService)
         assertEquals(listOf(TargetApp.NUVIO, TargetApp.STREMIO), o.players)
-        assertEquals(listOf(TargetApp.DEBRID_STREAM), o.missingPlayers)
+        assertTrue(TargetApp.DEBRID_STREAM in o.missingPlayers && TargetApp.STREMIO !in o.missingPlayers)
+    }
+
+    @Test fun usesEachServiceLibraryAndDefaultPlayer() {
+        val availability = listOf(
+            avail(Market.RO, flat = listOf(p(1899, "Max"), p(8, "Netflix"))),
+            avail(Market.US, flat = listOf(p(1899, "Max"), p(8, "Netflix"), p(386, "Peacock"))),
+        )
+        val settings = PlaybackSettings(Market.RO, serviceMarkets = mapOf("hbomax" to Market.US), defaultPlayer = "stremio")
+        val o = WatchOptionsBuilder.build(availability, settings, setOf(TargetApp.NUVIO, TargetApp.STREMIO, TargetApp.HBO_MAX))
+        val byName = o.services.associate { it.provider.name to it.market }
+        assertEquals(Market.US, byName["Max"])
+        assertEquals(Market.RO, byName["Netflix"])
+        assertEquals(Market.US, byName["Peacock"])
+        assertEquals(3, o.services.size)
+        assertEquals("Max", o.recommendedService?.provider?.name)
+        assertEquals(listOf(TargetApp.STREMIO, TargetApp.NUVIO), o.players)
     }
 
     @Test fun preferredPlayerNotInstalledFallsBackToOfficial() {
@@ -103,8 +125,7 @@ class PlaybackTest {
             PlaybackSettings(Market.RO),
             emptySet(),
         )
-        val w = o.warning as MarketWarning.OnlyElsewhere
-        assertEquals(Market.US, w.otherMarket)
+        val w = o.warning as MarketWarning.NotInYourLibraries
         assertEquals(listOf("Max"), w.services)
         assertNull(o.recommendedService)
 

@@ -45,6 +45,8 @@ android {
         buildConfigField("String", "WETRAKR_API_KEY", quoted(secret("WETRAKR_API_KEY")))
         // Opțional (Calendar): note IMDb prin OMDb. Se poate pune și din aplicație (Setări → Calendar).
         buildConfigField("String", "OMDB_API_KEY", quoted(secret("OMDB_API_KEY")))
+        buildConfigField("String", "GOOGLE_CLIENT_ID", quoted(secret("GOOGLE_CLIENT_ID")))
+        buildConfigField("String", "GOOGLE_CLIENT_SECRET", quoted(secret("GOOGLE_CLIENT_SECRET")))
         buildConfigField("String", "UPDATE_REPO", quoted("radumariusi/ak_vod_unify"))
     }
 

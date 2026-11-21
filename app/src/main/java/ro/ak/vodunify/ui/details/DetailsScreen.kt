@@ -149,7 +149,7 @@ private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel, c
         item(key = "availability") { AvailabilitySection(details.availability) }
         if (details.item.kind == TitleKind.TV && details.seasons.isNotEmpty()) {
             item(key = "seasons") {
-                SeasonPicker(details, selectedSeason, viewModel::selectSeason)
+                SeasonPicker(details, selectedSeason, watchedEpisodes, viewModel::selectSeason)
             }
             when (val e = episodes) {
                 null, LoadState.Loading -> item(key = "episodes_loading") { LoadingPanel() }
@@ -157,8 +157,8 @@ private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel, c
                 is LoadState.Data -> episodeItems(
                     e.value,
                     watched = watchedEpisodes,
-                    // Episoadele se marchează din AK Scrobbler; manual doar cu un tracker extern activ.
-                    canMark = connected && ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED,
+                    // Episoadele se marchează automat din AK Scrobbler; manual se pot corecta aici (local).
+                    canMark = connected,
                     onToggle = { ep -> viewModel.toggleEpisode(details, ep) },
                     onWatch = { ep -> chooser.open(details.playbackRequest(ep), details.availability) },
                 )
@@ -322,9 +322,9 @@ private fun TrackPanel(
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             val inList = state?.inWatchlist == true
             if (inList) {
-                FilledTonalButton(onClick = onToggleWatchlist, enabled = !busy) { Text("✓ În „De văzut”") }
+                FilledTonalButton(onClick = onToggleWatchlist, enabled = !busy) { Text("✓ În Lista mea") }
             } else {
-                OutlinedButton(onClick = onToggleWatchlist, enabled = !busy) { Text("+ De văzut") }
+                OutlinedButton(onClick = onToggleWatchlist, enabled = !busy) { Text("+ Lista mea") }
             }
             if (isMovie) {
                 if (state?.watched == true) {
@@ -434,7 +434,7 @@ private fun ProviderGroup(label: String, providers: List<ProviderInfo>) {
 // ---------- Sezoane și episoade ----------
 
 @Composable
-private fun SeasonPicker(details: TitleDetails, selected: Int?, onSelect: (Int) -> Unit) {
+private fun SeasonPicker(details: TitleDetails, selected: Int?, watched: Set<EpisodeNumber>, onSelect: (Int) -> Unit) {
     val spec = layoutSpec()
     Column {
         SectionTitle("Sezoane")
@@ -446,7 +446,10 @@ private fun SeasonPicker(details: TitleDetails, selected: Int?, onSelect: (Int) 
                 FilterChip(
                     selected = s.number == selected,
                     onClick = { onSelect(s.number) },
-                    label = { Text("${s.name} · ${s.episodeCount} ep.") },
+                    label = {
+                        val seen = watched.count { it.season == s.number && it.episode <= s.episodeCount }
+                        Text(if (seen > 0) "${s.name} · $seen/${s.episodeCount} ep." else "${s.name} · ${s.episodeCount} ep.")
+                    },
                 )
             }
         }

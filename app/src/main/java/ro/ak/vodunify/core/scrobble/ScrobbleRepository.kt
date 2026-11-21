@@ -9,7 +9,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import ro.ak.vodunify.BuildConfig
 import ro.ak.vodunify.core.connector.MediaRef
@@ -48,6 +51,15 @@ class ScrobbleRepository @Inject constructor(
 
     private val _log = MutableStateFlow(readLog())
     val log: StateFlow<List<ScrobbleLogEntry>> = _log.asStateFlow()
+
+    private val proofSerializer = MapSerializer(String.serializer(), AppProof.serializer())
+    private val _proofs = MutableStateFlow(readProofs())
+
+    /**
+     * Dovada, pe fiecare aplicație (pachet), că „Continuă vizionarea” merge: ultima vizionare recunoscută
+     * și metoda prin care am aflat titlul. Se completează singură, din vizionările reale.
+     */
+    val proofs: StateFlow<Map<String, AppProof>> = _proofs.asStateFlow()
 
     private val _enabled = MutableStateFlow(prefs.getBoolean(KEY_ENABLED, true))
     val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
@@ -113,6 +125,9 @@ class ScrobbleRepository @Inject constructor(
             val e = entry(event, raw, media, duration, result, position, fromQueue)
             // În timpul redării păstrăm o singură linie pe titlu; pauzele, opririle și problemele se adaugă.
             if (event.isTick && !fromQueue) replaceLastTick(e) else appendLog(e)
+            if (media != null && (result == ScrobbleResult.SAVED || result == ScrobbleResult.WATCHED)) {
+                recordProof(original, extra.isNotEmpty(), media)
+            }
             return result
         }
 
@@ -253,6 +268,26 @@ class ScrobbleRepository @Inject constructor(
         if (media.type != MediaType.EPISODE) trackingDao.upsertWatched(listOf(TrackingEntities.watched(event)))
     }
 
+    private fun recordProof(event: ScrobbleEvent, fromServiceCode: Boolean, media: MediaRef) {
+        val proof = AppProof(
+            pkg = event.pkg,
+            app = event.app,
+            at = event.at,
+            method = AppProof.method(event.fields["title_source"], fromServiceCode, event.estimated),
+            title = label(media),
+        )
+        val current = _proofs.value[event.pkg]
+        // O dată la 10 minute e destul (punctele intermediare vin des).
+        if (current != null && current.method == proof.method && proof.at - current.at < TimeUnit.MINUTES.toMillis(10)) return
+        val next = _proofs.value + (event.pkg to proof)
+        _proofs.value = next
+        prefs.edit().putString(KEY_PROOFS, json.encodeToString(proofSerializer, next)).apply()
+    }
+
+    private fun readProofs(): Map<String, AppProof> = runCatching {
+        prefs.getString(KEY_PROOFS, null)?.let { json.decodeFromString(proofSerializer, it) }
+    }.getOrNull().orEmpty()
+
     private fun label(media: MediaRef?): String? = media?.let {
         if (it.type == MediaType.EPISODE) {
             "${it.title} S${it.season}E${it.episode}" + (it.episodeTitle?.let { t -> " · $t" } ?: "")
@@ -309,8 +344,32 @@ class ScrobbleRepository @Inject constructor(
         const val KEY_UNRESOLVED = "unresolved"
         const val KEY_LAST_RETRY = "unresolved_last_retry"
         const val KEY_NETFLIX_STATUS = "netflix_status_"
+        const val KEY_PROOFS = "proofs"
         const val MAX_UNRESOLVED = 100
         const val UNRESOLVED_DAYS = 30L
         const val MAX_LOG = 50
+    }
+}
+
+/** O vizionare recunoscută dintr-o aplicație: dovada că metoda merge (vezi [ScrobbleRepository.proofs]). */
+@Serializable
+data class AppProof(
+    val pkg: String,
+    val app: String,
+    val at: Long,
+    val method: String,
+    val title: String? = null,
+) {
+    companion object {
+        fun method(titleSource: String?, fromServiceCode: Boolean, estimated: Boolean): String {
+            val base = when {
+                titleSource == "netflix_activity" -> "Istoricul Netflix (AK Import)"
+                fromServiceCode -> "Sesiune media + codul titlului din serviciu"
+                titleSource == "screen" -> "Cititor de ecran"
+                titleSource == "notification" -> "Notificare"
+                else -> "Sesiune media"
+            }
+            return if (estimated) "$base, minut estimat" else base
+        }
     }
 }

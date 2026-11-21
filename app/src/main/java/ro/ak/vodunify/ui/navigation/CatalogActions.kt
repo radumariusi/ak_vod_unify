@@ -1,6 +1,7 @@
 package ro.ak.vodunify.ui.navigation
 
 import androidx.compose.runtime.staticCompositionLocalOf
+import ro.ak.vodunify.core.catalog.CatalogItem
 import ro.ak.vodunify.core.catalog.StudioKind
 import ro.ak.vodunify.core.catalog.TitleKind
 
@@ -11,6 +12,8 @@ data class CatalogActions(
     val openStudio: (StudioKind, Long) -> Unit = { _, _ -> },
     val openSettings: () -> Unit = {},
     val openDiagnostics: () -> Unit = {},
+    /** Meniul rapid al unui titlu (apăsare lungă pe poster): Lista mea, văzut, pagina titlului. */
+    val titleMenu: (CatalogItem) -> Unit = {},
 )
 
 val LocalCatalogActions = staticCompositionLocalOf { CatalogActions() }

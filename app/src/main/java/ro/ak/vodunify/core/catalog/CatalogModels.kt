@@ -34,6 +34,8 @@ data class CatalogItem(
     val genreIds: List<Int> = emptyList(),
     /** Ex. personajul jucat, pentru filmografia unei persoane. */
     val note: String? = null,
+    /** Numărul de episoade (doar la seriale, din pagina titlului). */
+    val episodeCount: Int? = null,
 ) {
     /** Cheie stabilă comună cu tabela `media` (ex. "movie:tmdb:603"). */
     val mediaKey: String get() = mediaKey(kind, id)

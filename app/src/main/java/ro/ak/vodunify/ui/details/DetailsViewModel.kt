@@ -117,16 +117,26 @@ class DetailsViewModel @Inject constructor(
         if (!force && progressLoadedFor == details.item.mediaKey) return
         progressLoadedFor = details.item.mediaKey
         viewModelScope.launch {
-            if (!tracking.hasConnectedTracker()) return@launch
-            runCatching { tracking.showProgress(ref(details)) }
+            runCatching { progressFor(details) }
                 .onSuccess { _showProgress.value = it }
                 .onFailure { _message.value = "Nu am putut citi progresul: ${it.message}" }
         }
     }
 
+    /** Progresul pe serial: din istoricul local (implicit) sau din trackerii externi, când sunt activi. */
+    private suspend fun progressFor(details: TitleDetails): ShowProgress? {
+        val show = ref(details)
+        if (!ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED) {
+            val counts = details.seasons.filter { it.number > 0 }.associate { it.number to it.episodeCount }
+            return tracking.localShowProgress(show, counts)
+        }
+        if (!tracking.hasConnectedTracker()) return null
+        return tracking.showProgress(show)
+    }
+
     fun toggleWatchlist(details: TitleDetails) {
         val inList = trackState.value?.inWatchlist == true
-        act(if (inList) "Scos din „De văzut”" else "Adăugat în „De văzut”") {
+        act(if (inList) "Scos din Lista mea" else "Adăugat în Lista mea (De văzut)") {
             tracking.setInWatchlist(ref(details), !inList)
         }
     }
@@ -151,7 +161,7 @@ class DetailsViewModel @Inject constructor(
                 _showProgress.value = p.copy(watched = if (watched) p.watched - number else p.watched + number)
             }
             tracking.refreshUpNext(show)
-            _showProgress.value = runCatching { tracking.showProgress(show) }.getOrNull() ?: _showProgress.value
+            _showProgress.value = runCatching { progressFor(details) }.getOrNull() ?: _showProgress.value
         }
     }
 

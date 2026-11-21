@@ -114,9 +114,11 @@ class TrackingRepository @Inject constructor(
     /**
      * „Continuă vizionarea” vine DOAR din AK Scrobbler (sursa locală): ce ai început în Netflix,
      * Prime, Apple TV, Stremio etc. Trakt/SIMKL nu mai sunt sursa (nu văd aplicațiile de streaming).
+     * Un singur rând pe titlu: dacă același film / serial a fost pornit din mai multe aplicații (sau
+     * episoade diferite), rămâne doar vizionarea cea mai recentă.
      */
     val continueWatching: Flow<List<ResumePointEntity>> =
-        dao.continueWatching().map { list -> list.filter { it.source == LOCAL_SOURCE } }
+        dao.continueWatching().map { list -> latestPerTitle(list.filter { it.source == LOCAL_SOURCE }) }
 
     val upNext: Flow<List<UpNextEntity>> = reconciled.map { it.upNext }
 
@@ -262,6 +264,14 @@ class TrackingRepository @Inject constructor(
         return targets.size
     }
 
+    /** Pe fiecare serial: câte episoade ai văzut și ultimul (din istoricul local). */
+    val seriesSummaries: Flow<Map<String, SeriesSummary>> =
+        dao.latestWatches().map { LocalProgress.summaries(it.visible { e -> e.source }) }.flowOn(Dispatchers.Default)
+
+    /** Progresul pe serial din istoricul local. [seasonCounts]: sezon → episoade (din TMDb). */
+    suspend fun localShowProgress(show: MediaRef, seasonCounts: Map<Int, Int>): ShowProgress =
+        LocalProgress.show(show, dao.historyFor(show.titleKey).first().visible { it.source }, seasonCounts, LOCAL_SOURCE)
+
     /** Progresul pe serial din prima sursă conectată care îl știe. */
     suspend fun showProgress(show: MediaRef): ShowProgress? {
         for (c in connected(Capability.UP_NEXT_READ)) {
@@ -320,3 +330,7 @@ class TrackingRepository @Inject constructor(
         val OWN_WRITE_TTL_MS: Long = TimeUnit.DAYS.toMillis(7)
     }
 }
+
+/** Cea mai recentă poziție pentru fiecare titlu (serial = toate episoadele lui), cele mai noi întâi. */
+internal fun latestPerTitle(list: List<ResumePointEntity>): List<ResumePointEntity> =
+    list.groupBy { it.ref.mediaKey }.values.map { group -> group.maxBy { it.updatedAt } }.sortedByDescending { it.updatedAt }

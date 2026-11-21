@@ -44,7 +44,10 @@ import javax.inject.Inject
 
 enum class CalendarTab(val label: String) { SHOWS("Seriale"), MOVIES("Filme") }
 
-enum class CalendarMode(val label: String) { DAY("Zi"), WEEK("Săptămână"), MONTH("Lună") }
+enum class CalendarMode(val label: String) { DAY("Zi"), WEEK("Săptămână"), MONTH("Lună"), UPCOMING("Următoare") }
+
+/** Cât de departe se uită „Următoare” (lansările viitoare). */
+const val UPCOMING_DAYS = 60L
 
 data class CalendarSummary(
     val count: Int = 0,
@@ -69,11 +72,14 @@ data class CalendarUiState(
     val onlyMyApps: Boolean = false,
     val movieKinds: Set<MovieReleaseKind> = MovieReleaseKind.entries.toSet(),
     val showRejected: Boolean = false,
+    /** Doar titlurile urmărite (din calendar sau din Lista mea). */
+    val onlyFollowed: Boolean = false,
 ) {
     val visible: List<CalendarItem>
         get() {
             val main = passed ?: return emptyList()
-            return if (showRejected) (main + rejected).sortedBy { it.date } else main
+            val all = if (showRejected) (main + rejected).sortedBy { it.date } else main
+            return if (onlyFollowed) all.filter { it.followed } else all
         }
 
     val days: List<LocalDate> get() = generateSequence(from) { it.plusDays(1) }.takeWhile { !it.isAfter(to) }.toList()
@@ -96,6 +102,7 @@ class CalendarViewModel @Inject constructor(
     private val anchor = MutableStateFlow(RomaniaTime.today())
     private val refresh = MutableStateFlow(0)
     private val showRejected = MutableStateFlow(false)
+    private val onlyFollowed = MutableStateFlow(false)
 
     /** Ultimul rezultat pentru aceeași perioadă: rămâne pe ecran cât se reîncarcă. */
     @Volatile private var last: Pair<String, CalendarUiState>? = null
@@ -110,8 +117,8 @@ class CalendarViewModel @Inject constructor(
     private val loaded = combine(tab, mode, anchor, calendar.settings, refresh) { t, m, a, s, r -> Query(t, m, a, s, r) }
         .flatMapLatest { load(it) }
 
-    val state: StateFlow<CalendarUiState> = combine(loaded, calendar.watched, showRejected) { s, watched, rejected ->
-        s.withWatched(watched).copy(showRejected = rejected)
+    val state: StateFlow<CalendarUiState> = combine(loaded, calendar.watched, showRejected, onlyFollowed) { s, watched, rejected, followed ->
+        s.withWatched(watched).copy(showRejected = rejected, onlyFollowed = followed)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CalendarUiState())
 
     val isConfigured: Boolean get() = calendar.isConfigured
@@ -137,6 +144,7 @@ class CalendarViewModel @Inject constructor(
             monday to monday.plusDays(6)
         }
         CalendarMode.MONTH -> anchor.withDayOfMonth(1) to anchor.with(TemporalAdjusters.lastDayOfMonth())
+        CalendarMode.UPCOMING -> anchor to anchor.plusDays(UPCOMING_DAYS - 1)
     }
 
     private fun load(q: Query) = flow {
@@ -191,13 +199,18 @@ class CalendarViewModel @Inject constructor(
             CalendarMode.DAY -> date.plusDays(sign)
             CalendarMode.WEEK -> date.plusWeeks(sign)
             CalendarMode.MONTH -> date.withDayOfMonth(1).plusMonths(sign)
+            CalendarMode.UPCOMING -> date.plusDays(sign * UPCOMING_DAYS)
         }
     }
 
     fun previous() = anchor.update { move(it, forward = false) }
     fun next() = anchor.update { move(it, forward = true) }
     fun goToToday() = anchor.update { RomaniaTime.today() }
-    fun setMode(m: CalendarMode) = mode.update { m }
+    fun setMode(m: CalendarMode) {
+        // „Următoare” pornește mereu de azi.
+        if (m == CalendarMode.UPCOMING && mode.value != m) anchor.value = RomaniaTime.today()
+        mode.value = m
+    }
     fun setTab(t: CalendarTab) {
         // Filmele se văd mai bine pe săptămână (cum era în AK VOD Calendar).
         if (t != tab.value && t == CalendarTab.MOVIES && mode.value == CalendarMode.DAY) mode.value = CalendarMode.WEEK
@@ -210,6 +223,8 @@ class CalendarViewModel @Inject constructor(
     }
 
     fun toggleShowRejected() = showRejected.update { !it }
+
+    fun toggleOnlyFollowed() = onlyFollowed.update { !it }
 
     fun toggleOnlyMyApps() = edit { it.copy(onlyInstalledApps = !it.onlyInstalledApps) }
 
@@ -274,6 +289,22 @@ class CalendarViewModel @Inject constructor(
             } catch (e: Exception) {
                 if (ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED && !tracking.hasConnectedTracker()) "Conectează Trakt sau SIMKL în Setări ca să marchezi ce ai văzut"
                 else "Eroare: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
+
+    /** Adaugă filmul / serialul în Lista mea (De văzut). */
+    fun addToList(item: CalendarItem) {
+        val type = if (item.isMovie) MediaType.MOVIE else MediaType.SHOW
+        val media = MediaRef(type, ExternalIds(tmdb = item.tmdbId), item.episode?.showName ?: item.title)
+        viewModelScope.launch {
+            _message.value = try {
+                tracking.setInWatchlist(media, true)
+                "„${media.title}” adăugat în Lista mea"
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                "Eroare: ${e.message ?: e.javaClass.simpleName}"
             }
         }
     }

@@ -155,6 +155,7 @@ fun DayList(
     onFollow: (CalendarItem) -> Unit,
     onHide: (CalendarItem) -> Unit,
     onWatched: (CalendarItem) -> Unit,
+    onList: (CalendarItem) -> Unit,
 ) {
     val spec = layoutSpec()
     LazyColumn(
@@ -185,6 +186,7 @@ fun DayList(
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     OutlinedButton(onClick = { onWatch(item) }) { Text("▶ Alege unde vezi") }
                     OutlinedButton(onClick = { onWatched(item) }) { Text(if (item.watched) "✓ Văzut" else "Marchează văzut") }
+                    OutlinedButton(onClick = { onList(item) }) { Text("+ Lista mea") }
                     OutlinedButton(onClick = { onFollow(item) }) { Text(if (item.followed) "★ Urmărești" else "Urmăresc") }
                     if (!item.followed) OutlinedButton(onClick = { onHide(item) }) { Text("Ascunde") }
                 }
@@ -202,6 +204,8 @@ fun WeekList(
     noun: String,
     onOpen: (CalendarItem) -> Unit,
     onWatch: (CalendarItem) -> Unit,
+    /** „Următoare”: zilele fără nimic nu se afișează. */
+    skipEmpty: Boolean = false,
 ) {
     val spec = layoutSpec()
     val byDay = items.groupBy { it.date }
@@ -213,6 +217,7 @@ fun WeekList(
     ) {
         days.forEach { day ->
             val entries = byDay[day].orEmpty()
+            if (skipEmpty && entries.isEmpty()) return@forEach
             item(key = "day-$day") {
                 Text(
                     dayLabel(day) + if (entries.isEmpty()) " · nimic" else " · ${entries.size} $noun",

@@ -1,5 +1,6 @@
 package ro.ak.vodunify.core.playback
 
+import android.app.SearchManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -36,10 +37,8 @@ class TargetResolver @Inject constructor(@ApplicationContext private val context
         val launchables by lazy { launcherActivities() }
         return TargetApp.entries.mapNotNull { app ->
             val byPackage = app.packages.firstOrNull { launchIntent(it) != null }
-            val pkg = byPackage ?: app.labelHints.takeIf { it.isNotEmpty() }?.let { hints ->
-                launchables.firstOrNull { (p, label) ->
-                    p != context.packageName && hints.any { h -> label.lowercase().replace(" ", "").contains(h.replace(" ", "")) }
-                }?.first
+            val pkg = byPackage ?: app.labelHints.takeIf { it.isNotEmpty() }?.let {
+                launchables.firstOrNull { (p, label) -> p != context.packageName && app.matchesLabel(label) }?.first
             }
             pkg?.let { app to InstalledApp(app, it, labelOf(it) ?: app.displayName) }
         }.toMap()
@@ -53,6 +52,12 @@ class TargetResolver @Inject constructor(@ApplicationContext private val context
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             if (accepts(intent)) return ResolvedLaunch(installed, c.precision, intent)
         }
+        // Căutarea în aplicație (ex. AK VoD Hub, multe playere IPTV): titlul ajunge direct în ecranul de căutare.
+        val search = Intent(Intent.ACTION_SEARCH)
+            .setPackage(installed.packageName)
+            .putExtra(SearchManager.QUERY, request.title)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (installed.app.role != AppRole.OFFICIAL && accepts(search)) return ResolvedLaunch(installed, LinkPrecision.SEARCH, search)
         return launchIntent(installed.packageName)?.let { ResolvedLaunch(installed, LinkPrecision.APP, it) }
     }
 

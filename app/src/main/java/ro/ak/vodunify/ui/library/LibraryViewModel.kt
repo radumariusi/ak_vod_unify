@@ -39,7 +39,7 @@ data class LibraryUiState(
     val total: Int = 0,
 )
 
-/** Biblioteca: tot ce știe baza locală (AK Scrobbler, importuri; plus trackerii externi când sunt activi), reconciliat. */
+/** Lista mea: tot ce știe baza locală (AK Scrobbler, importuri; plus trackerii externi când sunt activi), reconciliat. */
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
@@ -55,26 +55,39 @@ class LibraryViewModel @Inject constructor(
 
     val state: StateFlow<LibraryUiState> = combine(
         tracking.library,
+        tracking.seriesSummaries,
         filter,
         if (ExternalTrackers.ENABLED) tracking.anyConnected else flowOf(true),
         prefs.settings,
-    ) { entries, f, connected, settings -> Input(entries, f, connected, settings) }
-        .mapLatest { input ->
+    ) { entries, series, f, connected, settings -> Input(entries, series, f, connected, settings) }
+        .mapLatest { raw ->
+            // Serialele din istoricul local: numărul de episoade din TMDb decide „În curs” / „Văzute”.
+            val totals = coroutineScope {
+                raw.series.mapNotNull { (key, s) -> s.tmdbId?.let { id -> key to id } }
+                    .map { (key, id) -> async { key to art(TitleKind.TV, id, raw.settings)?.episodeCount } }
+                    .awaitAll()
+                    .mapNotNull { (key, total) -> total?.let { key to it } }
+                    .toMap()
+            }
+            val input = raw.copy(entries = LibraryLogic.mergeSeries(raw.entries, raw.series, totals))
             val filtered = LibraryLogic.filter(input.entries, input.filter)
             val items = coroutineScope {
                 filtered.take(MAX_ITEMS).map { e ->
                     async {
                         val kind = if (e.ref.type == "MOVIE") TitleKind.MOVIE else TitleKind.TV
                         val art = art(kind, e.ref.tmdbId, input.settings)
+                        val series = input.series[e.titleKey]?.takeIf { kind == TitleKind.TV }
+                        val total = totals[e.titleKey]
+                        val seriesProgress = if (series != null && total != null && total > 0) minOf(1f, series.watched.toFloat() / total) else null
                         LibraryItem(
                             key = e.titleKey,
                             kind = kind,
                             tmdbId = e.ref.tmdbId,
                             title = art?.title ?: e.ref.title.ifBlank { "Titlu necunoscut" },
-                            subtitle = LibraryLogic.subtitle(e, input.filter.tab),
+                            subtitle = series?.let { LibraryLogic.seriesLabel(it, total) } ?: LibraryLogic.subtitle(e, input.filter.tab),
                             posterUrl = art?.posterUrl,
-                            progress = LibraryLogic.progress(e, input.filter.tab),
-                            showsProgress = LibraryLogic.showsProgress(e, input.filter.tab),
+                            progress = seriesProgress ?: LibraryLogic.progress(e, input.filter.tab),
+                            showsProgress = seriesProgress != null || LibraryLogic.showsProgress(e, input.filter.tab),
                             sources = e.sources.sorted().map { names[it] ?: it },
                         )
                     }
@@ -102,6 +115,7 @@ class LibraryViewModel @Inject constructor(
 
     private data class Input(
         val entries: List<ro.ak.vodunify.core.reconcile.LibraryEntry>,
+        val series: Map<String, ro.ak.vodunify.core.tracking.SeriesSummary>,
         val filter: LibraryFilter,
         val connected: Boolean,
         val settings: CatalogSettings,
