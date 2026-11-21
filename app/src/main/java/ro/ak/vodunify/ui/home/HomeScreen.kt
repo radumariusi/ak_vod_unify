@@ -4,7 +4,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.ui.focus.onFocusChanged
 import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.ui.components.LocalPosterLongPress
@@ -182,10 +181,11 @@ private fun Hero(
         if (backdrop != null && backdrop.focused == null) backdrop.url = promoted?.backdropUrl
     }
     // Sigla se cere după un focus stabil (nu la fiecare poster peste care treci).
-    val logo by produceState<String?>(null, shown.kind, shown.id) {
-        value = null
+    var logo by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(shown.kind, shown.id) {
+        logo = null
         delay(250)
-        value = loadLogo(shown.kind, shown.id)
+        logo = loadLogo(shown.kind, shown.id)
     }
 
     Box(modifier) {
