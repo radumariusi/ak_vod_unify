@@ -87,6 +87,7 @@ private fun PersonContent(person: PersonDetails) {
                         // Card focusabil: pe TV se poate extinde biografia cu OK, pe telefon cu tap.
                         FocusCard(
                             onClick = { expanded = !expanded },
+                            focusScale = 1.01f,
                             modifier = Modifier.widthIn(max = 900.dp).focusRequester(focus),
                         ) {
                             Column(Modifier.padding(12.dp)) {

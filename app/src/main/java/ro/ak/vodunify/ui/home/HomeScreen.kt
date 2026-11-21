@@ -14,17 +14,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material3.Button
+import ro.ak.vodunify.ui.components.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import ro.ak.vodunify.ui.components.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -38,8 +38,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -52,9 +50,13 @@ import ro.ak.vodunify.ui.components.AttributionNote
 import ro.ak.vodunify.ui.components.ErrorPanel
 import ro.ak.vodunify.ui.components.LoadState
 import ro.ak.vodunify.ui.components.LoadingPanel
-import ro.ak.vodunify.ui.components.NetworkImage
+import ro.ak.vodunify.ui.components.FocusedTitle
+import ro.ak.vodunify.ui.components.LocalBackdrop
+import ro.ak.vodunify.ui.components.LocalFocusRestore
+import ro.ak.vodunify.ui.components.PivotScroll
+import ro.ak.vodunify.ui.components.RatingChip
+import ro.ak.vodunify.ui.components.TitleBackdrop
 import ro.ak.vodunify.ui.components.TitleRow
-import ro.ak.vodunify.ui.components.formatRating
 import ro.ak.vodunify.ui.components.layoutSpec
 import ro.ak.vodunify.ui.navigation.LocalCatalogActions
 
@@ -81,102 +83,122 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
 private fun HomeContent(catalog: HomeCatalog, personalRows: @Composable () -> Unit) {
     val spec = layoutSpec()
     val heroFocus = remember { FocusRequester() }
+    val restore = LocalFocusRestore.current
 
-    // Pe TV punem focusul inițial pe butonul principal, ca D-pad-ul să aibă de unde porni.
+    // Pe TV punem focusul inițial pe butonul principal, ca D-pad-ul să aibă de unde porni;
+    // la întoarcerea dintr-o fișă focusul revine pe cardul deschis (vezi FocusRestore).
     if (spec.isTv && catalog.hero.isNotEmpty()) {
-        LaunchedEffect(Unit) { runCatching { heroFocus.requestFocus() } }
+        LaunchedEffect(Unit) { if (restore.pending == null) runCatching { heroFocus.requestFocus() } }
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        if (catalog.hero.isNotEmpty()) item(key = "hero") { Hero(catalog.hero, heroFocus) }
-        item(key = "personal") { personalRows() }
-        items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
-        item(key = "attribution") { AttributionNote() }
+    if (spec.isTv) {
+        // Ca în AK VOD Hub: hero-ul stă fix sus și arată titlul cu focus; doar rândurile se derulează,
+        // fiecare rând cu focus urcă întreg sub hero (derulare cu pivot).
+        Column(Modifier.fillMaxSize()) {
+            Hero(catalog.hero, heroFocus, Modifier.fillMaxWidth().height(spec.heroHeight))
+            PivotScroll(pivot = 40.dp) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 240.dp),
+                ) {
+                    item(key = "personal") { personalRows() }
+                    items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
+                    item(key = "attribution") { AttributionNote() }
+                }
+            }
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (catalog.hero.isNotEmpty()) {
+                item(key = "hero") { Hero(catalog.hero, heroFocus, Modifier.fillMaxWidth().height(spec.heroHeight)) }
+            }
+            item(key = "personal") { personalRows() }
+            items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
+            item(key = "attribution") { AttributionNote() }
+        }
     }
 }
 
+/**
+ * Hero-ul din Acasă, ca în AK VOD Hub: fără cadru propriu, peste fundalul panoramic al ecranului.
+ * Arată titlul cu focus (poster sau „Continuă”); până atunci, titlurile promovate, pe rând.
+ */
 @Composable
-private fun Hero(items: List<CatalogItem>, focusRequester: FocusRequester) {
+private fun Hero(items: List<CatalogItem>, focusRequester: FocusRequester, modifier: Modifier = Modifier) {
     val spec = layoutSpec()
     val actions = LocalCatalogActions.current
+    val backdrop = LocalBackdrop.current
     var index by rememberSaveable { mutableIntStateOf(0) }
-    val current = items[index.coerceIn(0, items.lastIndex)]
+    val promoted = items.getOrNull(index.coerceIn(0, (items.size - 1).coerceAtLeast(0)))?.let { FocusedTitle.of(it) }
+    val shown = backdrop?.focused ?: promoted ?: return
 
-    // Rotește automat titlul promovat.
-    LaunchedEffect(items.size) {
-        while (items.size > 1) {
+    // Rotește titlurile promovate cât timp nu ai ales încă nimic cu focusul.
+    LaunchedEffect(items.size, backdrop?.focused == null) {
+        while (items.size > 1 && backdrop?.focused == null) {
             delay(12_000)
             index = (index + 1) % items.size
         }
     }
+    LaunchedEffect(promoted?.id) {
+        if (backdrop != null && backdrop.focused == null) backdrop.url = promoted?.backdropUrl
+    }
 
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(spec.heroHeight)
-            .padding(horizontal = spec.screenPadding)
-            .clip(RoundedCornerShape(16.dp)),
-    ) {
-        Crossfade(current, label = "hero") { item ->
-            NetworkImage(item.backdropUrl, null, Modifier.fillMaxSize())
-        }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.horizontalGradient(
-                        0f to Color(0xF20E1116),
-                        0.55f to Color(0x990E1116),
-                        1f to Color.Transparent,
-                    ),
-                ),
-        )
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Brush.verticalGradient(0.5f to Color.Transparent, 1f to Color(0xCC0E1116))),
-        )
+    Box(modifier) {
+        if (backdrop == null) TitleBackdrop(shown.backdropUrl, Modifier.matchParentSize())
         Column(
             Modifier
                 .align(Alignment.BottomStart)
-                .padding(if (spec.isCompact) 16.dp else 32.dp)
-                .fillMaxWidth(if (spec.isCompact) 1f else 0.55f),
+                .padding(horizontal = spec.screenPadding, vertical = 10.dp)
+                .widthIn(max = 640.dp)
+                .fillMaxWidth(if (spec.isCompact) 1f else 0.6f),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text(
-                current.title,
-                style = if (spec.isCompact) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.Bold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                listOfNotNull(current.year?.toString(), current.kind.label, formatRating(current.rating)).joinToString(" · "),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                current.overview,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = if (spec.isCompact) 2 else 3,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Crossfade(shown, label = "heroText") { item ->
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text(
+                        item.title,
+                        style = if (spec.isCompact || spec.isTv) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        maxLines = if (spec.isTv) 1 else 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        item.rating?.takeIf { it > 0 }?.let { RatingChip(it) }
+                        Text(
+                            item.meta,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (item.overview.isNotBlank()) {
+                        Text(
+                            item.overview,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            maxLines = if (spec.isCompact || spec.isTv) 2 else 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Button(
-                    onClick = { actions.openTitle(current.kind, current.id) },
+                    onClick = { actions.openTitle(shown.kind, shown.id) },
                     modifier = Modifier.focusRequester(focusRequester),
                 ) {
                     Icon(Icons.Filled.Info, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
                     Text("Detalii")
                 }
-                if (items.size > 1) {
+                if (items.size > 1 && backdrop?.focused == null) {
                     OutlinedButton(onClick = { index = (index + 1) % items.size }) {
                         Text("Următorul")
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
@@ -188,7 +210,7 @@ private fun Hero(items: List<CatalogItem>, focusRequester: FocusRequester) {
                                     .size(if (i == index) 10.dp else 6.dp)
                                     .clip(CircleShape)
                                     .background(
-                                        if (i == index) MaterialTheme.colorScheme.onBackground
+                                        if (i == index) MaterialTheme.colorScheme.primary
                                         else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                     ),
                             )

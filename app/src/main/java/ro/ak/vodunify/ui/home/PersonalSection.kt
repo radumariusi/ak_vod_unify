@@ -16,14 +16,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
+import ro.ak.vodunify.ui.components.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import ro.ak.vodunify.ui.components.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,7 +32,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ro.ak.vodunify.core.tracking.SyncStatus
+import ro.ak.vodunify.core.connector.ExternalTrackers
+import ro.ak.vodunify.ui.components.DefaultScroll
 import ro.ak.vodunify.ui.components.FocusCard
+import ro.ak.vodunify.ui.components.FocusedTitle
+import ro.ak.vodunify.ui.components.LocalBackdrop
+import ro.ak.vodunify.ui.components.rowSpacing
 import ro.ak.vodunify.ui.components.NetworkImage
 import ro.ak.vodunify.ui.components.PlaceholderRow
 import ro.ak.vodunify.ui.components.SectionTitle
@@ -44,21 +48,25 @@ import ro.ak.vodunify.ui.navigation.LocalCatalogActions
 @Composable
 fun PersonalSection(rows: PersonalRows, status: SyncStatus, onSync: () -> Unit) {
     when (rows.state) {
-        PersonalState.NOT_CONFIGURED -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            PlaceholderRow(
-                "Continuă vizionarea",
-                "Trakt nu e configurat: lipsește secretul TRAKT_CLIENT_ID în GitHub. Pașii sunt în Setări.",
-            )
-        }
+        PersonalState.LOADING -> Unit
+        PersonalState.NOT_CONFIGURED -> PlaceholderRow(
+            "Continuă vizionarea",
+            "Trakt nu e configurat: lipsește secretul TRAKT_CLIENT_ID în GitHub. Pașii sunt în Setări.",
+        )
         PersonalState.DISCONNECTED -> ConnectPrompt()
-        PersonalState.CONNECTED -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            if (rows.isEmpty) {
+        PersonalState.CONNECTED -> Column {
+            if (rows.continueWatching.isEmpty()) {
                 if (status is SyncStatus.Running) {
                     SyncingRow()
                 } else {
                     PlaceholderRow(
                         "Continuă vizionarea",
-                        "Nimic început încă. Ce începi sau marchezi pe Trakt apare aici.",
+                        if (ExternalTrackers.ENABLED) {
+                            "Nimic început încă. Ce începi pe TV sau marchezi pe Trakt apare aici."
+                        } else {
+                            "Nimic început încă. Ce pornești în Netflix, Prime Video, HBO Max, Stremio, Nuvio… " +
+                                "apare aici automat, prin AK Scrobbler."
+                        },
                     )
                 }
             }
@@ -91,7 +99,7 @@ private fun SyncingRow() {
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-        Text("Se sincronizează cu Trakt…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Se sincronizează…", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -102,7 +110,7 @@ private fun ConnectPrompt() {
     Column {
         SectionTitle("Continuă vizionarea")
         Card(
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
             modifier = Modifier
                 .padding(horizontal = spec.screenPadding, vertical = 8.dp)
                 .fillMaxWidth()
@@ -131,24 +139,46 @@ private fun WideRow(title: String, items: List<PersonalItem>) {
     val spec = layoutSpec()
     Column {
         SectionTitle(title)
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(if (spec.isTv) 20.dp else 12.dp),
-        ) {
-            items(items, key = { it.key }) { WideCard(it) }
+        DefaultScroll {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
+            ) {
+                items(items, key = { it.key }) { WideCard(it, rowKey = title) }
+            }
         }
     }
 }
 
-/** Card orizontal (imagine de fundal) cu bară de progres; „poziție necunoscută” dacă lipsește. */
+/**
+ * Card 16:9 (ca „Continuă vizionarea” din AK VOD Hub): imaginea titlului, bara roșie de progres jos
+ * și episodul / procentul dedesubt. „?” = poziție necunoscută (nu 0%).
+ */
 @Composable
-private fun WideCard(item: PersonalItem) {
+private fun WideCard(item: PersonalItem, rowKey: String) {
     val spec = layoutSpec()
     val actions = LocalCatalogActions.current
+    val backdrop = LocalBackdrop.current
     Column(Modifier.width(spec.cardWidth)) {
         FocusCard(
             onClick = { item.tmdbId?.let { actions.openTitle(item.kind, it) } },
             modifier = Modifier.size(spec.cardWidth, spec.cardHeight),
+            restoreKey = "$rowKey|${item.key}",
+            onFocused = {
+                val id = item.tmdbId
+                if (backdrop != null && id != null) {
+                    backdrop.focus(
+                        FocusedTitle(
+                            kind = item.kind,
+                            id = id,
+                            title = item.title,
+                            meta = item.subtitle.orEmpty(),
+                            overview = item.overview,
+                            backdropUrl = item.backdropUrl,
+                        ),
+                    )
+                }
+            },
         ) {
             Box(Modifier.fillMaxSize()) {
                 NetworkImage(item.backdropUrl ?: item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
@@ -160,38 +190,49 @@ private fun WideCard(item: PersonalItem) {
                 if (item.showsProgress || item.progress != null) {
                     val p = item.progress
                     if (p != null) {
-                        LinearProgressIndicator(
-                            progress = { p.coerceIn(0f, 1f) },
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
+                        Box(
+                            Modifier
+                                .align(Alignment.BottomStart)
                                 .fillMaxWidth()
-                                .height(4.dp),
-                            color = MaterialTheme.colorScheme.primary,
-                            trackColor = Color(0x55FFFFFF),
-                        )
+                                .height(4.dp)
+                                .background(Color(0xAA000000)),
+                        ) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth(p.coerceIn(0f, 1f))
+                                    .height(4.dp)
+                                    .background(MaterialTheme.colorScheme.primary),
+                            )
+                        }
                     } else {
                         Text(
                             "?",
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.labelMedium,
                             color = Color.White,
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)
-                                .padding(6.dp),
+                                .padding(6.dp)
+                                .background(Color(0xCC000000), MaterialTheme.shapes.extraSmall)
+                                .padding(horizontal = 5.dp, vertical = 1.dp),
                         )
                     }
                 }
             }
         }
         Spacer(Modifier.height(6.dp))
-        Text(item.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        item.subtitle?.takeIf { it.isNotBlank() }?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        Text(
+            item.title,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            item.subtitle.orEmpty(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }

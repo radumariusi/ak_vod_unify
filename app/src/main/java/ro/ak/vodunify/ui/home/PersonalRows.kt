@@ -19,9 +19,11 @@ data class PersonalItem(
     /** Bara de progres: 0–1; null = poziție necunoscută (nu 0%). */
     val progress: Float?,
     val showsProgress: Boolean,
+    /** Descrierea din TMDb, pentru hero-ul din Acasă. */
+    val overview: String = "",
 )
 
-enum class PersonalState { NOT_CONFIGURED, DISCONNECTED, CONNECTED }
+enum class PersonalState { LOADING, NOT_CONFIGURED, DISCONNECTED, CONNECTED }
 
 data class PersonalRows(
     val state: PersonalState,
@@ -56,6 +58,7 @@ object PersonalMapper {
             subtitle = listOfNotNull(detail, progressLabel(e.progress)).joinToString(" · "),
             backdropUrl = art?.backdropUrl,
             posterUrl = art?.posterUrl,
+            overview = art?.overview.orEmpty(),
             progress = e.progress,
             showsProgress = true,
         )
@@ -74,6 +77,7 @@ object PersonalMapper {
             ).joinToString(" · "),
             backdropUrl = art?.backdropUrl,
             posterUrl = art?.posterUrl,
+            overview = art?.overview.orEmpty(),
             progress = if (e.aired > 0) e.completed.toFloat() / e.aired else null,
             showsProgress = false,
         )
@@ -89,6 +93,7 @@ object PersonalMapper {
             subtitle = listOfNotNull(e.ref.year?.toString(), k.label).joinToString(" · "),
             backdropUrl = art?.backdropUrl,
             posterUrl = art?.posterUrl,
+            overview = art?.overview.orEmpty(),
             progress = null,
             showsProgress = false,
         )

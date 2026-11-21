@@ -9,9 +9,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
+import ro.ak.vodunify.ui.components.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import ro.ak.vodunify.ui.components.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -52,8 +52,8 @@ fun ScrobblerSection(viewModel: ScrobblerSettingsViewModel = hiltViewModel()) {
             Text(
                 "Aplicația mică AK Scrobbler vede ce redă Netflix, Prime Video, SkyShowtime, HBO Max, Disney+, Apple TV, " +
                     "Stremio sau alt player și trimite aici titlul și minutul. Le salvăm local, în „Continuă vizionarea”, " +
-                    "iar peste pragul de mai jos le trecem automat ca văzute, în istoric. Publicarea în Trakt/SIMKL " +
-                    "urmează profilul de mai sus.",
+                    "iar peste pragul de mai jos le trecem automat ca văzute, în istoric." +
+                    if (ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED) " Publicarea în Trakt/SIMKL urmează profilul de mai sus." else "",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

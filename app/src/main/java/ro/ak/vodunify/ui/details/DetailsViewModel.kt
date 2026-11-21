@@ -83,10 +83,12 @@ class DetailsViewModel @Inject constructor(
         reload.value++
     }
 
-    // ---------- Trakt (și ceilalți trackeri conectați) ----------
+    // ---------- De văzut / Văzut (local; plus trackerii externi când sunt activi) ----------
 
-    val trackerConnected: StateFlow<Boolean> = tracking.anyConnected
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    /** True când „De văzut” / „Văzut” se pot marca: mereu cu baza locală, altfel doar cu un tracker conectat. */
+    val trackerConnected: StateFlow<Boolean> =
+        (if (ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED) tracking.anyConnected else kotlinx.coroutines.flow.flowOf(true))
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), !ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED)
 
     val trackState: StateFlow<TitleTrackState?> = tracking.titleState(mediaKey(kind, id))
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
