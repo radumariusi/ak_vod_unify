@@ -61,6 +61,7 @@ private enum class SettingsCategory(val title: String, val subtitle: String) {
     SCROBBLER("AK Scrobbler", "Continuă vizionarea, automat"),
     IMPORT("Import istoric", "Netflix, Prime Video, fișiere CSV"),
     CALENDAR("Calendar", "Seriale urmărite, calitate"),
+    BACKUP("Backup", "Google Drive"),
     ACCOUNTS("Conturi", "Trakt, SIMKL, publicare"),
     ;
 
@@ -166,6 +167,7 @@ private fun CategoryContent(cat: SettingsCategory, viewModel: SettingsViewModel,
             SettingsCategory.SCROBBLER -> ScrobblerSection()
             SettingsCategory.IMPORT -> ImportSection()
             SettingsCategory.CALENDAR -> CalendarSection()
+            SettingsCategory.BACKUP -> BackupSection()
             SettingsCategory.ACCOUNTS -> {
                 // Trakt/SIMKL ascunși implicit (vezi ExternalTrackers); codul rămâne.
                 PublishSection()
