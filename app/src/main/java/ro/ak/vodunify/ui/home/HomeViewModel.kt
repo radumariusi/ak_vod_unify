@@ -22,6 +22,7 @@ import ro.ak.vodunify.core.catalog.CatalogItem
 import ro.ak.vodunify.core.catalog.CatalogRepository
 import ro.ak.vodunify.core.catalog.HomeCatalog
 import ro.ak.vodunify.core.catalog.TitleKind
+import ro.ak.vodunify.core.connector.ExternalTrackers
 import ro.ak.vodunify.core.db.ResumePointEntity
 import ro.ak.vodunify.core.db.UpNextEntity
 import ro.ak.vodunify.core.db.WatchlistEntity
@@ -34,7 +35,7 @@ import ro.ak.vodunify.ui.components.loadCatching
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 
-/** Ecranul principal: rânduri personale (Trakt) + rânduri din TMDb pentru piața și limba din Setări. */
+/** Ecranul principal: rânduri personale (baza locală, AK Scrobbler) + rânduri din TMDb pentru piața și limba din Setări. */
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -64,27 +65,28 @@ class HomeViewModel @Inject constructor(
         prefs.settings,
     ) { connected, resume, next, list, settings -> Snapshot(connected, resume, next, list, settings) }
         .mapLatest { s ->
-            when {
-                // „Continuă vizionarea” vine din AK Scrobbler: se arată și fără Trakt/SIMKL conectat.
-                s.resume.isEmpty() && !configured -> PersonalRows(PersonalState.NOT_CONFIGURED)
-                s.resume.isEmpty() && !s.connected -> PersonalRows(PersonalState.DISCONNECTED)
-                else -> coroutineScope {
-                    suspend fun <E> build(items: List<E>, map: suspend (E) -> PersonalItem) =
-                        items.take(ROW_LIMIT).map { async { map(it) } }.awaitAll()
-                    val resume = async {
-                        build(s.resume) { PersonalMapper.resume(it, art(PersonalMapper.kind(it.ref), it.ref.tmdbId, s.settings)) }
-                    }
-                    val next = async {
-                        build(s.next) { PersonalMapper.upNext(it, art(TitleKind.TV, it.ref.tmdbId, s.settings)) }
-                    }
-                    val list = async {
-                        build(s.list) { PersonalMapper.watchlist(it, art(PersonalMapper.kind(it.ref), it.ref.tmdbId, s.settings)) }
-                    }
-                    PersonalRows(PersonalState.CONNECTED, resume.await(), next.await(), list.await())
+            // „Continuă vizionarea” vine din AK Scrobbler: se arată și fără Trakt/SIMKL conectat.
+            // Cu trackerii externi ascunși, rândurile personale vin doar din baza locală.
+            if (ExternalTrackers.ENABLED && s.resume.isEmpty()) {
+                if (!configured) return@mapLatest PersonalRows(PersonalState.NOT_CONFIGURED)
+                if (!s.connected) return@mapLatest PersonalRows(PersonalState.DISCONNECTED)
+            }
+            coroutineScope {
+                suspend fun <E> build(items: List<E>, map: suspend (E) -> PersonalItem) =
+                    items.take(ROW_LIMIT).map { async { map(it) } }.awaitAll()
+                val resume = async {
+                    build(s.resume) { PersonalMapper.resume(it, art(PersonalMapper.kind(it.ref), it.ref.tmdbId, s.settings)) }
                 }
+                val next = async {
+                    build(s.next) { PersonalMapper.upNext(it, art(TitleKind.TV, it.ref.tmdbId, s.settings)) }
+                }
+                val list = async {
+                    build(s.list) { PersonalMapper.watchlist(it, art(PersonalMapper.kind(it.ref), it.ref.tmdbId, s.settings)) }
+                }
+                PersonalRows(PersonalState.CONNECTED, resume.await(), next.await(), list.await())
             }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PersonalRows(PersonalState.DISCONNECTED))
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PersonalRows(PersonalState.LOADING))
 
     val syncStatus: StateFlow<SyncStatus> = tracking.status
 

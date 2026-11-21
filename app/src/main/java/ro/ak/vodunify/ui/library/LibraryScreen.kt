@@ -18,17 +18,18 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
+import ro.ak.vodunify.ui.components.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
+import ro.ak.vodunify.ui.components.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import ro.ak.vodunify.ui.components.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -63,7 +64,7 @@ fun LibraryScreen(viewModel: LibraryViewModel = hiltViewModel()) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Bibliotecă", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                     if (status is SyncStatus.Running) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    if (state.connected) {
+                    if (state.connected && ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED) {
                         OutlinedButton(onClick = viewModel::syncNow, enabled = status !is SyncStatus.Running) { Text("Sincronizează") }
                     }
                 }
@@ -132,6 +133,7 @@ private fun LibraryCard(item: LibraryItem) {
         FocusCard(
             onClick = { item.tmdbId?.let { actions.openTitle(item.kind, it) } },
             modifier = Modifier.size(spec.posterWidth, spec.posterHeight),
+            restoreKey = "library|${item.key}",
         ) {
             Box {
                 NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
@@ -139,6 +141,10 @@ private fun LibraryCard(item: LibraryItem) {
                     LinearProgressIndicator(
                         progress = { item.progress ?: 0f },
                         modifier = Modifier.fillMaxWidth().height(4.dp).align(Alignment.BottomCenter),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = Color(0xAA000000),
+                        drawStopIndicator = {},
+                        gapSize = 0.dp,
                     )
                 }
             }

@@ -90,7 +90,7 @@ class CalendarRepository @Inject constructor(
     val watched: Flow<WatchedSet> = trackingDao.latestWatches().map { list ->
         val episodes = mutableSetOf<String>()
         val movies = mutableSetOf<Int>()
-        list.forEach { w ->
+        list.filter { ro.ak.vodunify.core.connector.ExternalTrackers.isVisible(it.source) }.forEach { w ->
             val id = w.ref.tmdbId?.toInt() ?: return@forEach
             if (w.ref.season != null && w.ref.episode != null) {
                 episodes += "$id-${w.ref.season}-${w.ref.episode}"

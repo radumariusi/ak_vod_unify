@@ -17,13 +17,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import ro.ak.vodunify.ui.components.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import ro.ak.vodunify.ui.components.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import ro.ak.vodunify.ui.components.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -49,6 +49,7 @@ import ro.ak.vodunify.core.playback.ResumeInfo
 import ro.ak.vodunify.core.playback.ResumeState
 import ro.ak.vodunify.core.playback.ServiceOption
 import ro.ak.vodunify.core.playback.formatPosition
+import ro.ak.vodunify.core.connector.ExternalTrackers
 import ro.ak.vodunify.core.publish.PublishMode
 import ro.ak.vodunify.ui.components.NetworkImage
 import ro.ak.vodunify.ui.components.layoutSpec
@@ -113,16 +114,19 @@ private fun ChooserContent(s: ChooserState, vm: WatchChooserViewModel) {
             if (s.canSetMinute && !s.loading) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     OutlinedButton(onClick = vm::openSetMinute, enabled = !s.publishing) { Text("Setează minutul") }
-                    if (s.publishMode != PublishMode.VIEW_ONLY && s.resume.hasPosition) {
+                    if (ExternalTrackers.ENABLED && s.publishMode != PublishMode.VIEW_ONLY && s.resume.hasPosition) {
                         OutlinedButton(onClick = vm::publishNow, enabled = !s.publishing) { Text("Publică acum") }
                     }
                     if (s.publishing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 }
                 Hint(
-                    when (s.publishMode) {
+                    when {
+                        !ExternalTrackers.ENABLED -> "Minutul setat se salvează local, în „Continuă vizionarea”."
+                        else -> when (s.publishMode) {
                         PublishMode.AUTOMATIC -> "Publicare automată: minutul setat se trimite în trackerele profilului."
                         PublishMode.ON_DEMAND -> "Publicare la cerere: minutul rămâne local până apeși „Publică acum”."
                         PublishMode.VIEW_ONLY -> "Doar vizualizare: minutul setat rămâne pe acest dispozitiv."
+                        }
                     },
                 )
             }
@@ -359,7 +363,8 @@ private fun SetMinuteDialog(initialMs: Long, runtimeMinutes: Int?, onSave: (Long
                 }
                 Text(
                     if (runtimeMinutes == null) "Durata nu e cunoscută: poziția se salvează local, dar nu poate fi trimisă ca procent."
-                    else "Peste 80% nu se publică: trackerele l-ar putea trece ca văzut.",
+                    else if (ExternalTrackers.ENABLED) "Peste 80% nu se publică: trackerele l-ar putea trece ca văzut."
+                    else "Poziția se salvează local.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

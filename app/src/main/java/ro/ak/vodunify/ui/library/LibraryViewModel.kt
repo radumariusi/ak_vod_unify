@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -20,6 +21,7 @@ import kotlinx.coroutines.sync.withPermit
 import ro.ak.vodunify.core.catalog.CatalogItem
 import ro.ak.vodunify.core.catalog.CatalogRepository
 import ro.ak.vodunify.core.catalog.TitleKind
+import ro.ak.vodunify.core.connector.ExternalTrackers
 import ro.ak.vodunify.core.prefs.CatalogPreferences
 import ro.ak.vodunify.core.prefs.CatalogSettings
 import ro.ak.vodunify.core.tracking.SyncStatus
@@ -37,7 +39,7 @@ data class LibraryUiState(
     val total: Int = 0,
 )
 
-/** Biblioteca: tot ce știu Trakt și SIMKL, reconciliat, cu filtru pe sursă și stare. */
+/** Biblioteca: tot ce știe baza locală (AK Scrobbler, importuri; plus trackerii externi când sunt activi), reconciliat. */
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
@@ -47,12 +49,14 @@ class LibraryViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val filter = MutableStateFlow(LibraryFilter())
-    private val names = tracking.trackers.associate { it.id to it.displayName } + ro.ak.vodunify.core.imports.ImportSources.labels
+    private val names = tracking.trackers.associate { it.id to it.displayName } +
+        ro.ak.vodunify.core.imports.ImportSources.labels +
+        (ro.ak.vodunify.core.publish.LOCAL_SOURCE to LOCAL_LABEL)
 
     val state: StateFlow<LibraryUiState> = combine(
         tracking.library,
         filter,
-        tracking.anyConnected,
+        if (ExternalTrackers.ENABLED) tracking.anyConnected else flowOf(true),
         prefs.settings,
     ) { entries, f, connected, settings -> Input(entries, f, connected, settings) }
         .mapLatest { input ->
@@ -81,7 +85,11 @@ class LibraryViewModel @Inject constructor(
                 loading = false,
                 connected = input.connected,
                 filter = input.filter,
-                sources = tracking.trackers.filter { it.id in present }.map { SourceOption(it.id, it.displayName) } +
+                sources = listOfNotNull(
+                    SourceOption(ro.ak.vodunify.core.publish.LOCAL_SOURCE, LOCAL_LABEL)
+                        .takeIf { it.id in present },
+                ) +
+                    tracking.trackers.filter { it.id in present }.map { SourceOption(it.id, it.displayName) } +
                     ro.ak.vodunify.core.imports.ImportSources.labels.filterKeys { it in present }.map { (id, label) -> SourceOption(id, label) },
                 counts = LibraryLogic.countsBySource(input.entries, input.filter.tab),
                 items = items,
@@ -130,6 +138,8 @@ class LibraryViewModel @Inject constructor(
     }
 
     private companion object {
+        const val LOCAL_LABEL = "AK Scrobbler"
+
         /** Afișăm primele 300; restul se văd filtrând. */
         const val MAX_ITEMS = 300
     }

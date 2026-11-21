@@ -16,9 +16,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
+import ro.ak.vodunify.ui.components.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import ro.ak.vodunify.ui.components.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -145,7 +145,13 @@ fun CalendarSection(viewModel: CalendarSettingsViewModel = hiltViewModel()) {
                 )
             }
             OutlinedButton(onClick = viewModel::showTodayNow) { Text("Arată acum ce apare azi") }
-            Hint("Ce urmărești vine din Trakt și SIMKL (De văzut, seriale în curs), plus „Urmăresc” din Calendar.")
+            Hint(
+                if (ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED) {
+                    "Ce urmărești vine din Trakt și SIMKL (De văzut, seriale în curs), plus „Urmăresc” din Calendar."
+                } else {
+                    "Ce urmărești vine din biblioteca ta (De văzut, seriale începute), plus „Urmăresc” din Calendar."
+                },
+            )
 
             SavedList("Seriale urmărite din Calendar", s.followedShows, "Nu mai urmări", viewModel::unfollowShow)
             SavedList("Seriale ascunse", s.hiddenShows, "Reafișează", viewModel::unhideShow)

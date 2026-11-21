@@ -23,6 +23,7 @@ import ro.ak.vodunify.core.connector.Connector
 import ro.ak.vodunify.core.connector.ConnectorKind
 import ro.ak.vodunify.core.connector.ConnectorRegistry
 import ro.ak.vodunify.core.connector.DeviceAuthConnector
+import ro.ak.vodunify.core.connector.ExternalTrackers
 import ro.ak.vodunify.core.connector.MediaRef
 import ro.ak.vodunify.core.connector.MediaType
 import ro.ak.vodunify.core.connector.ShowProgress
@@ -88,19 +89,26 @@ class TrackingRepository @Inject constructor(
         dao.upNext(),
         dao.ownWrites(),
     ) { (resume, watches, watched), list, next, own ->
-        reconcile(resume, watches, watched, list, next, own)
+        reconcile(
+            resume.visible { it.source },
+            watches.visible { it.source },
+            watched.visible { it.source },
+            list.visible { it.source },
+            next.visible { it.source },
+            own.visible { it.source },
+        )
     }
         .flowOn(Dispatchers.Default)
         .shareIn(scope, SharingStarted.WhileSubscribed(5_000), replay = 1)
 
     /** Reconcilierea calculată acum, direct din Room (fără valoarea partajată, care poate întârzia). */
     suspend fun reconcileNow(): ReconciledView = reconcile(
-        dao.allResume().first(),
-        dao.latestWatches().first(),
-        dao.watchedTitles().first(),
-        dao.watchlist().first(),
-        dao.upNext().first(),
-        dao.ownWrites().first(),
+        dao.allResume().first().visible { it.source },
+        dao.latestWatches().first().visible { it.source },
+        dao.watchedTitles().first().visible { it.source },
+        dao.watchlist().first().visible { it.source },
+        dao.upNext().first().visible { it.source },
+        dao.ownWrites().first().visible { it.source },
     )
 
     /**
@@ -116,11 +124,23 @@ class TrackingRepository @Inject constructor(
 
     val library: Flow<List<LibraryEntry>> = reconciled.map { it.library }
 
-    fun titleState(mediaKey: String): Flow<TitleTrackState> = combine(
-        dao.inWatchlist(mediaKey),
-        dao.isWatched(mediaKey),
-        dao.resumeFor(mediaKey),
-    ) { inList, watched, resume -> TitleTrackState(inList, watched, resume.firstOrNull()) }
+    fun titleState(mediaKey: String): Flow<TitleTrackState> =
+        if (ExternalTrackers.ENABLED) {
+            combine(
+                dao.inWatchlist(mediaKey),
+                dao.isWatched(mediaKey),
+                dao.resumeFor(mediaKey),
+            ) { inList, watched, resume -> TitleTrackState(inList, watched, resume.firstOrNull()) }
+        } else {
+            // Doar datele locale: ce a rămas de la Trakt/SIMKL nu mai contează.
+            combine(dao.watchlist(), dao.watchedTitles(), dao.resumeFor(mediaKey)) { list, watched, resume ->
+                TitleTrackState(
+                    inWatchlist = list.any { it.ref.mediaKey == mediaKey && ExternalTrackers.isVisible(it.source) },
+                    watched = watched.any { it.ref.mediaKey == mediaKey && ExternalTrackers.isVisible(it.source) },
+                    resume = resume.firstOrNull { ExternalTrackers.isVisible(it.source) },
+                )
+            }
+        }
 
     fun syncState(source: String): Flow<SyncStateEntity?> = dao.syncStateFlow(source)
 
@@ -195,6 +215,7 @@ class TrackingRepository @Inject constructor(
 
     /** Marchează văzut / nevăzut. Întoarce numărul de surse actualizate. */
     suspend fun setWatched(media: MediaRef, watched: Boolean): Int {
+        if (!ExternalTrackers.ENABLED) return setWatchedLocally(media, watched)
         val targets = connected(Capability.HISTORY_WRITE)
         requireTargets(targets)
         val now = Instant.now()
@@ -220,6 +241,7 @@ class TrackingRepository @Inject constructor(
     }
 
     suspend fun setInWatchlist(media: MediaRef, inWatchlist: Boolean): Int {
+        if (!ExternalTrackers.ENABLED) return setInWatchlistLocally(media, inWatchlist)
         val targets = connected(Capability.WATCHLIST_WRITE)
         requireTargets(targets)
         targets.forEach { it.setInWatchlist(media, inWatchlist) }
@@ -259,9 +281,39 @@ class TrackingRepository @Inject constructor(
 
     suspend fun clearSource(source: String) = dao.clearSource(source)
 
+    // ---------- Fără trackeri externi: „Văzut” și „De văzut” se țin doar în baza locală ----------
+
+    private suspend fun setWatchedLocally(media: MediaRef, watched: Boolean): Int {
+        val now = Instant.now()
+        if (watched) {
+            val event = WatchEvent(media, now, LOCAL_SOURCE)
+            dao.insertHistory(listOf(TrackingEntities.history(event)))
+            if (media.type != MediaType.EPISODE) dao.upsertWatched(listOf(TrackingEntities.watched(event)))
+            dao.deleteResumeById("$LOCAL_SOURCE|${media.itemKey}")
+            if (media.type == MediaType.MOVIE) dao.removeFromWatchlist(media.titleKey)
+        } else {
+            dao.deleteHistory(LOCAL_SOURCE, media.titleKey, media.season, media.episode)
+            if (media.type != MediaType.EPISODE) dao.removeWatched(media.titleKey)
+        }
+        return 1
+    }
+
+    private suspend fun setInWatchlistLocally(media: MediaRef, inWatchlist: Boolean): Int {
+        if (inWatchlist) {
+            val title = if (media.type == MediaType.EPISODE) media.asShow() else media
+            dao.upsertWatchlist(listOf(TrackingEntities.watchlist(WatchlistEntry(title, Instant.now(), LOCAL_SOURCE))))
+        } else {
+            dao.removeFromWatchlist(media.titleKey)
+        }
+        return 1
+    }
+
     private fun requireTargets(targets: List<Connector>) {
         if (targets.isEmpty()) throw IllegalStateException("Niciun cont conectat. Conectează Trakt sau SIMKL din Setări.")
     }
+
+    private fun <T> List<T>.visible(source: (T) -> String): List<T> =
+        if (ExternalTrackers.ENABLED) this else filter { ExternalTrackers.isVisible(source(it)) }
 
     private companion object {
         /** Scrierile proprii se țin o săptămână: destul cât să revină ecoul din orice sursă. */

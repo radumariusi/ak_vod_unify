@@ -2,6 +2,8 @@
 
 Hub VOD pentru **Android TV** (funcționează și pe telefon, cu touch): adună istoricul și progresul de vizionare din **Trakt**, **SIMKL** și **WeTrakr**, afișează catalogul din **TMDb** și te trimite, prin deep link, în aplicația în care vrei să vezi (Netflix, Nuvio, Stremio, DebridStream).
 
+> **Noiembrie 2026:** baza de date locală e sursa de adevăr. „Continuă vizionarea” și istoricul vin din **AK Scrobbler**; Trakt și SIMKL sunt **ascunși** (codul rămâne, comutator în `core/connector/ExternalTrackers.kt`). Interfața folosește identitatea vizuală **AK VOD Hub** (fundal bleumarin, accent roșu, focus albastru-deschis, fundal panoramic în Acasă).
+
 ## Planul pe etape
 
 | Etapă | Conținut | Stare |

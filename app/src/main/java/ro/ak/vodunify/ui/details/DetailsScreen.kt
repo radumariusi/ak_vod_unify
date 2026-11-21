@@ -20,15 +20,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.Button
+import ro.ak.vodunify.ui.components.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
+import ro.ak.vodunify.ui.components.FilledTonalButton
+import ro.ak.vodunify.ui.components.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import ro.ak.vodunify.ui.components.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,7 +39,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -65,6 +64,7 @@ import ro.ak.vodunify.ui.components.FocusCard
 import ro.ak.vodunify.ui.components.LoadState
 import ro.ak.vodunify.ui.components.LoadingPanel
 import ro.ak.vodunify.ui.components.NetworkImage
+import ro.ak.vodunify.ui.components.TitleBackdrop
 import ro.ak.vodunify.ui.components.PersonRow
 import ro.ak.vodunify.ui.components.SectionTitle
 import ro.ak.vodunify.ui.components.TitleRow
@@ -157,7 +157,8 @@ private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel, c
                 is LoadState.Data -> episodeItems(
                     e.value,
                     watched = watchedEpisodes,
-                    canMark = connected,
+                    // Episoadele se marchează din AK Scrobbler; manual doar cu un tracker extern activ.
+                    canMark = connected && ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED,
                     onToggle = { ep -> viewModel.toggleEpisode(details, ep) },
                     onWatch = { ep -> chooser.open(details.playbackRequest(ep), details.availability) },
                 )
@@ -210,23 +211,13 @@ private fun Header(
     val context = LocalContext.current
     val item = details.item
     Box(Modifier.fillMaxWidth()) {
-        NetworkImage(
+        // Fundalul fișei, ca în AK VOD Hub: imaginea se topește în fundal spre stânga și în jos.
+        TitleBackdrop(
             item.backdropUrl,
-            null,
             Modifier
                 .fillMaxWidth()
-                .height(spec.heroHeight + 60.dp),
-        )
-        Box(
-            Modifier
-                .matchParentSize()
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color(0x660E1116),
-                        0.6f to Color(0xDD0E1116),
-                        1f to MaterialTheme.colorScheme.background,
-                    ),
-                ),
+                .height(spec.heroHeight + 200.dp),
+            settleMillis = 0,
         )
         Row(
             Modifier
@@ -310,7 +301,7 @@ private fun metaLine(d: TitleDetails): String = listOfNotNull(
     formatRating(d.item.rating)?.let { r -> d.voteCount?.let { "$r ($it voturi)" } ?: r },
 ).joinToString(" · ")
 
-// ---------- Trakt: De văzut / Văzut / progres ----------
+// ---------- De văzut / Văzut / progres ----------
 
 @Composable
 private fun TrackPanel(
@@ -467,6 +458,7 @@ private fun EpisodeCard(episode: Episode, watched: Boolean, canMark: Boolean, on
     val spec = layoutSpec()
     FocusCard(
         onClick = onWatch,
+        focusScale = 1.01f,
         modifier = Modifier
             .padding(horizontal = spec.screenPadding)
             .fillMaxWidth()
@@ -552,7 +544,7 @@ private fun StudioRow(studios: List<StudioRef>) {
                                     placeholderColor = Color.Transparent,
                                 )
                             } else {
-                                Text(studio.name, color = Color(0xFF1A1F27), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(studio.name, color = Color(0xFF151D2A), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
                         Text(studio.name, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)

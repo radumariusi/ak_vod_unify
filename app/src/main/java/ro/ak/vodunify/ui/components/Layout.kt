@@ -23,7 +23,7 @@ val LocalLayoutSpec = compositionLocalOf { layoutSpecFor(isTv = false, widthDp =
 fun layoutSpecFor(isTv: Boolean, widthDp: Int): LayoutSpec {
     val compact = !isTv && widthDp < 600
     return when {
-        isTv -> LayoutSpec(true, false, 48.dp, 240.dp, 135.dp, 380.dp, 140.dp, 210.dp)
+        isTv -> LayoutSpec(true, false, 48.dp, 240.dp, 135.dp, 250.dp, 120.dp, 180.dp)
         compact -> LayoutSpec(false, true, 16.dp, 200.dp, 112.dp, 260.dp, 110.dp, 165.dp)
         else -> LayoutSpec(false, false, 32.dp, 220.dp, 124.dp, 320.dp, 130.dp, 195.dp)
     }

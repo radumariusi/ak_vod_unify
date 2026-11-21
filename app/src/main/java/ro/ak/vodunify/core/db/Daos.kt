@@ -128,6 +128,10 @@ interface TrackingDao {
     )
     fun latestWatches(): Flow<List<WatchEventEntity>>
 
+    /** Șterge vizionările unei surse pentru un film/serial (season/episode null) sau un episod anume. */
+    @Query("DELETE FROM watch_events WHERE source = :source AND mediaKey = :mediaKey AND season IS :season AND episode IS :episode")
+    suspend fun deleteHistory(source: String, mediaKey: String, season: Int?, episode: Int?)
+
     @Query("SELECT * FROM watch_events WHERE mediaKey = :mediaKey ORDER BY watchedAt DESC")
     fun historyFor(mediaKey: String): Flow<List<WatchEventEntity>>
 

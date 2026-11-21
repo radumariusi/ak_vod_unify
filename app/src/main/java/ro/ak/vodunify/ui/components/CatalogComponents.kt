@@ -18,12 +18,10 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -47,7 +45,8 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier) {
         text,
         style = MaterialTheme.typography.titleMedium,
         fontWeight = FontWeight.SemiBold,
-        modifier = modifier.padding(horizontal = layoutSpec().screenPadding, vertical = 8.dp),
+        color = MaterialTheme.colorScheme.onBackground,
+        modifier = modifier.padding(horizontal = layoutSpec().screenPadding, vertical = 6.dp),
     )
 }
 
@@ -87,28 +86,76 @@ fun NetworkImage(
 
 fun formatRating(rating: Double?): String? = rating?.let { String.format(Locale.US, "★ %.1f", it) }
 
+/** Insigna TMDb de pe poster (ca în AK VOD Hub): sigla în culorile TMDb + nota. */
 @Composable
-fun PosterCard(item: CatalogItem, modifier: Modifier = Modifier) {
+fun RatingChip(rating: Double, modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .background(Color(0xCC000000), RoundedCornerShape(4.dp))
+            .padding(horizontal = 3.dp, vertical = 1.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Text(
+            "TMDB",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Black,
+            color = Color(0xFF01D277),
+            maxLines = 1,
+            modifier = Modifier
+                .background(Color(0xFF0D253F), RoundedCornerShape(3.dp))
+                .padding(horizontal = 3.dp),
+        )
+        Text(
+            String.format(Locale.US, "%.1f", rating),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = Color.White,
+            maxLines = 1,
+        )
+    }
+}
+
+/**
+ * Posterul unui titlu (2:3), ca în AK VOD Hub: nota TMDb pe poster, numele centrat dedesubt pe două rânduri
+ * fixe (cardurile au aceeași înălțime), focus cu mărire ușoară și contur alb. [rowKey] face cheia unică
+ * pe ecran, ca focusul să revină pe acest card la întoarcerea din fișă.
+ */
+@Composable
+fun PosterCard(item: CatalogItem, modifier: Modifier = Modifier, rowKey: String = "") {
     val spec = layoutSpec()
     val actions = LocalCatalogActions.current
+    val backdrop = LocalBackdrop.current
     Column(modifier.width(spec.posterWidth)) {
         FocusCard(
             onClick = { actions.openTitle(item.kind, item.id) },
             modifier = Modifier.size(spec.posterWidth, spec.posterHeight),
+            restoreKey = "$rowKey|${item.mediaKey}",
+            onFocused = { backdrop?.focus(FocusedTitle.of(item)) },
         ) {
-            NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
+            Box(Modifier.fillMaxSize()) {
+                NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
+                item.rating?.takeIf { it > 0 }?.let {
+                    RatingChip(it, Modifier.align(Alignment.TopStart).padding(4.dp))
+                }
+            }
         }
-        Spacer(Modifier.height(6.dp))
-        Text(item.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(
-            listOfNotNull(item.subtitle.takeIf { it.isNotBlank() }, formatRating(item.rating)).joinToString(" · "),
+            item.title,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
+            minLines = 2,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
         )
     }
 }
+
+/** Spațiul dintre carduri: destul cât cardul mărit la focus să nu atingă vecinii. */
+@Composable
+fun rowSpacing() = if (layoutSpec().isTv) 18.dp else 12.dp
 
 @Composable
 fun TitleRow(title: String, items: List<CatalogItem>, modifier: Modifier = Modifier) {
@@ -116,11 +163,13 @@ fun TitleRow(title: String, items: List<CatalogItem>, modifier: Modifier = Modif
     val spec = layoutSpec()
     Column(modifier) {
         SectionTitle(title)
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(if (spec.isTv) 20.dp else 12.dp),
-        ) {
-            items(items, key = { it.mediaKey }) { PosterCard(it) }
+        DefaultScroll {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
+            ) {
+                items(items, key = { it.mediaKey }) { PosterCard(it, rowKey = title) }
+            }
         }
     }
 }
@@ -130,7 +179,12 @@ fun PersonCard(person: PersonSummary, modifier: Modifier = Modifier) {
     val actions = LocalCatalogActions.current
     val size = if (layoutSpec().isTv) 110.dp else 84.dp
     Column(modifier.width(size + 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        FocusCard(onClick = { actions.openPerson(person.id) }, modifier = Modifier.size(size), shape = CircleShape) {
+        FocusCard(
+            onClick = { actions.openPerson(person.id) },
+            modifier = Modifier.size(size),
+            shape = CircleShape,
+            restoreKey = "person|${person.id}|${person.role}",
+        ) {
             NetworkImage(person.profileUrl, person.name, Modifier.fillMaxSize(), fallbackText = initials(person.name))
         }
         Spacer(Modifier.height(6.dp))
@@ -163,11 +217,13 @@ fun PersonRow(title: String, people: List<PersonSummary>) {
     val spec = layoutSpec()
     Column {
         SectionTitle(title)
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            items(people, key = { "${it.id}:${it.role}" }) { PersonCard(it) }
+        DefaultScroll {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                items(people, key = { "${it.id}:${it.role}" }) { PersonCard(it) }
+            }
         }
     }
 }

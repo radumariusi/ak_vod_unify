@@ -237,7 +237,7 @@ class CalendarViewModel @Inject constructor(
             }
             _message.value = when {
                 !item.followed -> "Urmărești „${item.title}”: apare mereu în calendar"
-                onTracker -> "„${item.title}” e pe lista ta din Trakt/SIMKL, deci rămâne urmărit. Ca să dispară, folosește „Ascunde”."
+                onTracker -> "„${item.title}” e în biblioteca ta, deci rămâne urmărit. Ca să dispară, folosește „Ascunde”."
                 else -> "Nu mai urmărești „${item.title}”"
             }
         }
@@ -272,7 +272,7 @@ class CalendarViewModel @Inject constructor(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                if (!tracking.hasConnectedTracker()) "Conectează Trakt sau SIMKL în Setări ca să marchezi ce ai văzut"
+                if (ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED && !tracking.hasConnectedTracker()) "Conectează Trakt sau SIMKL în Setări ca să marchezi ce ai văzut"
                 else "Eroare: ${e.message ?: e.javaClass.simpleName}"
             }
         }

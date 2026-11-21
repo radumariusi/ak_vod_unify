@@ -12,14 +12,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
+import ro.ak.vodunify.ui.components.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
+import ro.ak.vodunify.ui.components.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import ro.ak.vodunify.ui.components.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -37,6 +37,7 @@ import ro.ak.vodunify.core.connector.Capability
 import ro.ak.vodunify.core.connector.Connector
 import ro.ak.vodunify.core.connector.ConnectorKind
 import ro.ak.vodunify.core.connector.DeviceAuthConnector
+import ro.ak.vodunify.core.connector.ExternalTrackers
 import ro.ak.vodunify.core.prefs.ContentLanguage
 import ro.ak.vodunify.core.prefs.Market
 import ro.ak.vodunify.core.update.UpdateState
@@ -131,18 +132,24 @@ fun SettingsScreen(
             }
         }
         item { PlaybackSection() }
-        item { PublishSection() }
+        // Trakt/SIMKL ascunși: fără publicare de progres și fără conturi (codul rămâne, vezi ExternalTrackers).
+        if (ExternalTrackers.ENABLED) item { PublishSection() }
         item { ScrobblerSection() }
         item { ImportSection() }
         item { CalendarSection() }
-        item {
-            Text("Conturi", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        if (ExternalTrackers.ENABLED) {
+            item {
+                Text("Conturi", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            }
+            items(accounts.connectors, key = { "account_${it.id}" }) { AccountCard(it, accounts) }
         }
-        items(accounts.connectors, key = { "account_${it.id}" }) { AccountCard(it, accounts) }
-        item {
-            Text("Conectori", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        val connectorRows = viewModel.connectors.filterNot { it is DeviceAuthConnector || it.kind == ConnectorKind.TRACKER }
+        if (connectorRows.isNotEmpty()) {
+            item {
+                Text("Aplicații de redare", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            }
+            items(connectorRows, key = { it.id }) { ConnectorRow(it) }
         }
-        items(viewModel.connectors.filterNot { it is DeviceAuthConnector }, key = { it.id }) { ConnectorRow(it) }
     }
 }
 
