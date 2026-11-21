@@ -21,6 +21,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ro.ak.vodunify.ui.components.readable
 
 /** „Aplicațiile AK”: instalează / actualizează aplicațiile mici din ultimul release. */
 @Composable
@@ -52,6 +53,7 @@ fun CompanionsPanel(viewModel: CompanionsViewModel = hiltViewModel()) {
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.readable(),
                     )
                 }
                 if (state.downloading == c) {
@@ -63,6 +65,6 @@ fun CompanionsPanel(viewModel: CompanionsViewModel = hiltViewModel()) {
                 }
             }
         }
-        state.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        state.message?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.readable()) }
     }
 }

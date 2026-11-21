@@ -22,8 +22,8 @@ val SurfaceColor = Color(0xFF151D2A)
 val SurfaceVariantColor = Color(0xFF202C3D)
 
 /** Focus pe butoane și chip-uri (ca în AK VOD Hub). */
-val FocusFill = Color(0xFF9CC8FC)
-val OnFocusFill = Color(0xFF13243A)
+val FocusFill = Color(0xFF4DA3FF)
+val OnFocusFill = Color(0xFF06121F)
 
 /** Conturul de focus al cardurilor: gros și aproape alb, vizibil de la 3 m pe orice poster. */
 val FocusBorder = Color(0xFFE8EAED)

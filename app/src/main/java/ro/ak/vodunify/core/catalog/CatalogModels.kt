@@ -46,6 +46,19 @@ data class CatalogItem(
 
 fun mediaKey(kind: TitleKind, id: Long) = "${kind.path}:tmdb:$id"
 
+/** Un episod cu data lui de difuzare (ultimul apărut sau următorul). */
+data class EpisodeAir(val season: Int, val episode: Int, val name: String?, val airDate: String?) {
+    val code: String get() = "S%02dE%02d".format(season, episode)
+}
+
+/** Titlul plus datele de lansare: data filmului, ultimul și următorul episod la seriale. */
+data class TitleReleases(
+    val item: CatalogItem,
+    val releaseDate: String?,
+    val lastEpisode: EpisodeAir?,
+    val nextEpisode: EpisodeAir?,
+)
+
 data class PersonSummary(
     val id: Long,
     val name: String,

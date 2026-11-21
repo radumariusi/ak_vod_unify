@@ -2,6 +2,10 @@ package ro.ak.vodunify.ui.home
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.focus.onFocusChanged
@@ -9,6 +13,7 @@ import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.ui.components.LocalPosterLongPress
 import ro.ak.vodunify.ui.components.TitleLogo
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -82,7 +87,7 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
             item { ErrorPanel(s.error, onRetry = viewModel::retry) }
             item { personalRows() }
         }
-        is LoadState.Data -> HomeContent(s.value, personalRows, viewModel::logo)
+        is LoadState.Data -> HomeContent(s.value, personalRows, viewModel)
     }
 }
 
@@ -90,59 +95,68 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
 private fun HomeContent(
     catalog: HomeCatalog,
     personalRows: @Composable () -> Unit,
-    loadLogo: suspend (TitleKind, Long) -> String?,
+    viewModel: HomeViewModel,
 ) {
     val spec = layoutSpec()
-    val heroFocus = remember { FocusRequester() }
+    val listFocus = remember { FocusRequester() }
     val restore = LocalFocusRestore.current
-    var heroFocused by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
-    // Pe TV punem focusul inițial pe butonul principal, ca D-pad-ul să aibă de unde porni;
-    // la întoarcerea dintr-o fișă focusul revine pe cardul deschis (vezi FocusRestore).
-    if (spec.isTv && catalog.hero.isNotEmpty()) {
-        LaunchedEffect(Unit) { if (restore.pending == null) runCatching { heroFocus.requestFocus() } }
+    // Siglele titlurilor din rânduri se pregătesc din timp (adresa + imaginea în cache).
+    LaunchedEffect(catalog) {
+        viewModel.prefetchLogos((catalog.hero + catalog.rows.flatMap { it.items.take(12) }).map { it.kind to it.id })
     }
-    // Din orice rând: Înapoi (sau OK ținut apăsat pe un poster) urcă direct la butoanele din hero, pentru
-    // titlul cu focus. Abia din hero, Înapoi întreabă dacă ieși din aplicație.
-    BackHandler(enabled = spec.isTv && !heroFocused) { runCatching { heroFocus.requestFocus() } }
-    val jumpToHero: () -> Unit = { runCatching { heroFocus.requestFocus() } }
+
+    // Pe TV focusul pornește pe primul poster (nu mai e buton „Detalii”: OK pe orice poster deschide fișa);
+    // la întoarcerea dintr-o fișă focusul revine pe cardul deschis (vezi FocusRestore).
+    if (spec.isTv) {
+        LaunchedEffect(Unit) { if (restore.pending == null) runCatching { listFocus.requestFocus() } }
+    }
+    // Înapoi de pe un rând de jos urcă la primul rând; abia de acolo întreabă dacă ieși din aplicație.
+    val scrolled by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 } }
+    BackHandler(enabled = spec.isTv && scrolled) {
+        scope.launch {
+            listState.scrollToItem(0)
+            runCatching { listFocus.requestFocus() }
+        }
+    }
 
     if (spec.isTv) {
         // Ca în AK VOD Hub: hero-ul stă fix sus și arată titlul cu focus; doar rândurile se derulează,
         // fiecare rând cu focus urcă întreg sub hero (derulare cu pivot). Hero-ul se micșorează cât să încapă
         // un rând întreg de postere dedesubt.
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            val heroHeight = minOf(maxHeight * 0.52f, 260.dp, maxHeight - spec.posterHeight - 76.dp).coerceAtLeast(150.dp)
+            val heroHeight = minOf(maxHeight * 0.52f, 240.dp, maxHeight - spec.posterHeight - 76.dp).coerceAtLeast(140.dp)
             Column(Modifier.fillMaxSize()) {
                 Hero(
                     catalog.hero,
-                    heroFocus,
-                    loadLogo,
-                    Modifier.fillMaxWidth().height(heroHeight).onFocusChanged { heroFocused = it.hasFocus },
-                    compact = heroHeight < 210.dp,
+                    viewModel,
+                    Modifier.fillMaxWidth().height(heroHeight),
+                    compact = heroHeight < 200.dp,
                 )
-                CompositionLocalProvider(LocalPosterLongPress provides jumpToHero) {
-                    PivotScroll(pivot = 8.dp) {
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(bottom = 240.dp),
-                        ) {
-                            item(key = "personal") { personalRows() }
-                            items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
-                            item(key = "attribution") { AttributionNote() }
-                        }
+                PivotScroll(pivot = 46.dp) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize().focusRequester(listFocus),
+                        contentPadding = PaddingValues(bottom = 240.dp),
+                    ) {
+                        item(key = "personal") { personalRows() }
+                        items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
+                        item(key = "attribution") { AttributionNote() }
                     }
                 }
             }
         }
     } else {
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (catalog.hero.isNotEmpty()) {
-                item(key = "hero") { Hero(catalog.hero, heroFocus, loadLogo, Modifier.fillMaxWidth().height(spec.heroHeight)) }
+                item(key = "hero") { Hero(catalog.hero, viewModel, Modifier.fillMaxWidth().height(spec.heroHeight)) }
             }
             item(key = "personal") { personalRows() }
             items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
@@ -158,8 +172,7 @@ private fun HomeContent(
 @Composable
 private fun Hero(
     items: List<CatalogItem>,
-    focusRequester: FocusRequester,
-    loadLogo: suspend (TitleKind, Long) -> String?,
+    viewModel: HomeViewModel,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
 ) {
@@ -180,15 +193,22 @@ private fun Hero(
     LaunchedEffect(promoted?.id) {
         if (backdrop != null && backdrop.focused == null) backdrop.url = promoted?.backdropUrl
     }
-    // Sigla se cere după un focus stabil (nu la fiecare poster peste care treci).
+    // Sigla: pe loc dacă e deja știută (pregătită din timp), altfel după un focus stabil
+    // (nu la fiecare poster peste care treci).
     var logo by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(shown.kind, shown.id) {
+        val known = viewModel.cachedLogo(shown.kind, shown.id)
+        if (known != null) {
+            logo = known.ifEmpty { null }
+            return@LaunchedEffect
+        }
         logo = null
         delay(250)
-        logo = loadLogo(shown.kind, shown.id)
+        logo = viewModel.logo(shown.kind, shown.id)
     }
 
-    Box(modifier) {
+    // Pe telefon, atingerea hero-ului deschide fișa (pe TV hero-ul doar arată titlul cu focus).
+    Box(if (spec.isTv) modifier else modifier.clickable { actions.openTitle(shown.kind, shown.id) }) {
         if (backdrop == null) TitleBackdrop(shown.backdropUrl, Modifier.matchParentSize())
         Column(
             Modifier
@@ -223,32 +243,19 @@ private fun Hero(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Button(
-                    onClick = { actions.openTitle(shown.kind, shown.id) },
-                    modifier = Modifier.focusRequester(focusRequester),
-                ) {
-                    Icon(Icons.Filled.Info, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Detalii")
-                }
-                if (items.size > 1 && backdrop?.focused == null) {
-                    OutlinedButton(onClick = { index = (index + 1) % items.size }) {
-                        Text("Următorul")
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items.indices.forEach { i ->
-                            Box(
-                                Modifier
-                                    .size(if (i == index) 10.dp else 6.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        if (i == index) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                    ),
-                            )
-                        }
+            // Fără butoane: OK pe orice poster deschide fișa. Punctele arată titlurile promovate, pe rând.
+            if (items.size > 1 && backdrop?.focused == null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    items.indices.forEach { i ->
+                        Box(
+                            Modifier
+                                .size(if (i == index) 10.dp else 6.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (i == index) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                ),
+                        )
                     }
                 }
             }

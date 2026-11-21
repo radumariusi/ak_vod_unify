@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -146,7 +147,9 @@ fun PosterCard(item: CatalogItem, modifier: Modifier = Modifier, rowKey: String 
     val longPress = LocalPosterLongPress.current
     FocusCard(
         onClick = { actions.openTitle(item.kind, item.id) },
-        modifier = modifier.size(spec.posterWidth, spec.posterHeight),
+        // wrapContentSize: în grile (Caută, Lista mea, actori) celula e mai lată decât posterul; fără el
+        // posterul s-ar lăți și s-ar tăia sus-jos. Așa are peste tot același format 2:3.
+        modifier = modifier.wrapContentSize().size(spec.posterWidth, spec.posterHeight),
         restoreKey = "$rowKey|${item.mediaKey}",
         onFocused = { backdrop?.focus(FocusedTitle.of(item)) },
         onLongClick = longPress ?: { actions.titleMenu(item) },
@@ -193,7 +196,7 @@ fun PersonCard(person: PersonSummary, modifier: Modifier = Modifier) {
     val actions = LocalCatalogActions.current
     val tv = layoutSpec().isTv
     val w = if (tv) 96.dp else 84.dp
-    Column(modifier.width(w + 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(modifier.wrapContentSize().width(w + 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         FocusCard(
             onClick = { actions.openPerson(person.id) },
             modifier = Modifier.size(w, w * 1.5f),

@@ -174,6 +174,7 @@ data class TmdbTitleDetails(
     val networks: List<TmdbCompany> = emptyList(),
     val seasons: List<TmdbSeasonSummary> = emptyList(),
     @SerialName("next_episode_to_air") val nextEpisodeToAir: TmdbEpisodeRef? = null,
+    @SerialName("last_episode_to_air") val lastEpisodeToAir: TmdbEpisodeRef? = null,
     @SerialName("imdb_id") val imdbId: String? = null,
     @SerialName("external_ids") val externalIds: TmdbExternalIds? = null,
     val credits: TmdbCredits? = null,

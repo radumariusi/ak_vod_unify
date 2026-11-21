@@ -6,6 +6,7 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
@@ -15,6 +16,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 enum class TopDestination(val route: String, val label: String, val icon: ImageVector) {
     HOME("home", "Acasă", Icons.Filled.Home),
     SEARCH("search", "Caută", Icons.Filled.Search),
+    DISCOVER("discover", "Descoperă", Icons.Filled.Star),
     CALENDAR("calendar", "Calendar", Icons.Filled.DateRange),
     LIBRARY("library", "Lista mea", Icons.AutoMirrored.Filled.List),
     SETTINGS("settings", "Setări", Icons.Filled.Settings),

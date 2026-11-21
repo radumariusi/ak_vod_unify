@@ -36,7 +36,8 @@ import ro.ak.vodunify.core.connector.ExternalTrackers
 import ro.ak.vodunify.ui.components.DefaultScroll
 import ro.ak.vodunify.ui.components.FocusCard
 import ro.ak.vodunify.ui.components.FocusedTitle
-import ro.ak.vodunify.ui.components.LocalPosterLongPress
+import ro.ak.vodunify.ui.components.PosterLabel
+import ro.ak.vodunify.ui.components.RatingChip
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import ro.ak.vodunify.ui.components.LocalBackdrop
@@ -58,7 +59,7 @@ fun PersonalSection(rows: PersonalRows, status: SyncStatus, onSync: () -> Unit) 
         )
         PersonalState.DISCONNECTED -> ConnectPrompt()
         PersonalState.CONNECTED -> Column {
-            if (rows.continueWatching.isEmpty()) {
+            if (rows.continueEmpty) {
                 if (status is SyncStatus.Running) {
                     SyncingRow()
                 } else {
@@ -73,9 +74,12 @@ fun PersonalSection(rows: PersonalRows, status: SyncStatus, onSync: () -> Unit) 
                     )
                 }
             }
-            WideRow("Continuă vizionarea", rows.continueWatching)
-            WideRow("Următorul episod", rows.upNext)
-            WideRow("De văzut", rows.watchlist)
+            WideRow("Continuă vizionarea · Filme", rows.continueMovies)
+            WideRow("Continuă vizionarea · Seriale", rows.continueShows)
+            PosterRow("Noutăți din Lista mea · Filme", rows.newMovies)
+            PosterRow("Noutăți din Lista mea · Episoade noi", rows.newEpisodes)
+            PosterRow("În curând · Filme", rows.soonMovies)
+            PosterRow("În curând · Episoade", rows.soonEpisodes)
             if (status is SyncStatus.Failed) {
                 Row(
                     Modifier.padding(horizontal = layoutSpec().screenPadding),
@@ -162,14 +166,13 @@ private fun WideCard(item: PersonalItem, rowKey: String) {
     val spec = layoutSpec()
     val actions = LocalCatalogActions.current
     val backdrop = LocalBackdrop.current
-    val longPress = LocalPosterLongPress.current
     FocusCard(
         onClick = { item.tmdbId?.let { actions.openTitle(item.kind, it) } },
         modifier = Modifier.size(spec.cardWidth, spec.cardHeight),
         restoreKey = "$rowKey|${item.key}",
         onFocused = { focusedTitle(item)?.let { backdrop?.focus(it) } },
-        // Același salt la butoanele din hero ca de pe postere.
-        onLongClick = longPress,
+        // OK ținut apăsat: meniul titlului (Lista mea, văzut, scoate din Continuă vizionarea…).
+        onLongClick = { item.asCatalogItem()?.let(actions.titleMenu) },
     ) {
         Box(Modifier.fillMaxSize().semantics { contentDescription = listOfNotNull(item.title, item.subtitle).joinToString(", ") }) {
             NetworkImage(item.backdropUrl ?: item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
@@ -216,6 +219,46 @@ private fun WideCard(item: PersonalItem, rowKey: String) {
     }
 }
 
+/** Rând de postere (Noutăți / În curând): ca posterele din catalog, cu episodul și data jos, pe poster. */
+@Composable
+private fun PosterRow(title: String, items: List<PersonalItem>) {
+    if (items.isEmpty()) return
+    val spec = layoutSpec()
+    Column {
+        SectionTitle(title)
+        DefaultScroll {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
+            ) {
+                items(items, key = { it.key }) { PersonalPoster(it, rowKey = title) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PersonalPoster(item: PersonalItem, rowKey: String) {
+    val spec = layoutSpec()
+    val actions = LocalCatalogActions.current
+    val backdrop = LocalBackdrop.current
+    FocusCard(
+        onClick = { item.tmdbId?.let { actions.openTitle(item.kind, it) } },
+        modifier = Modifier.size(spec.posterWidth, spec.posterHeight),
+        restoreKey = "$rowKey|${item.key}",
+        onFocused = { focusedTitle(item)?.let { backdrop?.focus(it) } },
+        onLongClick = { item.asCatalogItem()?.let(actions.titleMenu) },
+    ) {
+        Box(Modifier.fillMaxSize().semantics { contentDescription = listOfNotNull(item.title, item.subtitle).joinToString(", ") }) {
+            NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
+            item.rating?.takeIf { it > 0 }?.let { RatingChip(it, Modifier.align(Alignment.TopStart).padding(4.dp)) }
+            item.subtitle?.takeIf { it.isNotBlank() }?.let {
+                PosterLabel(it, Modifier.align(Alignment.BottomStart).padding(4.dp))
+            }
+        }
+    }
+}
+
 private fun focusedTitle(item: PersonalItem): FocusedTitle? {
     val id = item.tmdbId ?: return null
     return FocusedTitle(
@@ -225,5 +268,6 @@ private fun focusedTitle(item: PersonalItem): FocusedTitle? {
         meta = item.subtitle.orEmpty(),
         overview = item.overview,
         backdropUrl = item.backdropUrl,
+        rating = item.rating,
     )
 }

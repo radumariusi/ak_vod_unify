@@ -30,6 +30,7 @@ import ro.ak.vodunify.core.imports.ImportSources
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import ro.ak.vodunify.ui.components.readable
 
 /** „Istoric din servicii”: AK Import RO / US și CSV-ul Netflix. */
 @OptIn(ExperimentalLayoutApi::class)
@@ -58,6 +59,7 @@ fun ImportSection(viewModel: ImportSettingsViewModel = hiltViewModel()) {
                     "AK Import RO și AK VOD Unify merg direct.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.readable(),
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 viewModel.routes.forEach { route ->
@@ -81,7 +83,7 @@ fun ImportSection(viewModel: ImportSettingsViewModel = hiltViewModel()) {
                     }
                 }) { Text("Importă CSV Netflix") }
             }
-            message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            message?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.readable()) }
 
             preview?.let { p ->
                 Text(
@@ -113,6 +115,7 @@ fun ImportSection(viewModel: ImportSettingsViewModel = hiltViewModel()) {
                 Text(
                     "${s.received} primite · ${s.matched} găsite în TMDb · ${s.resumePoints} începute (cu minut) · ${s.unmatched} negăsite",
                     style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.readable(),
                 )
                 if (s.unmatchedSamples.isNotEmpty()) {
                     Text(

@@ -48,6 +48,7 @@ import ro.ak.vodunify.ui.components.ErrorPanel
 import ro.ak.vodunify.ui.components.LoadingPanel
 import ro.ak.vodunify.ui.components.PersonCard
 import ro.ak.vodunify.ui.components.PosterCard
+import ro.ak.vodunify.ui.components.TextInput
 import ro.ak.vodunify.ui.components.layoutSpec
 import java.time.Year
 
@@ -67,27 +68,39 @@ fun SearchScreen(viewModel: SearchViewModel = hiltViewModel()) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item(key = "query", span = { GridItemSpan(maxLineSpan) }) {
-            OutlinedTextField(
-                value = state.query,
-                onValueChange = viewModel::onQueryChange,
-                modifier = Modifier.fillMaxWidth().widthIn(max = 900.dp),
-                singleLine = true,
-                placeholder = { Text("Caută un film, un serial sau o persoană") },
-                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (state.query.isNotEmpty()) {
-                        IconButton(onClick = { viewModel.onQueryChange("") }) {
-                            Icon(Icons.Filled.Clear, contentDescription = "Șterge")
+            if (spec.isTv) {
+                TextInput(
+                    value = state.query,
+                    onValueChange = viewModel::onQueryChange,
+                    label = "Caută",
+                    placeholder = "Un film, un serial sau o persoană",
+                    imeAction = ImeAction.Search,
+                    onDone = viewModel::submit,
+                    modifier = Modifier.fillMaxWidth().widthIn(max = 900.dp),
+                )
+            } else {
+                OutlinedTextField(
+                    value = state.query,
+                    onValueChange = viewModel::onQueryChange,
+                    modifier = Modifier.fillMaxWidth().widthIn(max = 900.dp),
+                    singleLine = true,
+                    placeholder = { Text("Caută un film, un serial sau o persoană") },
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (state.query.isNotEmpty()) {
+                            IconButton(onClick = { viewModel.onQueryChange("") }) {
+                                Icon(Icons.Filled.Clear, contentDescription = "Șterge")
+                            }
                         }
-                    }
-                },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = {
-                    keyboard?.hide()
-                    focusManager.clearFocus()
-                    viewModel.submit()
-                }),
-            )
+                    },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = {
+                        keyboard?.hide()
+                        focusManager.clearFocus()
+                        viewModel.submit()
+                    }),
+                )
+            }
         }
         item(key = "filters", span = { GridItemSpan(maxLineSpan) }) {
             Filters(state.filters, state.genres, years, viewModel)

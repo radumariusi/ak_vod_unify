@@ -41,6 +41,17 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
+import ro.ak.vodunify.core.calendar.android.CALENDAR_TO_SERVICE
+import ro.ak.vodunify.core.playback.PlaybackPreferences
+import ro.ak.vodunify.core.playback.StreamingService
+import ro.ak.vodunify.core.playback.TargetApp
+import ro.ak.vodunify.core.playback.TargetResolver
+
+/** Pachetele pentru siglele de pe posterele din calendar. */
+data class CalendarIcons(val apps: Map<String, String> = emptyMap(), val player: String? = null)
 
 enum class CalendarTab(val label: String) { SHOWS("Seriale"), MOVIES("Filme") }
 
@@ -95,7 +106,28 @@ class CalendarViewModel @Inject constructor(
     private val catalog: CatalogRepository,
     private val catalogPrefs: CatalogPreferences,
     private val tracking: TrackingRepository,
+    private val resolver: TargetResolver,
+    private val playback: PlaybackPreferences,
 ) : ViewModel() {
+
+    /**
+     * Siglele de pe postere: pachetul aplicației instalate pentru fiecare serviciu din calendar (ex. „netflix”)
+     * și playerul standard, pentru titlurile care nu sunt pe platformele tale.
+     */
+    val icons: StateFlow<CalendarIcons> = playback.settings
+        .map { p ->
+            withContext(Dispatchers.IO) {
+                val installed = runCatching { resolver.installedApps() }.getOrDefault(emptyMap())
+                val apps = CALENDAR_TO_SERVICE.mapNotNull { (calendarId, serviceId) ->
+                    val app = StreamingService.byId(serviceId)?.let { TargetApp.byId(it.appId) } ?: return@mapNotNull null
+                    installed[app]?.let { calendarId to it.packageName }
+                }.toMap()
+                val player = p.defaultPlayerApp?.let { installed[it] }
+                    ?: TargetApp.players.firstNotNullOfOrNull { installed[it] }
+                CalendarIcons(apps, player?.packageName)
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CalendarIcons())
 
     private val tab = MutableStateFlow(CalendarTab.SHOWS)
     private val mode = MutableStateFlow(CalendarMode.DAY)

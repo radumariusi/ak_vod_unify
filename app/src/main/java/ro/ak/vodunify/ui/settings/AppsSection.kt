@@ -30,6 +30,7 @@ import ro.ak.vodunify.ui.components.OutlinedButton
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import ro.ak.vodunify.ui.components.readable
 
 /**
  * „Aplicații și servicii”, în trei liste:
@@ -104,7 +105,7 @@ private fun AppMethodRow(app: TargetApp, installed: InstalledApp?, proof: AppPro
             fontWeight = FontWeight.Medium,
         )
         InstallLine(installed)
-        Text("Metoda: ${app.method}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Metoda: ${app.method}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.readable())
         if (proof != null) ProofLine(proof)
     }
 }
@@ -116,6 +117,7 @@ private fun ProofLine(proof: AppProof) {
         "✓ Confirmat $date · ${proof.method}" + (proof.title?.let { " · $it" } ?: ""),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.tertiary,
+        modifier = Modifier.readable(),
     )
 }
 
@@ -125,6 +127,7 @@ private fun InstallLine(installed: InstalledApp?) {
         installed?.let { "Instalat: ${it.label} (${it.packageName})" } ?: "Neinstalat",
         style = MaterialTheme.typography.bodySmall,
         color = if (installed != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.readable(),
     )
 }
 
@@ -143,6 +146,7 @@ private fun ServiceRow(
                 if (app != null && app in installed) "Instalat" else "Neinstalat",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.readable(),
             )
         }
         Dropdown(

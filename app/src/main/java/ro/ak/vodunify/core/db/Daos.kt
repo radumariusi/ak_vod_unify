@@ -45,6 +45,9 @@ interface TrackingDao {
     @Query("DELETE FROM resume_points WHERE id = :id")
     suspend fun deleteResumeById(id: String)
 
+    @Query("DELETE FROM resume_points WHERE mediaKey = :mediaKey")
+    suspend fun deleteResumeFor(mediaKey: String)
+
     @Query("SELECT * FROM resume_points ORDER BY updatedAt DESC")
     fun allResume(): Flow<List<ResumePointEntity>>
 

@@ -11,6 +11,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import kotlin.math.abs
 
 /**
  * Derulare verticală „cu pivot”, ca pe TV (preluată din AK VOD Hub): rândul cu focus ajunge mereu la aceeași
@@ -23,16 +25,20 @@ fun PivotScroll(pivot: Dp, enabled: Boolean = true, content: @Composable () -> U
         content()
         return
     }
-    val pivotPx = with(LocalDensity.current) { pivot.toPx() }
+    val density = LocalDensity.current
+    val pivotPx = with(density) { pivot.toPx() }
+    // Toleranța: mărirea cardului cu focus (1.05) și conturul îi schimbă puțin marginile; fără ea, fiecare
+    // pas stânga / dreapta în rând ar mișca rândul cu câțiva pixeli („țopăie”).
+    val tolerancePx = with(density) { 20.dp.toPx() }
     val default = LocalBringIntoViewSpec.current
-    val spec = remember(pivotPx, default) {
+    val spec = remember(pivotPx, tolerancePx, default) {
         object : BringIntoViewSpec {
-            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float =
-                if (size + pivotPx > containerSize) {
-                    default.calculateScrollDistance(offset, size, containerSize)
-                } else {
-                    offset - pivotPx
-                }
+            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+                if (size + pivotPx > containerSize) return default.calculateScrollDistance(offset, size, containerSize)
+                val distance = offset - pivotPx
+                val visible = offset >= 0f && offset + size <= containerSize
+                return if (visible && abs(distance) <= tolerancePx) 0f else distance
+            }
         }
     }
     CompositionLocalProvider(LocalBringIntoViewSpec provides spec, LocalDefaultScroll provides default) { content() }

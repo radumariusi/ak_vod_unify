@@ -76,6 +76,7 @@ import ro.ak.vodunify.ui.home.HomeScreen
 import ro.ak.vodunify.ui.library.LibraryScreen
 import ro.ak.vodunify.ui.person.PersonScreen
 import ro.ak.vodunify.ui.search.SearchScreen
+import ro.ak.vodunify.ui.discover.DiscoverScreen
 import ro.ak.vodunify.ui.settings.SettingsScreen
 import ro.ak.vodunify.ui.studio.StudioScreen
 import ro.ak.vodunify.ui.theme.FocusBorder
@@ -149,6 +150,7 @@ fun AppNavigation() {
                 NavHost(nav, startDestination = TopDestination.HOME.route, modifier = Modifier.fillMaxSize()) {
                     composable(TopDestination.HOME.route) { HomeScreen() }
                     composable(TopDestination.SEARCH.route) { SearchScreen() }
+                    composable(TopDestination.DISCOVER.route) { DiscoverScreen() }
                     composable(TopDestination.CALENDAR.route) { CalendarScreen() }
                     composable(TopDestination.LIBRARY.route) { LibraryScreen() }
                     composable(TopDestination.SETTINGS.route) { SettingsScreen() }
@@ -218,7 +220,7 @@ private fun TopBar(
                         enter = { tabs[active ?: TopDestination.HOME] ?: FocusRequester.Default }
                     }
                     .focusGroup(),
-                horizontalArrangement = Arrangement.spacedBy(if (spec.isCompact) 4.dp else 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (spec.isCompact) 4.dp else 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TopDestination.entries.forEach { dest ->
@@ -234,7 +236,7 @@ private fun TopBar(
         }
         if (!spec.isCompact) {
             // Echilibrează marca din stânga, ca filele să rămână centrate pe ecran.
-            Spacer(Modifier.width(if (showBack) 64.dp else 140.dp))
+            Spacer(Modifier.width(if (showBack) 24.dp else 60.dp))
         }
     }
 }
