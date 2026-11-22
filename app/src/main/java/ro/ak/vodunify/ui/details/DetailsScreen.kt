@@ -79,6 +79,7 @@ import ro.ak.vodunify.ui.components.OutlinedButton
 import ro.ak.vodunify.ui.components.PersonRow
 import ro.ak.vodunify.ui.components.RatingChip
 import ro.ak.vodunify.ui.components.ImdbChip
+import ro.ak.vodunify.ui.components.ExpandableText
 import ro.ak.vodunify.ui.components.SectionTitle
 import ro.ak.vodunify.ui.components.TextButton
 import ro.ak.vodunify.ui.components.TitleBackdrop
@@ -298,8 +299,6 @@ private fun Header(
     actions: @Composable () -> Unit,
 ) {
     val item = details.item
-    var expanded by rememberSaveable(item.mediaKey) { mutableStateOf(false) }
-    var truncated by remember(item.mediaKey) { mutableStateOf(false) }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Column(Modifier.widthIn(max = 760.dp).fillMaxWidth(0.86f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -320,23 +319,14 @@ private fun Header(
             }
             val text = item.overview.ifBlank { details.tagline.orEmpty() }
             if (text.isNotBlank()) {
-                Text(
-                    text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    maxLines = if (expanded) Int.MAX_VALUE else 3,
-                    overflow = TextOverflow.Ellipsis,
-                    onTextLayout = { if (!expanded) truncated = it.hasVisualOverflow },
-                )
+                // Întreagă dacă încape; altfel tăiată, cu „… Arată mai mult” (îngroșat) care o deschide.
+                ExpandableText(text)
             }
             WhereToWatch(watch)
         }
         // Acțiunile pe un rând (trec pe rândul următor doar dacă nu încap), ca restul fișei să rămână pe ecran.
         FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             actions()
-            if (truncated || expanded) {
-                TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Arată mai puțin" else "Arată mai mult") }
-            }
         }
     }
 }

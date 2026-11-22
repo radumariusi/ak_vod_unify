@@ -126,7 +126,7 @@ class CatalogRepository @Inject constructor(
                 settings.language,
             ),
             year = TmdbMappers.year(if (isMovie) dto.releaseDate else dto.firstAirDate),
-            overview = dto.overview.orEmpty(),
+            overview = TmdbMappers.cleanOverview(dto.overview).orEmpty(),
             posterUrl = TmdbImages.poster(dto.posterPath),
             backdropUrl = TmdbImages.backdrop(dto.backdropPath),
             rating = dto.voteAverage?.takeIf { it > 0 },
@@ -197,7 +197,7 @@ class CatalogRepository @Inject constructor(
                 settings.language,
             ),
             year = TmdbMappers.year(if (isMovie) dto.releaseDate else dto.firstAirDate),
-            overview = dto.overview.orEmpty(),
+            overview = TmdbMappers.cleanOverview(dto.overview).orEmpty(),
             posterUrl = TmdbImages.poster(dto.posterPath),
             backdropUrl = TmdbImages.backdrop(dto.backdropPath),
             rating = dto.voteAverage?.takeIf { it > 0 },
@@ -229,9 +229,9 @@ class CatalogRepository @Inject constructor(
             TmdbTitleDetails.serializer(),
         )
         // Multe titluri nu au descriere în română: cădem pe engleză.
-        val overview = dto.overview?.takeIf { it.isNotBlank() } ?: if (settings.language == ContentLanguage.ROMANIAN) {
+        val overview = TmdbMappers.cleanOverview(dto.overview) ?: if (settings.language == ContentLanguage.ROMANIAN) {
             runCatching {
-                tmdb.get("${kind.path}/$id", mapOf("language" to "en-US"), TmdbTitleDetails.serializer()).overview
+                tmdb.get("${kind.path}/$id", mapOf("language" to "en-US"), TmdbTitleDetails.serializer()).overview.let(TmdbMappers::cleanOverview)
             }.getOrNull().orEmpty()
         } else {
             ""
@@ -379,13 +379,13 @@ class CatalogRepository @Inject constructor(
         return Season(
             number = dto.seasonNumber,
             name = dto.name ?: "Sezonul $number",
-            overview = dto.overview.orEmpty(),
+            overview = TmdbMappers.cleanOverview(dto.overview).orEmpty(),
             episodes = dto.episodes.map {
                 Episode(
                     season = it.seasonNumber,
                     number = it.episodeNumber,
                     name = it.name?.takeIf { n -> n.isNotBlank() } ?: "Episodul ${it.episodeNumber}",
-                    overview = it.overview.orEmpty(),
+                    overview = TmdbMappers.cleanOverview(it.overview).orEmpty(),
                     stillUrl = TmdbImages.still(it.stillPath),
                     airDate = it.airDate,
                     runtimeMinutes = it.runtime,

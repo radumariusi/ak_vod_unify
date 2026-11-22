@@ -282,7 +282,8 @@ private fun releaseBadge(item: PersonalItem): BadgeSpec? {
             service != null -> BadgeSpec.Service(release.serviceId?.let { CALENDAR_TO_SERVICE[it] ?: it }, service)
             else -> BadgeSpec.Label("Streaming")
         }
-        ReleaseChannel.DIGITAL -> BadgeSpec.Label("Digital ${release.region}")
+        // Digital (închiriere / cumpărare): sigla player-ului standard, ca la orice titlu.
+        ReleaseChannel.DIGITAL -> null
         ReleaseChannel.UNKNOWN -> null
     }
 }
@@ -293,12 +294,28 @@ private fun focusedTitle(item: PersonalItem, badge: BadgeSpec?): FocusedTitle? {
         kind = item.kind,
         id = id,
         title = item.title,
-        meta = listOfNotNull(releaseText(item), item.subtitle?.takeIf { it.isNotBlank() }).joinToString(" · "),
+        meta = heroMeta(item),
         overview = item.overview,
         backdropUrl = item.backdropUrl,
         rating = item.rating,
         badge = badge,
     )
+}
+
+/**
+ * Rândul de sub sigla din hero. Noutăți / În curând: unde apare și data completă, cu ziua săptămânii;
+ * Continuă vizionarea: episodul, procentul și când l-ai văzut.
+ */
+private fun heroMeta(item: PersonalItem): String {
+    val date = item.eventDate
+    if (date != null) {
+        return listOfNotNull(releaseText(item), item.episodeCode, HomeSections.fullDayLabel(date)).joinToString(" · ")
+    }
+    return listOfNotNull(
+        releaseText(item),
+        item.subtitle?.takeIf { it.isNotBlank() },
+        item.watchedAt?.let { HomeSections.watchedLabel(it) },
+    ).joinToString(" · ")
 }
 
 /** Unde apare filmul, pentru hero: „În cinema în România · 25 nov”. */

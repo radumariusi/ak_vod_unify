@@ -20,6 +20,19 @@ object TmdbMappers {
         return primary?.takeIf { it.isNotBlank() } ?: translated ?: original ?: "Fără titlu"
     }
 
+    private val phoneLike = Regex("""\+?\d[\d\s().\-]{8,}\d""")
+    private val spamWords = Regex("""(?i)\b(toll[- ]?free|helpline|customer (care|service|support)|call (us|now)|whatsapp)\b""")
+
+    /**
+     * Descrierea, fără spam: unele fișe TMDb sunt vandalizate cu numere de telefon („Ticket+1-888-…”).
+     * Acelea contează ca lipsă (null), ca să cădem pe engleză sau să nu arătăm nimic.
+     */
+    fun cleanOverview(text: String?): String? {
+        val t = text?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val phone = phoneLike.findAll(t).any { m -> m.value.count(Char::isDigit) >= 10 }
+        return if (phone || spamWords.containsMatchIn(t)) null else t
+    }
+
     /** `fallbackKind` se folosește pentru listele care nu au `media_type` (ex. /movie/popular). */
     fun item(dto: TmdbListItem, language: ContentLanguage, fallbackKind: TitleKind? = null): CatalogItem? {
         val kind = TitleKind.fromPath(dto.mediaType) ?: fallbackKind ?: return null
@@ -33,7 +46,7 @@ object TmdbMappers {
                 language,
             ),
             year = year(if (isMovie) dto.releaseDate else dto.firstAirDate),
-            overview = dto.overview.orEmpty(),
+            overview = cleanOverview(dto.overview).orEmpty(),
             posterUrl = TmdbImages.poster(dto.posterPath),
             backdropUrl = TmdbImages.backdrop(dto.backdropPath),
             rating = dto.voteAverage?.takeIf { it > 0 },

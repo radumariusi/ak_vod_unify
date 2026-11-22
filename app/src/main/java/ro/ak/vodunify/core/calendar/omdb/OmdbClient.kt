@@ -55,10 +55,20 @@ class OmdbClient(
 
     private val base: HttpUrl = baseUrl.toHttpUrl()
     private val cache = ConcurrentHashMap<String, Pair<Long, ImdbRating?>>()
+    /** Cheia oprită (cheie greșită / limita zilnică) și până când; după o oră încercăm din nou. */
     @Volatile private var blockedKey: String? = null
+    @Volatile private var blockedAt: Long = 0L
+
+    private fun blocked(apiKey: String): Boolean {
+        if (apiKey != blockedKey) return false
+        if (now() - blockedAt > BLOCK_MS) { blockedKey = null; return false }
+        return true
+    }
+
+    private fun block(apiKey: String) { blockedKey = apiKey; blockedAt = now() }
 
     override suspend fun rating(imdbId: String, apiKey: String): ImdbRating? {
-        if (apiKey.isBlank() || imdbId.isBlank() || apiKey == blockedKey) return null
+        if (apiKey.isBlank() || imdbId.isBlank() || blocked(apiKey)) return null
         cache[imdbId]?.let { (at, value) -> if (now() - at < ttlMillis) return value }
 
         val url = base.newBuilder()
@@ -69,7 +79,7 @@ class OmdbClient(
             withContext(Dispatchers.IO) {
                 http.newCall(Request.Builder().url(url).get().build()).execute().use { r ->
                     if (r.code == 401) {
-                        blockedKey = apiKey
+                        block(apiKey)
                         return@withContext null
                     }
                     if (!r.isSuccessful) return@withContext null
@@ -85,9 +95,11 @@ class OmdbClient(
         if (response.response != "True") {
             val error = response.error.orEmpty()
             if (error.contains("limit", ignoreCase = true) || error.contains("key", ignoreCase = true)) {
-                blockedKey = apiKey
+                block(apiKey)
                 return null
             }
+            // Doar „nu există” e un răspuns de păstrat; erorile trecătoare („Error getting data.”) se reîncearcă.
+            if (!error.contains("not found", ignoreCase = true) && !error.contains("incorrect", ignoreCase = true)) return null
         }
         val parsed = parse(response)
         cache[imdbId] = now() to parsed
@@ -104,7 +116,7 @@ class OmdbClient(
      * Gol când serialul nu e găsit, cheia lipsește sau limita zilnică e atinsă.
      */
     suspend fun seasonRatings(seriesImdbId: String, season: Int, apiKey: String): Map<Int, Double> {
-        if (apiKey.isBlank() || seriesImdbId.isBlank() || apiKey == blockedKey) return emptyMap()
+        if (apiKey.isBlank() || seriesImdbId.isBlank() || blocked(apiKey)) return emptyMap()
         val key = "$seriesImdbId:$season"
         seasonCache[key]?.let { (at, value) -> if (now() - at < ttlMillis) return value }
         val url = base.newBuilder()
@@ -116,7 +128,7 @@ class OmdbClient(
             withContext(Dispatchers.IO) {
                 http.newCall(Request.Builder().url(url).get().build()).execute().use { r ->
                     if (r.code == 401) {
-                        blockedKey = apiKey
+                        block(apiKey)
                         return@withContext null
                     }
                     if (!r.isSuccessful) return@withContext null
@@ -130,7 +142,7 @@ class OmdbClient(
         } ?: return emptyMap()
         if (response.response != "True") {
             val error = response.error.orEmpty()
-            if (error.contains("limit", ignoreCase = true) || error.contains("key", ignoreCase = true)) blockedKey = apiKey
+            if (error.contains("limit", ignoreCase = true) || error.contains("key", ignoreCase = true)) block(apiKey)
             return emptyMap()
         }
         val parsed = parseSeason(response)
@@ -146,13 +158,15 @@ class OmdbClient(
                 n to r
             }.toMap()
 
+        private const val BLOCK_MS = 60 * 60 * 1000L
         const val DEFAULT_BASE_URL = "https://www.omdbapi.com/"
         private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
 
         internal fun parse(response: OmdbResponse): ImdbRating? {
             if (response.response != "True") return null
             val rating = response.imdbRating?.toDoubleOrNull() ?: return null
-            val votes = response.imdbVotes?.replace(",", "")?.toIntOrNull() ?: return null
+            // Unele titluri au notă dar voturile „N/A”: nota contează oricum.
+            val votes = response.imdbVotes?.replace(",", "")?.toIntOrNull() ?: 0
             return ImdbRating(rating, votes)
         }
     }

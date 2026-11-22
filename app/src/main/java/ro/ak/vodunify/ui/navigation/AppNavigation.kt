@@ -288,42 +288,19 @@ private fun TopBar(
         }
         if (!spec.isCompact) {
             // Echilibrează marca din stânga, ca bara să rămână centrată pe ecran.
-            Spacer(Modifier.width(if (showBack) 24.dp else 155.dp))
+            Spacer(Modifier.width(if (showBack) 24.dp else 72.dp))
         }
     }
 }
 
-/** Sigla AK VOD Unify: triunghiul din A și K într-un cerc bleumarin, apoi „AK VOD Unify”. */
+/** Sigla AK VOD Unify: triunghiul roșu cu „UNIFY” scris de jos în sus (fără text alături). */
 @Composable
 private fun Brand(compact: Boolean) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier.size(if (compact) 28.dp else 32.dp).clip(CircleShape).background(Color(0xFF0D2340)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Image(
-                painterResource(R.drawable.ic_brand_mark),
-                contentDescription = "AK VOD Unify",
-                modifier = Modifier.size(if (compact) 16.dp else 19.dp).offset(x = 1.dp),
-            )
-        }
-        Spacer(Modifier.width(8.dp))
-        Text(
-            "AK VOD",
-            style = if (compact) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Black,
-            color = Color.White,
-        )
-        if (!compact) {
-            Spacer(Modifier.width(6.dp))
-            Text(
-                "Unify",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Medium,
-                color = Color(0xFF00B6F9),
-            )
-        }
-    }
+    Image(
+        painterResource(R.drawable.ic_brand_mark),
+        contentDescription = "AK VOD Unify",
+        modifier = Modifier.size(if (compact) 36.dp else 48.dp),
+    )
 }
 
 /**

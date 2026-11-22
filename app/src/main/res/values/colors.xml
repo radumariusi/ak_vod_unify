@@ -2,5 +2,5 @@
 <resources>
     <color name="background">#FF0C1017</color>
     <color name="accent">#FFE50914</color>
-    <color name="ic_launcher_background">#FF0D2340</color>
+    <color name="ic_launcher_background">#FF0C1017</color>
 </resources>

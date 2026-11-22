@@ -35,6 +35,12 @@ data class PersonalItem(
      * la o lansare pe streaming aplicația serviciului. Null = sigla obișnuită a titlului.
      */
     val appPackage: String? = null,
+    /** Data lansării / episodului (Noutăți, În curând), scrisă complet în hero. */
+    val eventDate: LocalDate? = null,
+    /** Codul episodului („S01E02”) la Noutăți / În curând seriale. */
+    val episodeCode: String? = null,
+    /** Când ai văzut ultima dată (Continuă vizionarea), epoch ms. */
+    val watchedAt: Long? = null,
 ) {
     /** Titlul ca element de catalog (pentru meniul rapid de la OK ținut apăsat). */
     fun asCatalogItem(): CatalogItem? = tmdbId?.let {
@@ -78,6 +84,19 @@ object HomeSections {
 
     fun dayLabel(d: LocalDate): String = dayFormat.format(d)
 
+    private val roLocale = Locale("ro", "RO")
+    private val fullDayFormat = DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy", roLocale)
+    private val timeFormat = DateTimeFormatter.ofPattern("HH:mm", roLocale)
+
+    /** Data completă, cu ziua săptămânii: „joi, 27 noiembrie 2026”. */
+    fun fullDayLabel(d: LocalDate): String = fullDayFormat.format(d)
+
+    /** Când ai văzut: „Văzut duminică, 22 noiembrie 2026, 21:30”. */
+    fun watchedLabel(epochMs: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String {
+        val t = java.time.Instant.ofEpochMilli(epochMs).atZone(zone)
+        return "Văzut ${fullDayLabel(t.toLocalDate())}, ${timeFormat.format(t)}"
+    }
+
     /**
      * Lansările unui film care contează în Acasă: cea în cinema (România bate SUA: dacă are dată în RO, nu mai
      * arătăm SUA) și cea „acasă” (pe un serviciu de streaming, cu ale tale întâi; altfel digital, SUA întâi).
@@ -108,7 +127,7 @@ object HomeSections {
                 ?.let { (r, d) -> Triple(f, r, d) }
         }
             .sortedByDescending { it.third }
-            .map { (f, r, d) -> item(f, prefix, dayLabel(d), r) }
+            .map { (f, r, d) -> item(f, prefix, dayLabel(d), r, d) }
 
     /** Filme care apar în următoarele luni, cele mai apropiate întâi; fiecare cu următoarea lui lansare. */
     fun soonMovies(list: List<FollowedTitle>, today: LocalDate, prefix: String = "soon"): List<PersonalItem> =
@@ -120,7 +139,7 @@ object HomeSections {
                 ?.let { (r, d) -> Triple(f, r, d) }
         }
             .sortedBy { it.third }
-            .map { (f, r, d) -> item(f, prefix, dayLabel(d), r) }
+            .map { (f, r, d) -> item(f, prefix, dayLabel(d), r, d) }
 
     /** Seriale cu un episod nou (ultima lună) pe care nu l-ai văzut încă. */
     fun newEpisodes(list: List<FollowedTitle>, today: LocalDate, days: Long = NEW_DAYS): List<PersonalItem> =
@@ -135,7 +154,7 @@ object HomeSections {
             Triple(f, ep, d)
         }
             .sortedByDescending { it.third }
-            .map { (f, ep, d) -> item(f, "new", "${ep.code} · ${dayLabel(d)}") }
+            .map { (f, ep, d) -> item(f, "new", "${ep.code} · ${dayLabel(d)}", date = d, code = ep.code) }
 
     /** Seriale cu episodul următor în perioada care vine. */
     fun soonEpisodes(list: List<FollowedTitle>, today: LocalDate): List<PersonalItem> =
@@ -146,9 +165,16 @@ object HomeSections {
             Triple(f, ep, d)
         }
             .sortedBy { it.third }
-            .map { (f, ep, d) -> item(f, "soon", "${ep.code} · ${dayLabel(d)}") }
+            .map { (f, ep, d) -> item(f, "soon", "${ep.code} · ${dayLabel(d)}", date = d, code = ep.code) }
 
-    private fun item(f: FollowedTitle, prefix: String, label: String, release: MovieReleaseEvent? = null): PersonalItem {
+    private fun item(
+        f: FollowedTitle,
+        prefix: String,
+        label: String,
+        release: MovieReleaseEvent? = null,
+        date: LocalDate? = null,
+        code: String? = null,
+    ): PersonalItem {
         val i = f.releases.item
         return PersonalItem(
             key = "$prefix:${i.mediaKey}",
@@ -163,6 +189,8 @@ object HomeSections {
             overview = i.overview,
             rating = i.rating,
             release = release?.takeIf { it.channel != ReleaseChannel.UNKNOWN },
+            eventDate = date,
+            episodeCode = code,
         )
     }
 }
@@ -196,6 +224,7 @@ object PersonalMapper {
             progress = e.progress,
             showsProgress = true,
             appPackage = e.appPackage,
+            watchedAt = e.updatedAt.takeIf { it > 0 },
         )
     }
 

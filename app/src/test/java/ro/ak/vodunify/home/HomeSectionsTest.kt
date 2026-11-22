@@ -106,4 +106,11 @@ class HomeSectionsTest {
         assertEquals("2", p["page"])
         assertNull(DiscoverQuery.params(DiscoverFilters(), 1, "ro-RO", today)["watch_region"])
     }
+
+    @Test
+    fun `full day label has the weekday`() {
+        assertEquals("joi, 26 noiembrie 2026", HomeSections.fullDayLabel(LocalDate.of(2026, 11, 26)))
+        val ms = java.time.ZonedDateTime.of(2026, 11, 22, 21, 30, 0, 0, java.time.ZoneId.of("Europe/Bucharest")).toInstant().toEpochMilli()
+        assertEquals("Văzut duminică, 22 noiembrie 2026, 21:30", HomeSections.watchedLabel(ms, java.time.ZoneId.of("Europe/Bucharest")))
+    }
 }
