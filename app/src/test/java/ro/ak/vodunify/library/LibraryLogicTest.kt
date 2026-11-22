@@ -45,6 +45,6 @@ class LibraryLogicTest {
         assertEquals(3, counts[null])
         assertEquals(2, counts["trakt"])
         val gotEntry = entries.first { it.titleKey == "tv:tmdb:1399" }
-        assertEquals("S01E02 · Poziție necunoscută", LibraryLogic.subtitle(gotEntry, LibraryTab.IN_PROGRESS))
+        assertEquals("S01E02", LibraryLogic.subtitle(gotEntry, LibraryTab.IN_PROGRESS))
     }
 }

@@ -118,11 +118,11 @@ object LibraryLogic {
         when {
             (tab == LibraryTab.IN_PROGRESS || tab == LibraryTab.ALL) && resume != null -> {
                 val r = resume.winner.ref
-                if (r.type == "EPISODE") PersonalMapper.episodeLabel(r.season, r.episode, null)?.let(parts::add)
-                parts += PersonalMapper.progressLabel(resume.progress)
+                if (r.type == "EPISODE") PersonalMapper.episodeLabel(r.season, r.episode)?.let(parts::add)
+                PersonalMapper.progressLabel(resume.progress)?.let(parts::add)
             }
             (tab == LibraryTab.UP_NEXT || tab == LibraryTab.ALL) && next != null ->
-                PersonalMapper.episodeLabel(next.ref.season, next.ref.episode, null)?.let { parts += "Urmează $it" }
+                PersonalMapper.episodeLabel(next.ref.season, next.ref.episode)?.let { parts += "Urmează $it" }
             tab == LibraryTab.WATCHLIST || (tab == LibraryTab.ALL && LibraryStatus.WATCHLIST in e.statuses && LibraryStatus.WATCHED !in e.statuses) ->
                 parts += "De văzut"
             LibraryStatus.WATCHED in e.statuses -> parts += if (e.ref.type == "MOVIE") "Văzut" else "Început"
