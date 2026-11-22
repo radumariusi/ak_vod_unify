@@ -59,7 +59,7 @@ class HomeSectionsTest {
         assertEquals(ReleaseChannel.CINEMA, new.single().release?.channel)
         // Streaming bate digitalul: „acasă” înseamnă Netflix.
         assertEquals(ReleaseChannel.STREAMING, soon.single().release?.channel)
-        assertEquals("20 ian", soon.single().subtitle)
+        assertEquals("20.01", soon.single().subtitle)
         // După data lansării în cinema, filmul trece în Noutăți.
         assertEquals(emptyList<Long>(), HomeSections.soonMovies(listOf(m), LocalDate.of(2027, 1, 21)).map { it.tmdbId })
     }
@@ -74,7 +74,7 @@ class HomeSectionsTest {
         )
         val out = HomeSections.newEpisodes(list, today)
         assertEquals(listOf(1L, 3L), out.map { it.tmdbId })
-        assertEquals("S02E05 · 18 nov", out.first().subtitle)
+        assertEquals("S02E05 · 18.11", out.first().subtitle)
     }
 
     @Test fun soonEpisodesInTheNextWeeks() {

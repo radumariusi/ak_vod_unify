@@ -39,7 +39,8 @@ class TmdbClient @Inject constructor(
         ttlMillis: Long = DEFAULT_TTL,
     ): T {
         val body = getRaw(path, params, ttlMillis)
-        return json.decodeFromString(serializer, body)
+        // Decodarea JSON (unele răspunsuri au zeci de KB) nu are voie pe firul interfeței: altfel derularea sacadează.
+        return withContext(Dispatchers.Default) { json.decodeFromString(serializer, body) }
     }
 
     /** Corpul JSON brut (din cache sau rețea), pentru cine își decodează singur DTO-urile (ex. Calendarul). */

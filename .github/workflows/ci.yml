@@ -31,7 +31,7 @@ jobs:
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
       - name: Build, lint, unit tests
-        run: ./gradlew --no-daemon assembleDebug lintDebug testDebugUnitTest :importer:lintRoDebug :importer:lintUsDebug
+        run: ./gradlew --no-daemon assembleDebug :app:assembleRelease lintDebug testDebugUnitTest :importer:lintRoDebug :importer:lintUsDebug
       - name: Show lint errors
         if: failure()
         run: |

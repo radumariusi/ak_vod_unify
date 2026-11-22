@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
@@ -88,7 +89,7 @@ class CalendarRepository @Inject constructor(
 
     private val fetch = object : TmdbFetch {
         override suspend fun <T> get(path: String, params: Map<String, String?>, serializer: KSerializer<T>, ttlMillis: Long): T =
-            json.decodeFromString(serializer, tmdb.getRaw(path, params, ttlMillis))
+            tmdb.getRaw(path, params, ttlMillis).let { body -> withContext(Dispatchers.Default) { json.decodeFromString(serializer, body) } }
     }
 
     private val episodeRepos = ConcurrentHashMap<String, EpisodeCalendarRepository>()

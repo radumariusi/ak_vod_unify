@@ -72,11 +72,11 @@ object HomeSections {
     const val SOON_MOVIE_DAYS = 90L
     const val SOON_EPISODE_DAYS = 60L
 
-    private val dayFormat = DateTimeFormatter.ofPattern("d MMM", Locale.forLanguageTag("ro-RO"))
+    private val dayFormat = DateTimeFormatter.ofPattern("dd.MM")
 
     private fun date(s: String?): LocalDate? = s?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
 
-    fun dayLabel(d: LocalDate): String = dayFormat.format(d).replace(".", "")
+    fun dayLabel(d: LocalDate): String = dayFormat.format(d)
 
     /**
      * Lansările unui film care contează în Acasă: cea în cinema (România bate SUA: dacă are dată în RO, nu mai

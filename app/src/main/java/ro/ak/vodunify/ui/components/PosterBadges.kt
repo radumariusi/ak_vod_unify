@@ -41,6 +41,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
+import android.content.Context
+import android.util.LruCache
 import androidx.compose.ui.graphics.painter.Painter
 import coil.compose.AsyncImage
 import ro.ak.vodunify.core.playback.AppRole
@@ -80,16 +82,69 @@ fun PosterLabel(text: String, modifier: Modifier = Modifier) {
     }
 }
 
+/** O informație despre un titlu, cu ce se știe deja ([peek], fără așteptare) și aflarea ei ([load], în fundal). */
+class TitleLookup<T : Any>(
+    val peek: (TitleKind, Long) -> T?,
+    val load: suspend (TitleKind, Long) -> T?,
+)
+
+/** La fel, după o cheie (pachetul aplicației, id-ul serviciului). */
+class KeyLookup(
+    val peek: (String) -> String?,
+    val load: suspend (String) -> String?,
+)
+
 /**
  * Cum află un poster sigla pătrată a unui serviciu de streaming (Netflix „N”…): după pachetul aplicației sau
  * după id-ul serviciului ([ro.ak.vodunify.core.playback.StreamingService.id]). Dat de AppNavigation.
  */
-class ServiceLogoLookup(
-    val byPackage: suspend (String) -> String?,
-    val byService: suspend (String) -> String?,
-)
+class ServiceLogoLookup(val byPackage: KeyLookup, val byService: KeyLookup)
 
 val LocalServiceLogos = staticCompositionLocalOf<ServiceLogoLookup?> { null }
+
+/**
+ * Ce se știe deja (din [KeyLookup.peek]) se arată din primul cadru; altfel se află în fundal. [ready] devine
+ * true după răspuns (cu sau fără siglă).
+ */
+@Composable
+private fun rememberKeyLookup(lookup: KeyLookup?, key: String?): Pair<String?, Boolean> {
+    val initial = remember(lookup, key) { if (lookup == null || key == null) null else lookup.peek(key) }
+    var url by remember(lookup, key) { mutableStateOf(initial) }
+    var ready by remember(lookup, key) { mutableStateOf(lookup == null || key == null || initial != null) }
+    if (!ready && lookup != null && key != null) {
+        LaunchedEffect(lookup, key) {
+            url = runCatching { lookup.load(key) }.getOrNull()
+            ready = true
+        }
+    }
+    return url to ready
+}
+
+/**
+ * Iconițele aplicațiilor, citite o singură dată din sistem (citirea e lentă și se făcea la fiecare poster
+ * desenat, pe firul interfeței: derularea sacada).
+ */
+private object AppIcons {
+    private val icons = LruCache<String, Any>(64)
+    private val labels = LruCache<String, String>(64)
+    private val NONE = Any()
+
+    fun icon(context: Context, packageName: String): ImageBitmap? {
+        icons.get(packageName)?.let { return it as? ImageBitmap }
+        val bitmap = runCatching { context.packageManager.getApplicationIcon(packageName).toBitmap(96, 96).asImageBitmap() }.getOrNull()
+        icons.put(packageName, bitmap ?: NONE)
+        return bitmap
+    }
+
+    fun label(context: Context, packageName: String): String? {
+        labels.get(packageName)?.let { return it.ifEmpty { null } }
+        val label = runCatching {
+            context.packageManager.let { pm -> pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString() }
+        }.getOrNull()
+        labels.put(packageName, label.orEmpty())
+        return label
+    }
+}
 
 /** O siglă pătrată (imagine), cât o etichetă, cu aceleași colțuri, fără chenar. */
 @Composable
@@ -129,24 +184,13 @@ private fun LetterLogo(name: String, modifier: Modifier = Modifier) {
 @Composable
 fun AppIconBadge(packageName: String, modifier: Modifier = Modifier, fallbackLabel: String? = null) {
     val context = LocalContext.current
-    val lookup = LocalServiceLogos.current
     val isService = remember(packageName) { TargetApp.byPackage(packageName)?.role == AppRole.OFFICIAL }
-    var logoUrl by remember(packageName) { mutableStateOf<String?>(null) }
-    var looking by remember(packageName) { mutableStateOf(lookup != null && isService) }
-    LaunchedEffect(packageName, lookup) {
-        if (lookup != null && isService) {
-            logoUrl = runCatching { lookup.byPackage(packageName) }.getOrNull()
-            looking = false
-        }
-    }
-    val icon: ImageBitmap? = remember(packageName) {
-        runCatching { context.packageManager.getApplicationIcon(packageName).toBitmap(96, 96).asImageBitmap() }.getOrNull()
-    }
+    val (logoUrl, ready) = rememberKeyLookup(LocalServiceLogos.current?.byPackage, packageName.takeIf { isService })
+    val icon = remember(packageName) { AppIcons.icon(context, packageName) }
     val iconPainter = remember(icon) { icon?.let { BitmapPainter(it) } }
-    val url = logoUrl
     when {
-        url != null -> SquareLogo(url, iconPainter, modifier)
-        looking -> Box(modifier.size(BadgeHeight))
+        logoUrl != null -> SquareLogo(logoUrl, iconPainter, modifier)
+        !ready -> Box(modifier.size(BadgeHeight))
         icon != null -> Image(
             icon,
             contentDescription = null,
@@ -154,11 +198,7 @@ fun AppIconBadge(packageName: String, modifier: Modifier = Modifier, fallbackLab
             modifier = modifier.size(BadgeHeight).clip(BadgeShape),
         )
         else -> {
-            val label = fallbackLabel ?: remember(packageName) {
-                runCatching {
-                    context.packageManager.let { pm -> pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString() }
-                }.getOrNull()
-            }
+            val label = fallbackLabel ?: remember(packageName) { AppIcons.label(context, packageName) }
             label?.takeIf { it.isNotBlank() }?.let { LetterLogo(it, modifier) }
         }
     }
@@ -170,34 +210,55 @@ fun AppIconBadge(packageName: String, modifier: Modifier = Modifier, fallbackLab
  */
 @Composable
 fun ServiceLogoBadge(serviceId: String?, name: String, modifier: Modifier = Modifier) {
-    val lookup = LocalServiceLogos.current
-    var logoUrl by remember(serviceId) { mutableStateOf<String?>(null) }
-    var looking by remember(serviceId) { mutableStateOf(lookup != null && serviceId != null) }
-    LaunchedEffect(serviceId, lookup) {
-        if (lookup != null && serviceId != null) {
-            logoUrl = runCatching { lookup.byService(serviceId) }.getOrNull()
-            looking = false
-        }
-    }
-    val url = logoUrl
+    val (logoUrl, ready) = rememberKeyLookup(LocalServiceLogos.current?.byService, serviceId)
     when {
-        url != null -> SquareLogo(url, null, modifier)
-        looking -> Box(modifier.size(BadgeHeight))
+        logoUrl != null -> SquareLogo(logoUrl, null, modifier)
+        !ready -> Box(modifier.size(BadgeHeight))
         else -> LetterLogo(name, modifier)
     }
 }
 
 /** Cum află un poster sigla lui (platforma ta pe care e titlul sau playerul standard); dat de AppNavigation. */
-val LocalPosterBadge = staticCompositionLocalOf<(suspend (TitleKind, Long) -> PosterBadge?)?> { null }
+val LocalPosterBadge = staticCompositionLocalOf<TitleLookup<PosterBadge>?> { null }
+
+/** O informație despre titlu: ce se știe deja din primul cadru, restul în fundal. */
+@Composable
+private fun <T : Any> rememberTitleLookup(lookup: TitleLookup<T>?, kind: TitleKind, id: Long?): T? {
+    val initial = remember(lookup, kind, id) { if (lookup == null || id == null) null else lookup.peek(kind, id) }
+    var value by remember(lookup, kind, id) { mutableStateOf(initial) }
+    if (initial == null && lookup != null && id != null) {
+        LaunchedEffect(lookup, kind, id) { value = runCatching { lookup.load(kind, id) }.getOrNull() }
+    }
+    return value
+}
 
 /** Sigla platformei / playerului pe un poster din catalog; nimic până se află (sau dacă nu e de unde). */
 @Composable
 fun PlatformBadge(kind: TitleKind, id: Long?, modifier: Modifier = Modifier) {
-    val source = LocalPosterBadge.current ?: return
-    if (id == null) return
-    var badge by remember(kind, id) { mutableStateOf<PosterBadge?>(null) }
-    LaunchedEffect(kind, id) { badge = runCatching { source(kind, id) }.getOrNull() }
+    val badge = rememberTitleLookup(LocalPosterBadge.current, kind, id)
     badge?.let { AppIconBadge(it.packageName, modifier, fallbackLabel = it.label) }
+}
+
+/**
+ * Ce siglă stă lângă un titlu: aplicația (pachetul), cinema RO / SUA, un serviciu neinstalat sau un text scurt
+ * („Digital US”). Null = sigla platformei din catalog ([PlatformBadge]). Aceeași pe poster și în hero.
+ */
+sealed interface BadgeSpec {
+    data class App(val packageName: String, val label: String? = null) : BadgeSpec
+    data class Cinema(val region: String) : BadgeSpec
+    data class Service(val serviceId: String?, val name: String) : BadgeSpec
+    data class Label(val text: String) : BadgeSpec
+}
+
+@Composable
+fun TitleBadge(spec: BadgeSpec?, kind: TitleKind, id: Long?, modifier: Modifier = Modifier) {
+    when (spec) {
+        null -> PlatformBadge(kind, id, modifier)
+        is BadgeSpec.App -> AppIconBadge(spec.packageName, modifier, fallbackLabel = spec.label)
+        is BadgeSpec.Cinema -> CinemaBadge(spec.region, modifier)
+        is BadgeSpec.Service -> ServiceLogoBadge(spec.serviceId, spec.name, modifier)
+        is BadgeSpec.Label -> PosterLabel(spec.text, modifier)
+    }
 }
 
 /**
@@ -255,16 +316,12 @@ fun CinemaBadge(region: String, modifier: Modifier = Modifier) {
 }
 
 /** Cum află un poster nota IMDb (prin cheia OMDb); dat de AppNavigation. */
-val LocalImdbRating = staticCompositionLocalOf<(suspend (TitleKind, Long) -> Double?)?> { null }
+val LocalImdbRating = staticCompositionLocalOf<TitleLookup<Double>?> { null }
 
 /** Notele de pe poster, sus: TMDb și, alături, IMDb (când se știe). */
 @Composable
 fun PosterRatings(kind: TitleKind, id: Long?, tmdb: Double?, modifier: Modifier = Modifier) {
-    val source = LocalImdbRating.current
-    var imdb by remember(kind, id) { mutableStateOf<Double?>(null) }
-    LaunchedEffect(kind, id) {
-        if (source != null && id != null) imdb = runCatching { source(kind, id) }.getOrNull()
-    }
+    val imdb = rememberTitleLookup(LocalImdbRating.current, kind, id)
     val t = tmdb?.takeIf { it > 0 }
     val i = imdb?.takeIf { it > 0 }
     if (t == null && i == null) return

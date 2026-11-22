@@ -28,6 +28,10 @@ class TitleImdbRatings @Inject constructor(
 ) {
     private val prefs = context.getSharedPreferences("omdb_ratings", Context.MODE_PRIVATE)
     private val ids = ConcurrentHashMap<String, String>()
+    /** Notele aflate în sesiunea asta, după titlul TMDb (0 = fără notă), ca posterele să le arate pe loc. */
+    private val known = ConcurrentHashMap<String, Double>()
+
+    fun peek(kind: TitleKind, id: Long): Double? = known["${kind.path}:$id"]?.takeIf { it > 0 }
     private val gate = Semaphore(4)
 
     init {
@@ -35,20 +39,26 @@ class TitleImdbRatings @Inject constructor(
         runCatching { java.io.File(context.filesDir, "imdb_ratings.bin").delete() }
     }
 
-    suspend fun rating(kind: TitleKind, id: Long): Double? {
-        if (!tmdb.isConfigured) return null
+    suspend fun rating(kind: TitleKind, id: Long): Double? = withContext(Dispatchers.IO) {
         val key = "${kind.path}:$id"
+        known[key]?.let { return@withContext it.takeIf { r -> r > 0 } }
+        lookup(kind, id, key)?.also { known[key] = it }?.takeIf { it > 0 }
+    }
+
+    /** Nota (0 = OMDb nu are notă) sau null = nu se știe încă (fără cheie, fără rețea). */
+    private suspend fun lookup(kind: TitleKind, id: Long, key: String): Double? {
+        if (!tmdb.isConfigured) return null
         val imdb = ids[key] ?: gate.withPermit {
             runCatching {
                 tmdb.get("${kind.path}/$id/external_ids", emptyMap(), TmdbExternalIds.serializer(), TmdbClient.LONG_TTL).imdbId
             }.getOrNull()
         }?.takeIf { it.isNotBlank() }?.also { ids[key] = it } ?: return null
-        cached(imdb)?.let { return it.takeIf { r -> r > 0 } }
+        cached(imdb)?.let { return it }
         val answer = gate.withPermit { runCatching { calendar.imdbRating(imdb) }.getOrNull() } ?: return null
-        if (answer.answered) withContext(Dispatchers.IO) {
-            prefs.edit().putString(imdb, "${answer.rating ?: 0.0}|${System.currentTimeMillis()}").apply()
-        }
-        return answer.rating
+        if (!answer.answered) return null
+        val rating = answer.rating ?: 0.0
+        prefs.edit().putString(imdb, "$rating|${System.currentTimeMillis()}").apply()
+        return rating
     }
 
     /** Nota păstrată (0 = OMDb a spus că nu are notă), dacă nu e prea veche. */

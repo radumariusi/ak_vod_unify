@@ -6,6 +6,8 @@ import ro.ak.vodunify.ui.components.LocalPosterBadge
 import ro.ak.vodunify.ui.components.LocalImdbRating
 import ro.ak.vodunify.ui.components.LocalServiceLogos
 import ro.ak.vodunify.ui.components.ServiceLogoLookup
+import ro.ak.vodunify.ui.components.TitleLookup
+import ro.ak.vodunify.ui.components.KeyLookup
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
@@ -143,12 +145,16 @@ fun AppNavigation() {
     TitleMenuHost(titleMenu, onOpen = { kind, id -> nav.navigate(Routes.title(kind, id)) })
 
     val badgesModel: PosterBadgesViewModel = hiltViewModel()
-    val posterBadge: suspend (TitleKind, Long) -> PosterBadge? = remember(badgesModel) { { kind, id -> badgesModel.badge(kind, id) } }
-    val imdbRating: suspend (TitleKind, Long) -> Double? = remember(badgesModel) { { kind, id -> badgesModel.imdbRating(kind, id) } }
+    val posterBadge = remember(badgesModel) {
+        TitleLookup(peek = badgesModel::peekBadge, load = { kind, id -> badgesModel.badge(kind, id) })
+    }
+    val imdbRating = remember(badgesModel) {
+        TitleLookup(peek = badgesModel::peekImdbRating, load = { kind, id -> badgesModel.imdbRating(kind, id) })
+    }
     val serviceLogos = remember(badgesModel) {
         ServiceLogoLookup(
-            byPackage = { pkg -> badgesModel.serviceLogoForPackage(pkg) },
-            byService = { id -> badgesModel.serviceLogo(id) },
+            byPackage = KeyLookup(peek = badgesModel::peekServiceLogoForPackage, load = { badgesModel.serviceLogoForPackage(it) }),
+            byService = KeyLookup(peek = badgesModel::peekServiceLogo, load = { badgesModel.serviceLogo(it) }),
         )
     }
 

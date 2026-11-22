@@ -63,7 +63,9 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 optimizează Compose și bibliotecile (cod mai rapid, derulare mai fluidă pe TV). Fără redenumiri
+            // și cu tot codul aplicației păstrat (proguard-rules.pro), ca nimic să nu se strice la rulare.
+            isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfigs.findByName("release")?.let { signingConfig = it }
         }

@@ -18,17 +18,26 @@ class ServiceLogos @Inject constructor(private val tmdb: TmdbClient) {
     @Volatile private var logos: Map<Int, String>? = null
     @Volatile private var failedAt = 0L
 
+    /** Sigla deja știută (fără așteptare), ca eticheta s-o arate din primul cadru. */
+    fun peekPackage(packageName: String): String? = logos?.let { map -> serviceOf(packageName)?.let { s -> pick(map, s) } }
+
+    fun peekService(service: StreamingService): String? = logos?.let { pick(it, service) }
+
+    private fun serviceOf(packageName: String): StreamingService? {
+        val app = TargetApp.byPackage(packageName) ?: return null
+        return StreamingService.entries.firstOrNull { it.appId == app.id }
+    }
+
+    private fun pick(map: Map<Int, String>, service: StreamingService): String? =
+        service.tmdbProviderIds.firstNotNullOfOrNull { map[it] }
+
     /** Sigla pătrată a aplicației [packageName], dacă e aplicația unui serviciu de streaming; null pentru playere. */
     suspend fun forPackage(packageName: String): String? {
-        val app = TargetApp.byPackage(packageName) ?: return null
-        val service = StreamingService.entries.firstOrNull { it.appId == app.id } ?: return null
+        val service = serviceOf(packageName) ?: return null
         return forService(service)
     }
 
-    suspend fun forService(service: StreamingService): String? {
-        val map = load()
-        return service.tmdbProviderIds.firstNotNullOfOrNull { map[it] }
-    }
+    suspend fun forService(service: StreamingService): String? = pick(load(), service)
 
     private suspend fun load(): Map<Int, String> {
         logos?.let { return it }
