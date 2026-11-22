@@ -40,6 +40,7 @@ import kotlinx.coroutines.withContext
 import ro.ak.vodunify.ui.components.LoadState
 import ro.ak.vodunify.ui.components.loadCatching
 import javax.inject.Inject
+import ro.ak.vodunify.core.calendar.android.CalendarRepository
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
@@ -50,6 +51,7 @@ class DetailsViewModel @Inject constructor(
     prefs: CatalogPreferences,
     playbackPrefs: PlaybackPreferences,
     private val resolver: TargetResolver,
+    private val calendar: CalendarRepository,
 ) : ViewModel() {
 
     val kind: TitleKind = TitleKind.fromPath(savedState.get<String>("kind")) ?: TitleKind.MOVIE
@@ -94,7 +96,15 @@ class DetailsViewModel @Inject constructor(
             } else {
                 flow<LoadState<Season>?> {
                     emit(LoadState.Loading)
-                    emit(loadCatching { catalog.season(id, n, s) })
+                    val season = loadCatching { catalog.season(id, n, s) }
+                    emit(season)
+                    // Apoi notele IMDb ale episoadelor (o cerere OMDb pe sezon), dacă avem cheia.
+                    val data = (season as? LoadState.Data)?.value ?: return@flow
+                    val imdbId = (state.value as? LoadState.Data)?.value?.imdbId ?: return@flow
+                    val ratings = runCatching { calendar.episodeImdbRatings(imdbId, n) }.getOrDefault(emptyMap())
+                    if (ratings.isNotEmpty()) {
+                        emit(LoadState.Data(data.copy(episodes = data.episodes.map { it.copy(imdbRating = ratings[it.number]) })))
+                    }
                 }
             }
         }

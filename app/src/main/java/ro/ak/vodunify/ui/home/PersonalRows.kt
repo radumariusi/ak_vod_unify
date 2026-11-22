@@ -1,6 +1,8 @@
 package ro.ak.vodunify.ui.home
 
 import ro.ak.vodunify.core.catalog.CatalogItem
+import ro.ak.vodunify.core.catalog.MovieReleaseEvent
+import ro.ak.vodunify.core.catalog.ReleaseChannel
 import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.core.catalog.TitleReleases
 import java.time.LocalDate
@@ -26,6 +28,13 @@ data class PersonalItem(
     /** Descrierea din TMDb, pentru hero-ul din Acasă. */
     val overview: String = "",
     val rating: Double? = null,
+    /** La filmele din „În curând” / „Noutăți”: lansarea arătată (cinema RO / US, streaming, digital). */
+    val release: MovieReleaseEvent? = null,
+    /**
+     * Sigla de pe card: la Continuă vizionarea aplicația în care ai văzut ultima dată (acolo continui standard),
+     * la o lansare pe streaming aplicația serviciului. Null = sigla obișnuită a titlului.
+     */
+    val appPackage: String? = null,
 ) {
     /** Titlul ca element de catalog (pentru meniul rapid de la OK ținut apăsat). */
     fun asCatalogItem(): CatalogItem? = tmdbId?.let {
@@ -69,26 +78,56 @@ object HomeSections {
 
     fun dayLabel(d: LocalDate): String = dayFormat.format(d).replace(".", "")
 
-    /** Filme din Lista mea apărute în ultima lună, cele mai noi întâi. */
-    fun newMovies(list: List<FollowedTitle>, today: LocalDate): List<PersonalItem> =
-        list.mapNotNull { f -> date(f.releases.releaseDate)?.let { f to it } }
-            .filter { (_, d) -> !d.isAfter(today) && !d.isBefore(today.minusDays(NEW_DAYS)) }
-            .sortedByDescending { it.second }
-            .map { (f, d) -> item(f, "new", dayLabel(d)) }
+    /**
+     * Lansările unui film care contează în Acasă: cea în cinema (România bate SUA: dacă are dată în RO, nu mai
+     * arătăm SUA) și cea „acasă” (pe un serviciu de streaming, cu ale tale întâi; altfel digital, SUA întâi).
+     * Un film poate apărea astfel și în „Noutăți” (a ieșit în cinema) și în „În curând” (vine digital).
+     */
+    fun homeReleases(t: TitleReleases): List<MovieReleaseEvent> {
+        val all = t.movieReleases.filter { date(it.date) != null }
+        if (all.isEmpty()) {
+            return listOfNotNull(t.releaseDate?.takeIf { date(it) != null }?.let { MovieReleaseEvent(ReleaseChannel.UNKNOWN, "", it) })
+        }
+        val cinema = all.filter { it.channel == ReleaseChannel.CINEMA }.let { c -> c.firstOrNull { it.region == "RO" } ?: c.firstOrNull { it.region == "US" } }
+        val streaming = all.filter { it.channel == ReleaseChannel.STREAMING }
+            .sortedWith(compareBy({ !it.mine }, { it.region != "US" }, { it.date }))
+            .firstOrNull()
+        val digital = all.filter { it.channel == ReleaseChannel.DIGITAL }
+            .sortedWith(compareBy({ it.region != "US" }, { it.date }))
+            .firstOrNull()
+        return listOfNotNull(cinema, streaming ?: digital)
+    }
 
-    /** Filme din Lista mea care apar în următoarele luni, cele mai apropiate întâi. */
-    fun soonMovies(list: List<FollowedTitle>, today: LocalDate): List<PersonalItem> =
-        list.mapNotNull { f -> date(f.releases.releaseDate)?.let { f to it } }
-            .filter { (_, d) -> d.isAfter(today) && !d.isAfter(today.plusDays(SOON_MOVIE_DAYS)) }
-            .sortedBy { it.second }
-            .map { (f, d) -> item(f, "soon", dayLabel(d)) }
+    /** Filme apărute în ultima lună (în cinema sau acasă), cele mai noi întâi; fiecare cu ultima lui lansare. */
+    fun newMovies(list: List<FollowedTitle>, today: LocalDate, prefix: String = "new"): List<PersonalItem> =
+        list.mapNotNull { f ->
+            homeReleases(f.releases)
+                .mapNotNull { r -> date(r.date)?.let { r to it } }
+                .filter { (_, d) -> !d.isAfter(today) && !d.isBefore(today.minusDays(NEW_DAYS)) }
+                .maxByOrNull { it.second }
+                ?.let { (r, d) -> Triple(f, r, d) }
+        }
+            .sortedByDescending { it.third }
+            .map { (f, r, d) -> item(f, prefix, dayLabel(d), r) }
+
+    /** Filme care apar în următoarele luni, cele mai apropiate întâi; fiecare cu următoarea lui lansare. */
+    fun soonMovies(list: List<FollowedTitle>, today: LocalDate, prefix: String = "soon"): List<PersonalItem> =
+        list.mapNotNull { f ->
+            homeReleases(f.releases)
+                .mapNotNull { r -> date(r.date)?.let { r to it } }
+                .filter { (_, d) -> d.isAfter(today) && !d.isAfter(today.plusDays(SOON_MOVIE_DAYS)) }
+                .minByOrNull { it.second }
+                ?.let { (r, d) -> Triple(f, r, d) }
+        }
+            .sortedBy { it.third }
+            .map { (f, r, d) -> item(f, prefix, dayLabel(d), r) }
 
     /** Seriale cu un episod nou (ultima lună) pe care nu l-ai văzut încă. */
-    fun newEpisodes(list: List<FollowedTitle>, today: LocalDate): List<PersonalItem> =
+    fun newEpisodes(list: List<FollowedTitle>, today: LocalDate, days: Long = NEW_DAYS): List<PersonalItem> =
         list.mapNotNull { f ->
             val ep = f.releases.lastEpisode ?: return@mapNotNull null
             val d = date(ep.airDate) ?: return@mapNotNull null
-            if (d.isAfter(today) || d.isBefore(today.minusDays(NEW_DAYS))) return@mapNotNull null
+            if (d.isAfter(today) || d.isBefore(today.minusDays(days))) return@mapNotNull null
             val seen = f.lastSeen
             if (seen != null && compareValues(seen.first, ep.season).let { it > 0 || (it == 0 && seen.second >= ep.episode) }) {
                 return@mapNotNull null
@@ -109,7 +148,7 @@ object HomeSections {
             .sortedBy { it.third }
             .map { (f, ep, d) -> item(f, "soon", "${ep.code} · ${dayLabel(d)}") }
 
-    private fun item(f: FollowedTitle, prefix: String, label: String): PersonalItem {
+    private fun item(f: FollowedTitle, prefix: String, label: String, release: MovieReleaseEvent? = null): PersonalItem {
         val i = f.releases.item
         return PersonalItem(
             key = "$prefix:${i.mediaKey}",
@@ -123,6 +162,7 @@ object HomeSections {
             showsProgress = false,
             overview = i.overview,
             rating = i.rating,
+            release = release?.takeIf { it.channel != ReleaseChannel.UNKNOWN },
         )
     }
 }
@@ -131,18 +171,18 @@ object HomeSections {
 object PersonalMapper {
     fun kind(ref: TrackedRef): TitleKind = if (ref.type == "MOVIE") TitleKind.MOVIE else TitleKind.TV
 
-    fun episodeLabel(season: Int?, episode: Int?, title: String?): String? {
-        if (season == null || episode == null) return title
-        val code = "S%02dE%02d".format(season, episode)
-        return if (title.isNullOrBlank()) code else "$code · $title"
+    /** Pe carduri episodul apare doar ca sezon + număr („S01E02”); numele lui e doar în fișa serialului. */
+    fun episodeLabel(season: Int?, episode: Int?): String? {
+        if (season == null || episode == null) return null
+        return "S%02dE%02d".format(season, episode)
     }
 
-    fun progressLabel(progress: Float?): String =
-        progress?.let { "${(it * 100).toInt()}% văzut" } ?: "Poziție necunoscută"
+    /** Procentul văzut („42%”); null = poziție necunoscută (nu scriem 0%). */
+    fun progressLabel(progress: Float?): String? = progress?.let { "${(it * 100).toInt()}%" }
 
     fun resume(e: ResumePointEntity, art: CatalogItem?): PersonalItem {
         val k = kind(e.ref)
-        val detail = if (e.ref.type == "EPISODE") episodeLabel(e.ref.season, e.ref.episode, e.ref.episodeTitle) else e.ref.year?.toString()
+        val detail = if (e.ref.type == "EPISODE") episodeLabel(e.ref.season, e.ref.episode) else null
         return PersonalItem(
             key = "resume:${e.id}",
             kind = k,
@@ -155,6 +195,7 @@ object PersonalMapper {
             rating = art?.rating,
             progress = e.progress,
             showsProgress = true,
+            appPackage = e.appPackage,
         )
     }
 
@@ -166,7 +207,7 @@ object PersonalMapper {
             tmdbId = e.ref.tmdbId,
             title = art?.title ?: e.ref.title,
             subtitle = listOfNotNull(
-                episodeLabel(e.ref.season, e.ref.episode, e.ref.episodeTitle),
+                episodeLabel(e.ref.season, e.ref.episode),
                 if (left > 0) "încă $left" else null,
             ).joinToString(" · "),
             backdropUrl = art?.backdropUrl,

@@ -4,7 +4,6 @@ import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.core.playback.PosterBadge
 import ro.ak.vodunify.ui.components.LocalPosterBadge
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.horizontalScroll
@@ -65,7 +64,6 @@ import ro.ak.vodunify.ui.calendar.CalendarScreen
 import ro.ak.vodunify.ui.components.BackdropState
 import ro.ak.vodunify.ui.components.Button
 import ro.ak.vodunify.ui.components.ExpireFocusRestore
-import ro.ak.vodunify.ui.components.FocusBorderWidth
 import ro.ak.vodunify.ui.components.FocusRestore
 import ro.ak.vodunify.ui.components.IconButton
 import ro.ak.vodunify.ui.components.LocalBackdrop
@@ -82,7 +80,13 @@ import ro.ak.vodunify.ui.search.SearchScreen
 import ro.ak.vodunify.ui.discover.DiscoverScreen
 import ro.ak.vodunify.ui.settings.SettingsScreen
 import ro.ak.vodunify.ui.studio.StudioScreen
-import ro.ak.vodunify.ui.theme.FocusBorder
+import ro.ak.vodunify.ui.theme.FocusFill
+import ro.ak.vodunify.ui.theme.GlassActive
+import ro.ak.vodunify.ui.theme.GlassBar
+import ro.ak.vodunify.ui.theme.GlassIdle
+import ro.ak.vodunify.ui.theme.OnFocusFill
+import ro.ak.vodunify.ui.theme.PillShape
+import androidx.compose.ui.graphics.Brush
 import ro.ak.vodunify.ui.components.TitleMenuHost
 import ro.ak.vodunify.ui.components.TitleMenuViewModel
 
@@ -187,8 +191,9 @@ fun AppNavigation() {
 }
 
 /**
- * Meniul de sus, ca în AK VOD Hub: marca AK VOD în stânga, filele centrate (text, cu un singur indicator roșu
- * sub fila activă) și focus distinct (contur alb). Sus din conținut intră direct în fila activă.
+ * Meniul de sus: marca AK VOD în stânga, apoi o capsulă din „sticlă” cu căutarea și filele, iar în dreapta
+ * o capsulă cu Setările. Fila curentă = sticlă mai deschisă, fila cu focus = alb plin cu text închis
+ * (aceeași identitate ca toate butoanele). Sus din conținut intră direct în fila curentă.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -202,18 +207,22 @@ private fun TopBar(
     val tabs = remember { TopDestination.entries.associateWith { FocusRequester() } }
     val active = TopDestination.entries.firstOrNull { it.route == current }
     val scroll = rememberScrollState()
+    val textTabs = TopDestination.entries.filter { !it.iconTab }
+    val iconTabs = TopDestination.entries.filter { it.iconTab && it != TopDestination.SEARCH }
     Row(
         Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
-            .padding(horizontal = if (spec.isCompact) 8.dp else 20.dp, vertical = if (spec.isTv) 10.dp else 6.dp),
+            .background(Brush.verticalGradient(listOf(Color(0xB3000000), Color.Transparent)))
+            .padding(horizontal = if (spec.isCompact) 8.dp else 24.dp, vertical = if (spec.isTv) 12.dp else 6.dp)
+            .focusProperties { enter = { tabs[active ?: TopDestination.HOME] ?: FocusRequester.Default } }
+            .focusGroup(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (showBack) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Înapoi")
             }
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(8.dp))
         }
         if (!spec.isCompact || !showBack) {
             Brand(compact = spec.isCompact)
@@ -223,14 +232,19 @@ private fun TopBar(
             Row(
                 Modifier
                     .horizontalScroll(scroll)
-                    .focusProperties {
-                        enter = { tabs[active ?: TopDestination.HOME] ?: FocusRequester.Default }
-                    }
-                    .focusGroup(),
-                horizontalArrangement = Arrangement.spacedBy(if (spec.isCompact) 4.dp else 6.dp),
+                    .background(GlassBar, PillShape)
+                    .padding(if (spec.isCompact) 4.dp else 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (spec.isCompact) 2.dp else 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TopDestination.entries.forEach { dest ->
+                NavTab(
+                    dest = TopDestination.SEARCH,
+                    active = active == TopDestination.SEARCH,
+                    iconOnly = true,
+                    modifier = Modifier.focusRequester(tabs.getValue(TopDestination.SEARCH)),
+                    onClick = { onSelect(TopDestination.SEARCH) },
+                )
+                textTabs.forEach { dest ->
                     NavTab(
                         dest = dest,
                         active = dest == active,
@@ -241,9 +255,23 @@ private fun TopBar(
                 }
             }
         }
-        if (!spec.isCompact) {
-            // Echilibrează marca din stânga, ca filele să rămână centrate pe ecran.
-            Spacer(Modifier.width(if (showBack) 24.dp else 60.dp))
+        Spacer(Modifier.width(if (spec.isCompact) 6.dp else 16.dp))
+        Row(
+            Modifier
+                .background(GlassBar, PillShape)
+                .padding(if (spec.isCompact) 4.dp else 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            iconTabs.forEach { dest ->
+                NavTab(
+                    dest = dest,
+                    active = dest == active,
+                    iconOnly = true,
+                    modifier = Modifier.focusRequester(tabs.getValue(dest)),
+                    onClick = { onSelect(dest) },
+                )
+            }
         }
     }
 }
@@ -263,12 +291,16 @@ private fun Brand(compact: Boolean) {
                 "Unify",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Color.White.copy(alpha = 0.8f),
             )
         }
     }
 }
 
+/**
+ * O filă din meniu. În repaus: doar text alb îngroșat (iconițele: cerc de sticlă); fila curentă: capsulă de
+ * sticlă mai deschisă; cu focus: capsulă albă plină, text bleumarin. Fără linie sub fila curentă.
+ */
 @Composable
 private fun NavTab(
     dest: TopDestination,
@@ -279,44 +311,36 @@ private fun NavTab(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    val c = MaterialTheme.colorScheme
+    val spec = layoutSpec()
     Surface(
         onClick = onClick,
         modifier = modifier.semantics {
             selected = active
             role = Role.Tab
         },
-        shape = MaterialTheme.shapes.medium,
-        color = if (focused) c.surfaceVariant else Color.Transparent,
-        contentColor = if (active || focused) c.onSurface else c.onSurfaceVariant,
-        border = if (focused) BorderStroke(FocusBorderWidth, FocusBorder) else null,
+        shape = PillShape,
+        color = when {
+            focused -> FocusFill
+            active -> GlassActive
+            iconOnly -> GlassIdle
+            else -> Color.Transparent
+        },
+        contentColor = if (focused) OnFocusFill else Color.White,
         interactionSource = interaction,
     ) {
-        // Textul stă centrat pe verticală; indicatorul roșu e desenat peste marginea de jos, fără să-l împingă în sus.
-        Box(contentAlignment = Alignment.Center) {
+        if (iconOnly) {
+            Box(Modifier.size(if (spec.isTv) 44.dp else 38.dp), contentAlignment = Alignment.Center) {
+                Icon(dest.icon, contentDescription = dest.label, modifier = Modifier.size(if (spec.isTv) 24.dp else 20.dp))
+            }
+        } else {
             Box(
-                Modifier.padding(horizontal = if (iconOnly) 10.dp else 15.dp, vertical = 9.dp),
+                Modifier.height(if (spec.isTv) 44.dp else 38.dp).padding(horizontal = if (spec.isTv) 22.dp else 16.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                if (iconOnly) {
-                    Icon(dest.icon, contentDescription = dest.label, modifier = Modifier.size(22.dp))
-                } else {
-                    Text(
-                        dest.label,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
-                    )
-                }
-            }
-            // Un singur indicator: doar pe fila activă (focusul are conturul lui).
-            if (active) {
-                Box(
-                    Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 2.dp)
-                        .width(if (iconOnly) 18.dp else 32.dp)
-                        .height(3.dp)
-                        .background(c.primary, MaterialTheme.shapes.extraSmall),
+                Text(
+                    dest.label,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = if (focused) FontWeight.Medium else FontWeight.Bold,
                 )
             }
         }

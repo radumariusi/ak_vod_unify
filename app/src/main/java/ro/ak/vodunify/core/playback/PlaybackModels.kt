@@ -70,6 +70,8 @@ data class ResumeInfo(
     val durationMs: Long? = null,
     /** Ex. "trakt". */
     val source: String? = null,
+    /** Aplicația (pachetul) în care ai văzut ultima dată, după AK Scrobbler: acolo continui standard. */
+    val appPackage: String? = null,
 ) {
     val hasPosition: Boolean get() = positionMs != null && positionMs > 0
 

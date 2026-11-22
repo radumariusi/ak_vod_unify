@@ -66,6 +66,8 @@ data class ResumePointEntity(
     val remoteId: Long?,
     /** Poziția exactă în ms, doar pentru poziții setate de tine („Setează minutul”, sursa „local”). */
     val positionMs: Long? = null,
+    /** Aplicația (pachetul) în care ai văzut ultima dată, după AK Scrobbler; acolo continui standard. */
+    val appPackage: String? = null,
 )
 
 /** Lista „De văzut”. */

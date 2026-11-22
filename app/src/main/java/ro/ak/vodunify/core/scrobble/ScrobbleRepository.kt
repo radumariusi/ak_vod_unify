@@ -164,7 +164,7 @@ class ScrobbleRepository @Inject constructor(
             return done(ScrobbleResult.WATCHED, media, duration, position)
         }
         // Pauza / oprirea se publică (în modul automat); punctele intermediare doar se salvează.
-        publisher.setManualPosition(media, position, duration, publish = !event.isTick)
+        publisher.setManualPosition(media, position, duration, publish = !event.isTick, appPackage = event.pkg)
         return done(ScrobbleResult.SAVED, media, duration, position)
     }
 

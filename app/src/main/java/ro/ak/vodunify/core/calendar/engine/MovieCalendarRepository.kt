@@ -7,6 +7,7 @@ import ro.ak.vodunify.core.calendar.cinema.RoCinemaRelease
 import ro.ak.vodunify.core.calendar.filter.ContentClassifier
 import ro.ak.vodunify.core.calendar.model.CalendarSettings
 import ro.ak.vodunify.core.calendar.model.MovieCalendarResult
+import ro.ak.vodunify.core.calendar.model.MovieRelease
 import ro.ak.vodunify.core.calendar.model.MovieEntry
 import ro.ak.vodunify.core.calendar.model.MovieReleaseKind
 import ro.ak.vodunify.core.calendar.model.ProviderAvailability
@@ -269,6 +270,23 @@ class MovieCalendarRepository(
                 wikidataId = details.externalIds?.wikidataId?.takeIf { it.isNotBlank() },
             )
         }
+    }
+
+    /**
+     * All releases of one movie (cinema RO / US, streaming, digital), with the Romanian cinema program
+     * confirming the RO date, for the Home rows "În curând" / "Noutăți".
+     */
+    suspend fun releasesOf(movieId: Int, settings: CalendarSettings, apiKey: String = ""): List<MovieRelease> {
+        val details = apiFactory(apiKey).movieDetails(movieId)
+        val program = try {
+            roCinema?.load(today()).orEmpty()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            emptyList()
+        }
+        val ro = if (program.isEmpty()) null else RoCinemaProgram.find(program, details.allTitles, yearOf(details.releaseDate))
+        return MovieReleasePlanner.releases(details, settings, ro)
     }
 
     /** Program films opening in [from]..[to] that no discover candidate is. */

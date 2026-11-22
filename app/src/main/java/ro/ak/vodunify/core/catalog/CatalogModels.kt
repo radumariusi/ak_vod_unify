@@ -51,12 +51,35 @@ data class EpisodeAir(val season: Int, val episode: Int, val name: String?, val 
     val code: String get() = "S%02dE%02d".format(season, episode)
 }
 
+/** Pe unde apare un film: în cinema, pe un serviciu de streaming sau digital (închiriere / cumpărare). */
+enum class ReleaseChannel {
+    CINEMA, STREAMING, DIGITAL,
+
+    /** Știm doar data din TMDb, nu și unde apare. */
+    UNKNOWN,
+}
+
+/**
+ * O lansare a unui film, pentru „În curând” / „Noutăți”: unde, în ce țară (RO / US), când și, la streaming,
+ * pe ce serviciu ([serviceId] = id-ul din calendar, ex. „netflix”; [mine] = e pe aplicațiile tale).
+ */
+data class MovieReleaseEvent(
+    val channel: ReleaseChannel,
+    val region: String,
+    val date: String,
+    val serviceId: String? = null,
+    val serviceName: String? = null,
+    val mine: Boolean = false,
+)
+
 /** Titlul plus datele de lansare: data filmului, ultimul și următorul episod la seriale. */
 data class TitleReleases(
     val item: CatalogItem,
     val releaseDate: String?,
     val lastEpisode: EpisodeAir?,
     val nextEpisode: EpisodeAir?,
+    /** Lansările filmului (cinema / streaming / digital, RO și US); goale = știm doar [releaseDate]. */
+    val movieReleases: List<MovieReleaseEvent> = emptyList(),
 )
 
 data class PersonSummary(
@@ -93,6 +116,10 @@ data class Episode(
     val stillUrl: String?,
     val airDate: String?,
     val runtimeMinutes: Int?,
+    /** Nota TMDb a episodului. */
+    val rating: Double? = null,
+    /** Nota IMDb a episodului (prin OMDb, dacă e setată cheia). */
+    val imdbRating: Double? = null,
 )
 
 data class Season(val number: Int, val name: String, val overview: String, val episodes: List<Episode>)

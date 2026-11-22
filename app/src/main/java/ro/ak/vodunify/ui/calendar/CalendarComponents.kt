@@ -4,6 +4,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.semantics.contentDescription
 import ro.ak.vodunify.ui.components.PosterLabel
+import ro.ak.vodunify.ui.components.FocusBorderWidth
+import ro.ak.vodunify.ui.theme.FocusBorder
 import ro.ak.vodunify.ui.components.AppIconBadge
 import ro.ak.vodunify.ui.components.CinemaBadge
 import android.view.KeyEvent as AndroidKeyEvent
@@ -124,8 +126,8 @@ fun PressableCard(
             .focusable(interactionSource = interaction),
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
-        border = if (focused) BorderStroke(3.dp, Color.White) else null,
-        tonalElevation = if (focused) 8.dp else 0.dp,
+        // Același focus ca la toate cardurile (FocusCard): contur alb, fără altă umbră.
+        border = if (focused) BorderStroke(FocusBorderWidth, FocusBorder) else null,
     ) {
         content()
     }

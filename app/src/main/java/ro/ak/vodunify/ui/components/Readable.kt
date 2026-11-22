@@ -1,5 +1,6 @@
 package ro.ak.vodunify.ui.components
 
+import ro.ak.vodunify.ui.theme.GlassIdle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
@@ -30,7 +31,7 @@ fun Modifier.readable(): Modifier = composed {
     this
         .onFocusChanged { focused = it.isFocused }
         .focusable()
-        .background(if (focused) c.surfaceVariant.copy(alpha = 0.6f) else Color.Transparent, shape)
+        .background(if (focused) GlassIdle else Color.Transparent, shape)
         .border(if (focused) 2.dp else 0.dp, if (focused) c.secondary else Color.Transparent, shape)
         .padding(horizontal = 4.dp, vertical = 2.dp)
 }

@@ -32,6 +32,7 @@ object AppModule {
     @Singleton
     fun database(@ApplicationContext context: Context): VodDatabase =
         Room.databaseBuilder(context, VodDatabase::class.java, "vod.db")
+            .addMigrations(*ro.ak.vodunify.core.db.ALL_MIGRATIONS)
             .fallbackToDestructiveMigration()
             .build()
 

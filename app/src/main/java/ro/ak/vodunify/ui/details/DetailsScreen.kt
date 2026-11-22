@@ -1,5 +1,6 @@
 package ro.ak.vodunify.ui.details
 
+import ro.ak.vodunify.ui.components.PillRow
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -76,6 +77,7 @@ import ro.ak.vodunify.ui.components.NetworkImage
 import ro.ak.vodunify.ui.components.OutlinedButton
 import ro.ak.vodunify.ui.components.PersonRow
 import ro.ak.vodunify.ui.components.RatingChip
+import ro.ak.vodunify.ui.components.ImdbChip
 import ro.ak.vodunify.ui.components.SectionTitle
 import ro.ak.vodunify.ui.components.TextButton
 import ro.ak.vodunify.ui.components.TitleBackdrop
@@ -405,7 +407,7 @@ private fun trackSummary(isMovie: Boolean, state: TitleTrackState?, progress: Sh
     }
     if (!isMovie && progress != null && progress.aired > 0) {
         parts += "Văzute ${progress.completed} din ${progress.aired} episoade"
-        progress.next?.let { n -> parts += "Urmează S${n.season}E${n.episode}" + (n.episodeTitle?.let { " · $it" } ?: "") }
+        progress.next?.let { n -> parts += "Urmează S%02dE%02d".format(n.season, n.episode) }
     }
     return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
 }
@@ -502,20 +504,22 @@ private fun EpisodesPane(
 @Composable
 private fun SeasonRow(label: String, active: Boolean, onClick: () -> Unit) {
     val c = MaterialTheme.colorScheme
-    FocusCard(onClick = onClick, focusScale = 1f, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) {
+    PillRow(onClick = onClick, active = active, modifier = Modifier.fillMaxWidth()) { focused ->
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(if (active) c.surfaceVariant else c.surface)
-                .padding(horizontal = 10.dp, vertical = 9.dp),
+                .padding(horizontal = 14.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.width(3.dp).height(20.dp).background(if (active) c.primary else Color.Transparent))
-            Spacer(Modifier.width(8.dp))
             Text(
                 label,
                 style = MaterialTheme.typography.labelLarge,
-                color = if (active) c.onSurface else c.onSurfaceVariant,
+                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                color = when {
+                    focused -> c.onSecondary
+                    active -> c.onSurface
+                    else -> c.onSurfaceVariant
+                },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -609,7 +613,7 @@ private fun EpisodeRow(episode: Episode, watched: Boolean, isNext: Boolean, modi
                 }
             }
             Column(Modifier.weight(1f).heightIn(min = 70.dp), verticalArrangement = Arrangement.Center) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         "${episode.number}. ${episode.name}",
                         style = MaterialTheme.typography.titleSmall,
@@ -617,6 +621,9 @@ private fun EpisodeRow(episode: Episode, watched: Boolean, isNext: Boolean, modi
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
+                    // Notele episodului: TMDb și IMDb (IMDb doar cu cheia OMDb).
+                    episode.rating?.let { RatingChip(it) }
+                    episode.imdbRating?.let { ImdbChip(it) }
                     episode.runtimeMinutes?.takeIf { it > 0 }?.let { Text("$it min", style = MaterialTheme.typography.labelMedium) }
                 }
                 if (episode.overview.isNotBlank()) {

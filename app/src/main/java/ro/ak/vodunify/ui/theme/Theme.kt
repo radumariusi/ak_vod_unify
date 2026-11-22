@@ -11,19 +11,37 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 /*
- * Identitatea vizuală AK VOD (aceeași ca în AK VOD Hub): fundal bleumarin închis, accent roșu
- * pentru marcă, fila activă și progres, focus albastru-deschis pe butoane și contur alb pe carduri.
+ * Identitatea vizuală AK VOD: fundal bleumarin închis, accent roșu doar pentru marcă și progres.
+ * Butoanele, filele și listele de alegere au aceeași formă și aceleași tonuri peste tot (ca în meniul principal):
+ * - în repaus: „sticlă” albă transparentă (sau nimic, la file), text alb;
+ * - activ / ales (fila curentă, opțiunea aleasă): sticlă mai deschisă, text alb îngroșat;
+ * - cu focus (D-pad): plin alb, text bleumarin închis. Cardurile cu focus: contur alb.
  */
 
-/** Roșul AK VOD: marca, indicatorul filei active, barele de progres. */
+/** Roșul AK VOD: marca și barele de progres. */
 val Accent = Color(0xFFE50914)
 val Background = Color(0xFF0C1017)
 val SurfaceColor = Color(0xFF151D2A)
 val SurfaceVariantColor = Color(0xFF202C3D)
 
-/** Focus pe butoane și chip-uri (ca în AK VOD Hub). */
-val FocusFill = Color(0xFF4DA3FF)
-val OnFocusFill = Color(0xFF06121F)
+/** Focus pe butoane, file și chip-uri: plin alb cu text închis (ca în meniul principal). */
+val FocusFill = Color(0xFFFFFFFF)
+val OnFocusFill = Color(0xFF14202F)
+
+/** Sticla butoanelor în repaus. */
+val GlassIdle = Color(0x1FFFFFFF)
+
+/** Sticla mai deschisă: fila curentă, opțiunea aleasă, acțiunea principală. */
+val GlassActive = Color(0x42FFFFFF)
+
+/** Fundalul barelor care grupează butoane (meniul principal). */
+val GlassBar = Color(0x26FFFFFF)
+
+/** Forma butoanelor, filelor și chip-urilor: capsulă. */
+val PillShape = RoundedCornerShape(percent = 50)
+
+/** Forma rândurilor pe două linii (liste de alegere, setări pliabile, sezoane). */
+val RowShape = RoundedCornerShape(16.dp)
 
 /** Conturul de focus al cardurilor: gros și aproape alb, vizibil de la 3 m pe orice poster. */
 val FocusBorder = Color(0xFFE8EAED)
@@ -36,8 +54,8 @@ private val Colors = darkColorScheme(
     inversePrimary = Accent,
     secondary = FocusFill,
     onSecondary = OnFocusFill,
-    secondaryContainer = Color(0xFF2B3A50),
-    onSecondaryContainer = Color(0xFFE8EAED),
+    secondaryContainer = GlassActive,
+    onSecondaryContainer = Color.White,
     tertiary = Color(0xFF01D277),
     onTertiary = Color(0xFF00210F),
     tertiaryContainer = Color(0xFF0D3B2A),

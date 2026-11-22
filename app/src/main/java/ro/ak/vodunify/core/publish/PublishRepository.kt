@@ -118,7 +118,14 @@ class PublishRepository @Inject constructor(
      * o publică. [positionMs] = 0 șterge poziția locală. [publish] = false doar salvează
      * (punctele intermediare din AK Scrobbler, ca să nu scriem în trackere la fiecare minut).
      */
-    suspend fun setManualPosition(media: MediaRef, positionMs: Long, durationMs: Long?, publish: Boolean = true): List<PublishOutcome> {
+    suspend fun setManualPosition(
+        media: MediaRef,
+        positionMs: Long,
+        durationMs: Long?,
+        publish: Boolean = true,
+        /** Aplicația în care rulează (de la AK Scrobbler); null = păstrăm ce știam. */
+        appPackage: String? = null,
+    ): List<PublishOutcome> {
         require(media.type != MediaType.SHOW) { "Setează minutul pentru un film sau un episod" }
         val id = "$LOCAL_SOURCE|${media.itemKey}"
         if (positionMs <= 0L) {
@@ -126,6 +133,7 @@ class PublishRepository @Inject constructor(
             return emptyList()
         }
         val progress = durationMs?.takeIf { it > 0 }?.let { (positionMs.toFloat() / it).coerceIn(0f, 1f) }
+        val app = appPackage ?: trackingDao.allResume().first().firstOrNull { it.id == id }?.appPackage
         trackingDao.upsertResume(
             listOf(
                 ResumePointEntity(
@@ -136,6 +144,7 @@ class PublishRepository @Inject constructor(
                     updatedAt = System.currentTimeMillis(),
                     remoteId = null,
                     positionMs = positionMs,
+                    appPackage = app,
                 ),
             ),
         )

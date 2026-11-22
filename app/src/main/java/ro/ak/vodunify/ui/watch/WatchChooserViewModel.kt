@@ -103,7 +103,12 @@ class WatchChooserViewModel @Inject constructor(
                 val service = options.recommendedService
                 val serviceApp = service?.app
                 val player = options.recommendedPlayer
+                // Continui standard în aplicația în care ai văzut ultima dată (dacă e printre variante).
+                val last = resume.appPackage?.let { pkg -> installed.entries.firstOrNull { it.value.packageName == pkg }?.key }
+                val lastService = last?.let { app -> options.services.firstOrNull { it.app == app && it.installed } }
                 when {
+                    last != null && lastService != null && launches.containsKey(last) -> chooseService(lastService)
+                    last != null && last in options.players && launches.containsKey(last) -> choosePlayer(last)
                     service != null && serviceApp != null && launches.containsKey(serviceApp) -> chooseService(service)
                     player != null && launches.containsKey(player) -> choosePlayer(player)
                     else -> _state.update { it?.copy(direct = false) }

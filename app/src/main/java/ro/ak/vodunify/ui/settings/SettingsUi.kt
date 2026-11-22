@@ -1,6 +1,9 @@
 package ro.ak.vodunify.ui.settings
 
-import androidx.compose.foundation.BorderStroke
+import ro.ak.vodunify.ui.theme.RowShape
+import ro.ak.vodunify.ui.theme.PillShape
+import ro.ak.vodunify.ui.theme.GlassActive
+import ro.ak.vodunify.ui.theme.GlassIdle
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -19,7 +22,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.TextStyle
-import ro.ak.vodunify.ui.theme.FocusBorder
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -78,10 +80,9 @@ fun Expandable(
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Surface(
             onClick = { open = !open },
-            shape = MaterialTheme.shapes.small,
-            color = if (focused) c.secondary else c.surfaceVariant.copy(alpha = 0.6f),
+            shape = RowShape,
+            color = if (focused) c.secondary else GlassIdle,
             contentColor = if (focused) c.onSecondary else c.onSurface,
-            border = if (focused) BorderStroke(2.dp, FocusBorder) else null,
             interactionSource = interaction,
             modifier = Modifier.fillMaxWidth(),
         ) {

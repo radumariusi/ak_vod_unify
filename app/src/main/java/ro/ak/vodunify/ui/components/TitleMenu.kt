@@ -123,6 +123,8 @@ fun TitleMenuHost(viewModel: TitleMenuViewModel, onOpen: (TitleKind, Long) -> Un
     LaunchedEffect(i.mediaKey) { runCatching { first.requestFocus() } }
     AlertDialog(
         onDismissRequest = viewModel::close,
+        // Deschis cu OK ținut apăsat: ridicarea lui nu trebuie să aleagă prima opțiune.
+        modifier = Modifier.ignoreHeldOk(),
         title = { Text(i.title + (i.year?.let { " ($it)" } ?: "")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
