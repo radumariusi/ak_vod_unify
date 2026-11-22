@@ -7,6 +7,8 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -47,7 +49,7 @@ import ro.ak.vodunify.core.playback.PosterBadge
  */
 
 /** Înălțimea tuturor etichetelor de pe poster. */
-val BadgeHeight = 18.dp
+val BadgeHeight = 16.dp
 val BadgeShape = RoundedCornerShape(4.dp)
 val BadgeBackground = Color(0xCC000000)
 
@@ -58,12 +60,12 @@ fun PosterLabel(text: String, modifier: Modifier = Modifier) {
         modifier
             .height(BadgeHeight)
             .background(BadgeBackground, BadgeShape)
-            .padding(horizontal = 5.dp),
+            .padding(horizontal = 4.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text,
-            fontSize = 11.sp,
+            fontSize = 10.sp,
             lineHeight = 12.sp,
             fontWeight = FontWeight.SemiBold,
             color = Color.White,
@@ -120,65 +122,87 @@ fun PlatformBadge(kind: TitleKind, id: Long?, modifier: Modifier = Modifier) {
 }
 
 /**
- * Sigla de cinema, câte una pentru fiecare țară: o claketă albă lângă steagul țării (România: tricolorul;
- * SUA: dungi și cantonul albastru). Are forma celorlalte etichete de pe poster.
+ * Sigla de cinema: o claketă (tabla de filmare) cu steagul țării în corpul ei. România: tricolorul;
+ * SUA: dungile și cantonul albastru. Are forma și înălțimea celorlalte etichete de pe poster.
  */
 @Composable
 fun CinemaBadge(region: String, modifier: Modifier = Modifier) {
     val us = region.equals("US", ignoreCase = true)
-    Row(
+    Box(
         modifier
             .height(BadgeHeight)
             .background(BadgeBackground, BadgeShape)
-            .padding(horizontal = 4.dp, vertical = 3.dp)
+            .padding(horizontal = 3.dp, vertical = 1.5.dp)
             .semantics { contentDescription = if (us) "Cinema SUA" else "Cinema România" },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Clapper(Modifier.size(12.dp))
-        Flag(us, Modifier.size(width = 17.dp, height = 12.dp).clip(RoundedCornerShape(2.dp)))
+        Canvas(Modifier.size(width = 19.dp, height = 13.dp)) {
+            val w = size.width
+            val h = size.height
+            val barH = h * 0.28f
+            val top = barH + h * 0.08f
+            val bodyH = h - top
+            val r = CornerRadius(w * 0.07f)
+            // Bara de sus a claketei: albă, cu dungi oblice negre.
+            drawRoundRect(Color.White, Offset.Zero, Size(w, barH), r)
+            val stripe = w * 0.11f
+            for (i in 0..3) {
+                val x = w * (0.06f + i * 0.25f)
+                val p = Path().apply {
+                    moveTo(x, barH); lineTo(x + stripe, 0f); lineTo(x + stripe * 2, 0f); lineTo(x + stripe, barH); close()
+                }
+                drawPath(p, Color.Black)
+            }
+            // Corpul claketei = steagul țării.
+            val body = Path().apply { addRoundRect(RoundRect(0f, top, w, h, r)) }
+            clipPath(body) {
+                if (!us) {
+                    val third = w / 3f
+                    drawRect(Color(0xFF002B7F), Offset(0f, top), Size(third, bodyH))
+                    drawRect(Color(0xFFFCD116), Offset(third, top), Size(third, bodyH))
+                    drawRect(Color(0xFFCE1126), Offset(third * 2, top), Size(w - third * 2, bodyH))
+                } else {
+                    val band = bodyH / 7f
+                    drawRect(Color.White, Offset(0f, top), Size(w, bodyH))
+                    for (i in 0 until 7 step 2) drawRect(Color(0xFFB22234), Offset(0f, top + i * band), Size(w, band))
+                    drawRect(Color(0xFF3C3B6E), Offset(0f, top), Size(w * 0.45f, band * 4))
+                    for (row in 0..1) for (col in 0..2) {
+                        drawCircle(Color.White, radius = bodyH * 0.05f, center = Offset(w * (0.08f + col * 0.14f), top + band * (1f + row * 1.8f)))
+                    }
+                }
+            }
+        }
     }
 }
 
+/** Cum află un poster nota IMDb (din setul local IMDb); dat de AppNavigation. */
+val LocalImdbRating = staticCompositionLocalOf<(suspend (TitleKind, Long) -> Double?)?> { null }
+
+/** Notele de pe poster, sus: TMDb și, alături, IMDb (când se știe). */
 @Composable
-private fun Clapper(modifier: Modifier) {
-    Canvas(modifier) {
-        val w = size.width
-        val h = size.height
-        // Corpul.
-        drawRoundRect(Color.White, topLeft = Offset(0f, h * 0.42f), size = Size(w, h * 0.58f), cornerRadius = CornerRadius(w * 0.08f))
-        // Bara de sus, cu dungi oblice.
-        val top = Path().apply {
-            moveTo(0f, h * 0.06f); lineTo(w, 0f); lineTo(w, h * 0.30f); lineTo(0f, h * 0.36f); close()
-        }
-        drawPath(top, Color.White)
-        for (i in 0..2) {
-            val x = w * (0.18f + i * 0.3f)
-            drawLine(Color.Black, Offset(x, h * 0.34f), Offset(x + w * 0.14f, h * 0.02f), strokeWidth = w * 0.09f)
-        }
+fun PosterRatings(kind: TitleKind, id: Long?, tmdb: Double?, modifier: Modifier = Modifier) {
+    val source = LocalImdbRating.current
+    var imdb by remember(kind, id) { mutableStateOf<Double?>(null) }
+    LaunchedEffect(kind, id) {
+        if (source != null && id != null) imdb = runCatching { source(kind, id) }.getOrNull()
+    }
+    val t = tmdb?.takeIf { it > 0 }
+    val i = imdb?.takeIf { it > 0 }
+    if (t == null && i == null) return
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+        t?.let { RatingChip(it) }
+        i?.let { ImdbChip(it) }
     }
 }
 
+/**
+ * Rândul de jos al unui poster: sigla (aplicația / cinema) și, alături, eticheta (data, „S01E02 · 45%”).
+ * Eticheta se scurtează dacă nu încape.
+ */
 @Composable
-private fun Flag(us: Boolean, modifier: Modifier) {
-    Canvas(modifier) {
-        val w = size.width
-        val h = size.height
-        if (!us) {
-            val third = w / 3f
-            drawRect(Color(0xFF002B7F), Offset(0f, 0f), Size(third, h))
-            drawRect(Color(0xFFFCD116), Offset(third, 0f), Size(third, h))
-            drawRect(Color(0xFFCE1126), Offset(third * 2, 0f), Size(w - third * 2, h))
-        } else {
-            val stripe = h / 7f
-            for (i in 0 until 7) {
-                drawRect(if (i % 2 == 0) Color(0xFFB22234) else Color.White, Offset(0f, i * stripe), Size(w, stripe + 0.5f))
-            }
-            drawRect(Color(0xFF3C3B6E), Offset(0f, 0f), Size(w * 0.45f, stripe * 4))
-            // Câteva stele, ca puncte.
-            for (r in 0..1) for (c in 0..2) {
-                drawCircle(Color.White, radius = h * 0.045f, center = Offset(w * (0.08f + c * 0.14f), stripe * (1f + r * 1.8f)))
-            }
-        }
+fun PosterBottomRow(modifier: Modifier = Modifier, label: String? = null, badge: @Composable () -> Unit) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+        badge()
+        label?.takeIf { it.isNotBlank() }?.let { PosterLabel(it, Modifier.weight(1f, fill = false)) }
     }
 }

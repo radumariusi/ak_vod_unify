@@ -107,24 +107,25 @@ fun ImdbChip(rating: Double, modifier: Modifier = Modifier) {
 @Composable
 private fun BrandRating(label: String, background: Color, foreground: Color, rating: Double, modifier: Modifier) {
     // Aceeași etichetă ca sigla platformei și „S01E02 · 25 nov” (PosterBadges): înălțime, fundal și colțuri.
+    // Mică, ca pe un poster să încapă alături TMDb și IMDb.
     Row(
         modifier
             .height(BadgeHeight)
             .background(BadgeBackground, BadgeShape)
-            .padding(horizontal = 3.dp, vertical = 3.dp),
+            .padding(horizontal = 2.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Box(
-            Modifier.fillMaxHeight().background(background, RoundedCornerShape(3.dp)).padding(horizontal = 3.dp),
+            Modifier.fillMaxHeight().background(background, RoundedCornerShape(2.dp)).padding(horizontal = 2.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(label, fontSize = 9.sp, lineHeight = 10.sp, fontWeight = FontWeight.Black, color = foreground, maxLines = 1)
+            Text(label, fontSize = 7.sp, lineHeight = 8.sp, fontWeight = FontWeight.Black, color = foreground, maxLines = 1)
         }
         Text(
             String.format(Locale.US, "%.1f", rating),
-            fontSize = 11.sp,
-            lineHeight = 12.sp,
+            fontSize = 10.sp,
+            lineHeight = 11.sp,
             fontWeight = FontWeight.SemiBold,
             color = Color.White,
             maxLines = 1,
@@ -155,10 +156,8 @@ fun PosterCard(item: CatalogItem, modifier: Modifier = Modifier, rowKey: String 
     ) {
         Box(Modifier.fillMaxSize().semantics { contentDescription = item.title }) {
             NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
-            item.rating?.takeIf { it > 0 }?.let {
-                RatingChip(it, Modifier.align(Alignment.TopStart).padding(4.dp))
-            }
-            PlatformBadge(item.kind, item.id, Modifier.align(Alignment.TopEnd).padding(4.dp))
+            PosterRatings(item.kind, item.id, item.rating, Modifier.align(Alignment.TopStart).padding(4.dp))
+            PlatformBadge(item.kind, item.id, Modifier.align(Alignment.BottomStart).padding(4.dp))
         }
     }
 }
@@ -177,7 +176,7 @@ fun rowSpacing() = if (layoutSpec().isTv) 18.dp else 12.dp
 fun TitleRow(title: String, items: List<CatalogItem>, modifier: Modifier = Modifier) {
     if (items.isEmpty()) return
     val spec = layoutSpec()
-    Column(modifier) {
+    Column(modifier.peekRow()) {
         SectionTitle(title)
         DefaultScroll {
             LazyRow(

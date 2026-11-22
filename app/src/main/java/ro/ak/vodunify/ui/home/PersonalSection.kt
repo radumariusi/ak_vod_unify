@@ -34,11 +34,14 @@ import androidx.compose.ui.unit.dp
 import ro.ak.vodunify.core.tracking.SyncStatus
 import ro.ak.vodunify.core.connector.ExternalTrackers
 import ro.ak.vodunify.ui.components.DefaultScroll
+import ro.ak.vodunify.ui.components.peekRow
 import ro.ak.vodunify.ui.components.FocusCard
 import ro.ak.vodunify.ui.components.FocusedTitle
 import ro.ak.vodunify.ui.components.PosterLabel
 import ro.ak.vodunify.ui.components.RatingChip
 import ro.ak.vodunify.ui.components.PlatformBadge
+import ro.ak.vodunify.ui.components.PosterRatings
+import ro.ak.vodunify.ui.components.PosterBottomRow
 import ro.ak.vodunify.ui.components.AppIconBadge
 import ro.ak.vodunify.ui.components.CinemaBadge
 import ro.ak.vodunify.core.catalog.ReleaseChannel
@@ -148,7 +151,7 @@ private fun ConnectPrompt() {
 private fun WideRow(title: String, items: List<PersonalItem>) {
     if (items.isEmpty()) return
     val spec = layoutSpec()
-    Column {
+    Column(Modifier.peekRow()) {
         SectionTitle(title)
         DefaultScroll {
             LazyRow(
@@ -185,14 +188,16 @@ private fun WideCard(item: PersonalItem, rowKey: String) {
                     .fillMaxSize()
                     .background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to Color(0xCC000000))),
             )
-            // Fără text sub card: episodul (S01E02) și procentul stau pe imagine, ca etichetele de pe postere.
-            item.subtitle?.takeIf { it.isNotBlank() }?.let {
-                PosterLabel(it, Modifier.align(Alignment.BottomStart).padding(start = 6.dp, end = 6.dp, bottom = 10.dp))
+            // Fără text sub card. Jos: sigla aplicației în care ai văzut ultima dată (acolo continui standard,
+            // dacă nu alegi altceva), apoi episodul (S01E02) și procentul.
+            PosterRatings(item.kind, item.tmdbId, item.rating, Modifier.align(Alignment.TopStart).padding(6.dp))
+            PosterBottomRow(
+                Modifier.align(Alignment.BottomStart).padding(start = 6.dp, end = 6.dp, bottom = 10.dp),
+                label = item.subtitle,
+            ) {
+                val lastApp = item.appPackage
+                if (lastApp != null) AppIconBadge(lastApp) else PlatformBadge(item.kind, item.tmdbId)
             }
-            // Sigla aplicației în care ai văzut ultima dată: acolo continui standard (dacă nu alegi altceva).
-            val badge = Modifier.align(Alignment.TopEnd).padding(6.dp)
-            val lastApp = item.appPackage
-            if (lastApp != null) AppIconBadge(lastApp, badge) else PlatformBadge(item.kind, item.tmdbId, badge)
             if (item.showsProgress || item.progress != null) {
                 val p = item.progress
                 if (p != null) {
@@ -221,7 +226,7 @@ private fun WideCard(item: PersonalItem, rowKey: String) {
 private fun PosterRow(title: String, items: List<PersonalItem>) {
     if (items.isEmpty()) return
     val spec = layoutSpec()
-    Column {
+    Column(Modifier.peekRow()) {
         SectionTitle(title)
         DefaultScroll {
             LazyRow(
@@ -248,10 +253,10 @@ private fun PersonalPoster(item: PersonalItem, rowKey: String) {
     ) {
         Box(Modifier.fillMaxSize().semantics { contentDescription = listOfNotNull(item.title, item.subtitle).joinToString(", ") }) {
             NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
-            item.rating?.takeIf { it > 0 }?.let { RatingChip(it, Modifier.align(Alignment.TopStart).padding(4.dp)) }
-            ReleaseBadge(item, Modifier.align(Alignment.TopEnd).padding(4.dp))
-            item.subtitle?.takeIf { it.isNotBlank() }?.let {
-                PosterLabel(it, Modifier.align(Alignment.BottomStart).padding(4.dp))
+            PosterRatings(item.kind, item.tmdbId, item.rating, Modifier.align(Alignment.TopStart).padding(4.dp))
+            // Jos: unde apare (aplicația, cinema RO / SUA) lângă dată.
+            PosterBottomRow(Modifier.align(Alignment.BottomStart).padding(4.dp), label = item.subtitle) {
+                ReleaseBadge(item, Modifier)
             }
         }
     }
