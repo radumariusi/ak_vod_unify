@@ -39,7 +39,8 @@ import ro.ak.vodunify.ui.components.FocusCard
 import ro.ak.vodunify.ui.components.FocusedTitle
 import ro.ak.vodunify.ui.components.PosterLabel
 import ro.ak.vodunify.ui.components.RatingChip
-import ro.ak.vodunify.ui.components.ServiceLogoBadge
+import ro.ak.vodunify.ui.components.BadgeSpec
+import ro.ak.vodunify.ui.components.TitleBadge
 import ro.ak.vodunify.core.calendar.android.CALENDAR_TO_SERVICE
 import ro.ak.vodunify.ui.components.PlatformBadge
 import ro.ak.vodunify.ui.components.PosterRatings
@@ -179,7 +180,7 @@ private fun WideCard(item: PersonalItem, rowKey: String) {
         onClick = { item.tmdbId?.let { actions.openTitle(item.kind, it) } },
         modifier = Modifier.size(spec.cardWidth, spec.cardHeight),
         restoreKey = "$rowKey|${item.key}",
-        onFocused = { focusedTitle(item)?.let { backdrop?.focus(it) } },
+        onFocused = { focusedTitle(item, wideBadge(item))?.let { backdrop?.focus(it) } },
         // OK ținut apăsat: meniul titlului (Lista mea, văzut, scoate din Continuă vizionarea…).
         onLongClick = { item.asCatalogItem()?.let(actions.titleMenu) },
     ) {
@@ -197,8 +198,7 @@ private fun WideCard(item: PersonalItem, rowKey: String) {
                 Modifier.align(Alignment.BottomStart).padding(start = 6.dp, end = 6.dp, bottom = 10.dp),
                 label = item.subtitle,
             ) {
-                val lastApp = item.appPackage
-                if (lastApp != null) AppIconBadge(lastApp) else PlatformBadge(item.kind, item.tmdbId)
+                TitleBadge(wideBadge(item), item.kind, item.tmdbId)
             }
             if (item.showsProgress || item.progress != null) {
                 val p = item.progress
@@ -250,7 +250,7 @@ private fun PersonalPoster(item: PersonalItem, rowKey: String) {
         onClick = { item.tmdbId?.let { actions.openTitle(item.kind, it) } },
         modifier = Modifier.size(spec.posterWidth, spec.posterHeight),
         restoreKey = "$rowKey|${item.key}",
-        onFocused = { focusedTitle(item)?.let { backdrop?.focus(it) } },
+        onFocused = { focusedTitle(item, releaseBadge(item))?.let { backdrop?.focus(it) } },
         onLongClick = { item.asCatalogItem()?.let(actions.titleMenu) },
     ) {
         Box(Modifier.fillMaxSize().semantics { contentDescription = listOfNotNull(item.title, item.subtitle).joinToString(", ") }) {
@@ -258,38 +258,36 @@ private fun PersonalPoster(item: PersonalItem, rowKey: String) {
             PosterRatings(item.kind, item.tmdbId, item.rating, Modifier.align(Alignment.TopStart).padding(4.dp))
             // Jos: unde apare (aplicația, cinema RO / SUA) lângă dată.
             PosterBottomRow(Modifier.align(Alignment.BottomStart).padding(4.dp), label = item.subtitle) {
-                ReleaseBadge(item, Modifier)
+                TitleBadge(releaseBadge(item), item.kind, item.tmdbId)
             }
         }
     }
 }
 
+/** Cardurile „Continuă”: sigla aplicației în care ai văzut ultima dată, altfel sigla obișnuită a titlului. */
+private fun wideBadge(item: PersonalItem): BadgeSpec? = item.appPackage?.let { BadgeSpec.App(it) }
+
 /**
- * Sigla de sus a posterelor din „În curând” / „Noutăți”: la filme, unde apare la data de jos (cinema România
- * sau SUA, aplicația serviciului de streaming ori „Digital”); altfel sigla obișnuită a titlului.
+ * Sigla posterelor din „În curând” / „Noutăți”: la filme, unde apare la data de jos (cinema România sau SUA,
+ * aplicația serviciului de streaming ori „Digital”); altfel (null) sigla obișnuită a titlului.
  */
-@Composable
-private fun ReleaseBadge(item: PersonalItem, modifier: Modifier) {
-    val release = item.release
-    if (release == null) {
-        PlatformBadge(item.kind, item.tmdbId, modifier)
-        return
-    }
+private fun releaseBadge(item: PersonalItem): BadgeSpec? {
+    val release = item.release ?: return null
     val pkg = item.appPackage
     val service = release.serviceName
-    when (release.channel) {
-        ReleaseChannel.CINEMA -> CinemaBadge(release.region, modifier)
+    return when (release.channel) {
+        ReleaseChannel.CINEMA -> BadgeSpec.Cinema(release.region)
         ReleaseChannel.STREAMING -> when {
-            pkg != null -> AppIconBadge(pkg, modifier, fallbackLabel = service)
-            service != null -> ServiceLogoBadge(release.serviceId?.let { CALENDAR_TO_SERVICE[it] ?: it }, service, modifier)
-            else -> PosterLabel("Streaming", modifier)
+            pkg != null -> BadgeSpec.App(pkg, service)
+            service != null -> BadgeSpec.Service(release.serviceId?.let { CALENDAR_TO_SERVICE[it] ?: it }, service)
+            else -> BadgeSpec.Label("Streaming")
         }
-        ReleaseChannel.DIGITAL -> PosterLabel("Digital ${release.region}", modifier)
-        ReleaseChannel.UNKNOWN -> PlatformBadge(item.kind, item.tmdbId, modifier)
+        ReleaseChannel.DIGITAL -> BadgeSpec.Label("Digital ${release.region}")
+        ReleaseChannel.UNKNOWN -> null
     }
 }
 
-private fun focusedTitle(item: PersonalItem): FocusedTitle? {
+private fun focusedTitle(item: PersonalItem, badge: BadgeSpec?): FocusedTitle? {
     val id = item.tmdbId ?: return null
     return FocusedTitle(
         kind = item.kind,
@@ -299,6 +297,7 @@ private fun focusedTitle(item: PersonalItem): FocusedTitle? {
         overview = item.overview,
         backdropUrl = item.backdropUrl,
         rating = item.rating,
+        badge = badge,
     )
 }
 

@@ -84,8 +84,7 @@ fun CalendarSection(viewModel: CalendarSettingsViewModel = hiltViewModel()) {
             Label("Praguri pentru filme")
             ThresholdEditor(s.movieThresholds, newLabel = "Filme fără destule voturi doar dacă sunt „mult așteptate”", onChange = viewModel::updateMovieThresholds)
 
-            Label("Note IMDb (opțional, cheie OMDb)")
-            OmdbKeyField(s, viewModel)
+            Hint("Notele IMDb (cheia OMDb) se pun din Setări → Catalog → Note IMDb.")
 
             Expandable("Categorii", summary = "${s.hiddenCategories.size} ascunse din ${ContentFilter.entries.size}") {
             ContentFilter.entries.forEach { c ->
@@ -184,14 +183,30 @@ private fun Stepper(label: String, onDelta: (Int) -> Unit) {
     }
 }
 
+/** Setări → Catalog → Note IMDb: cheia OMDb (postere, episoade, pragurile din Calendar). */
+@Composable
+fun OmdbKeySection(viewModel: CalendarSettingsViewModel = hiltViewModel()) {
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val s = settings ?: return
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        modifier = Modifier.fillMaxWidth().widthIn(max = 900.dp),
+    ) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Note IMDb (cheie OMDb)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            OmdbKeyField(s, viewModel)
+        }
+    }
+}
+
 @Composable
 private fun OmdbKeyField(s: CalendarSettings, viewModel: CalendarSettingsViewModel) {
     var text by rememberSaveable(s.omdbApiKey) { mutableStateOf(s.omdbApiKey) }
     Hint(
         when {
-            s.omdbApiKey.isNotBlank() -> "Cheie OMDb salvată în aplicație: pragurile folosesc notele IMDb."
-            viewModel.omdbBuiltIn -> "Cheie OMDb inclusă la build (secretul OMDB_API_KEY): pragurile folosesc notele IMDb."
-            else -> "Fără cheie, pragurile se aplică pe notele TMDb. Cheie gratuită pe omdbapi.com (1.000 de cereri pe zi)."
+            s.omdbApiKey.isNotBlank() -> "Cheie OMDb salvată: notele IMDb apar pe postere, la episoade și în pragurile Calendarului."
+            viewModel.omdbBuiltIn -> "Cheie OMDb inclusă la build (secretul OMDB_API_KEY): notele IMDb apar pe postere și la episoade."
+            else -> "Fără cheie nu apar note IMDb (doar TMDb). Cheie gratuită pe omdbapi.com → API Key (1.000 de cereri pe zi)."
         },
     )
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {

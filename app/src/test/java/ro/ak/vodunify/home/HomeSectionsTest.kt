@@ -74,7 +74,7 @@ class HomeSectionsTest {
         )
         val out = HomeSections.newEpisodes(list, today)
         assertEquals(listOf(1L, 3L), out.map { it.tmdbId })
-        assertEquals("S02E05 · 18 nov", out.first().subtitle)
+        assertEquals("S02E05 · 18.11", out.first().subtitle)
     }
 
     @Test fun soonEpisodesInTheNextWeeks() {

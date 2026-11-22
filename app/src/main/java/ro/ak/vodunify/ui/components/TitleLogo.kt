@@ -23,8 +23,9 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 
 /**
- * Titlul ca siglă (ca în AK VOD Hub): logo-ul TMDb al titlului, aliniat la stânga. Textul rămâne vizibil
- * până când sigla chiar s-a încărcat, și când titlul nu are siglă sau imaginea nu se poate descărca.
+ * Titlul ca siglă (ca în AK VOD Hub): logo-ul TMDb al titlului, aliniat la stânga. Numele (text) apare doar
+ * când titlul nu are siglă sau imaginea nu se poate descărca; cât timp sigla se caută ([pending]) sau se
+ * încarcă, locul rămâne gol (fără să clipească întâi numele).
  */
 @Composable
 fun TitleLogo(
@@ -34,10 +35,11 @@ fun TitleLogo(
     modifier: Modifier = Modifier,
     maxWidth: Dp = 380.dp,
     textStyle: TextStyle = MaterialTheme.typography.headlineMedium,
+    pending: Boolean = false,
 ) {
-    var loaded by remember(logoUrl) { mutableStateOf(false) }
+    var failed by remember(logoUrl) { mutableStateOf(false) }
     Box(modifier.widthIn(max = maxWidth).fillMaxWidth().height(height), contentAlignment = Alignment.CenterStart) {
-        if (!loaded) {
+        if (!pending && (logoUrl == null || failed)) {
             Text(
                 title,
                 style = textStyle,
@@ -53,8 +55,8 @@ fun TitleLogo(
                 contentDescription = title,
                 contentScale = ContentScale.Fit,
                 alignment = Alignment.CenterStart,
-                onSuccess = { loaded = true },
-                onError = { loaded = false },
+                onSuccess = { failed = false },
+                onError = { failed = true },
                 modifier = Modifier.fillMaxSize(),
             )
         }

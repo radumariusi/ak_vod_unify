@@ -13,6 +13,7 @@ import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.ui.components.PosterRatings
 import ro.ak.vodunify.ui.components.LocalPosterLongPress
 import ro.ak.vodunify.ui.components.TitleLogo
+import ro.ak.vodunify.ui.components.TitleBadge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -83,6 +84,15 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
     val personal by viewModel.personal.collectAsStateWithLifecycle()
     val sync by viewModel.syncStatus.collectAsStateWithLifecycle()
     val personalRows: @Composable () -> Unit = { PersonalSection(personal, sync, viewModel::syncNow) }
+    // Siglele titlurilor din rândurile personale (Continuă, Noutăți, În curând) se pregătesc din timp, ca hero-ul
+    // să le arate pe loc la focus.
+    LaunchedEffect(personal) {
+        val p = personal
+        viewModel.prefetchLogos(
+            (p.continueMovies + p.continueShows + p.newMovies + p.newEpisodes + p.soonMovies + p.soonEpisodes)
+                .mapNotNull { item -> item.tmdbId?.let { item.kind to it } },
+        )
+    }
     when (val s = state) {
         LoadState.Loading -> LazyColumn(Modifier.fillMaxSize()) {
             item { personalRows() }
@@ -133,7 +143,7 @@ private fun HomeContent(
         // un rând întreg de postere dedesubt.
         BoxWithConstraints(Modifier.fillMaxSize()) {
             // Sub hero încape exact un rând de postere cu titlul lui și, dedesubt, titlul rândului următor.
-            val heroHeight = minOf(maxHeight * 0.52f, 240.dp, maxHeight - spec.posterHeight - 108.dp).coerceAtLeast(140.dp)
+            val heroHeight = minOf(maxHeight * 0.52f, 240.dp, maxHeight - spec.posterHeight - 84.dp).coerceAtLeast(140.dp)
             val peek = remember { RowPeek() }
             Column(Modifier.fillMaxSize()) {
                 Hero(
@@ -142,8 +152,9 @@ private fun HomeContent(
                     Modifier.fillMaxWidth().height(heroHeight),
                     compact = heroHeight < 200.dp,
                 )
-                // Rândul cu focus urcă sus, cu titlul lui; sub el se vede doar titlul rândului următor.
-                PivotScroll(pivot = 50.dp) {
+                // Rândul cu focus urcă sus, cu titlul lui; deasupra lui nu se vede nimic din rândul anterior,
+                // sub el doar titlul rândului următor.
+                PivotScroll(pivot = 24.dp) {
                     CompositionLocalProvider(LocalRowPeek provides peek) {
                     LazyColumn(
                         state = listState,
@@ -203,43 +214,42 @@ private fun Hero(
     LaunchedEffect(promoted?.id) {
         if (backdrop != null && backdrop.focused == null) backdrop.url = promoted?.backdropUrl
     }
-    // Sigla: pe loc dacă e deja știută (pregătită din timp), altfel după un focus stabil
-    // (nu la fiecare poster peste care treci).
-    var logo by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(shown.kind, shown.id) {
-        val known = viewModel.cachedLogo(shown.kind, shown.id)
-        if (known != null) {
-            logo = known.ifEmpty { null }
-            return@LaunchedEffect
+    // Sigla: pe loc dacă e deja știută (pregătită din timp), fără să apară întâi numele; altfel se cere după
+    // un focus scurt stabil (nu la fiecare poster peste care treci). Numele apare doar dacă titlul n-are siglă.
+    val cached = remember(shown.kind, shown.id) { viewModel.cachedLogo(shown.kind, shown.id) }
+    var fetched by remember(shown.kind, shown.id) { mutableStateOf<String?>(null) }
+    if (cached == null) {
+        LaunchedEffect(shown.kind, shown.id) {
+            delay(120)
+            fetched = viewModel.logo(shown.kind, shown.id).orEmpty()
         }
-        logo = null
-        delay(250)
-        logo = viewModel.logo(shown.kind, shown.id)
     }
+    val logo = cached ?: fetched
 
     // Pe telefon, atingerea hero-ului deschide fișa (pe TV hero-ul doar arată titlul cu focus).
     Box(if (spec.isTv) modifier else modifier.clickable { actions.openTitle(shown.kind, shown.id) }) {
         if (backdrop == null) TitleBackdrop(shown.backdropUrl, Modifier.matchParentSize())
         Column(
             Modifier
-                .align(Alignment.BottomStart)
+                .align(Alignment.TopStart)
                 .fillMaxHeight()
-                .padding(horizontal = spec.screenPadding, vertical = 8.dp)
+                .padding(start = spec.screenPadding, end = spec.screenPadding, top = 4.dp, bottom = 8.dp)
                 .widthIn(max = 620.dp)
                 .fillMaxWidth(if (spec.isCompact) 1f else 0.6f),
-            // Totul stă jos în hero; sigla ia doar cât loc rămâne (se micșorează, nu iese tăiată pe sus,
-            // de ex. cu textul mărit din setările televizorului).
-            verticalArrangement = Arrangement.spacedBy(5.dp, Alignment.Bottom),
+            // Sigla sus, ca descrierea să aibă loc dedesubt.
+            verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Top),
         ) {
             TitleLogo(
                 shown.title,
-                logo,
-                modifier = Modifier.weight(1f, fill = false),
-                height = if (compact) 44.dp else 60.dp,
+                logo?.ifEmpty { null },
+                pending = logo == null,
+                height = if (compact) 48.dp else 60.dp,
                 textStyle = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall,
             )
+            // Ca pe poster: notele, sigla aplicației / serviciului / cinema, apoi data sau episodul.
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 PosterRatings(shown.kind, shown.id, shown.rating)
+                TitleBadge(shown.badge, shown.kind, shown.id)
                 Text(
                     shown.meta,
                     style = MaterialTheme.typography.labelLarge,
@@ -253,7 +263,7 @@ private fun Hero(
                     shown.overview,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onBackground,
-                    maxLines = if (compact) 1 else 2,
+                    maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
             }

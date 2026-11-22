@@ -69,37 +69,49 @@ fun DefaultScroll(content: @Composable () -> Unit) {
 }
 
 /**
- * Pe TV, în Acasă: sub rândul cu focus se vede doar titlul rândului următor (ca să știi ce urmează), nu și
- * începutul posterelor lui. Rândurile își raportează marginea de jos când au focusul; lista se taie acolo,
- * plus înălțimea unui titlu de rând.
+ * Pe TV, în Acasă: se vede doar rândul cu focus (cu titlul lui) și, sub el, titlul rândului următor; nici
+ * începutul posterelor de dedesubt, nici partea de jos a rândului de deasupra. Rândurile își raportează
+ * marginile când au focusul; lista se taie acolo.
  */
 class RowPeek {
+    /** Marginea de sus a rândului cu focus, în coordonatele ecranului; null = niciun rând cu focus. */
+    var focusedTop by mutableStateOf<Float?>(null)
+
     /** Marginea de jos a rândului cu focus, în coordonatele ecranului; null = niciun rând cu focus. */
     var focusedBottom by mutableStateOf<Float?>(null)
 }
 
 val LocalRowPeek = staticCompositionLocalOf<RowPeek?> { null }
 
-/** Pe un rând (titlu + postere): îi spune listei unde se termină cât timp are focusul. */
+/** Pe un rând (titlu + postere): îi spune listei unde începe și unde se termină cât timp are focusul. */
 fun Modifier.peekRow(): Modifier = composed {
     val peek = LocalRowPeek.current ?: return@composed this
     var focused by remember { mutableStateOf(false) }
+    var top by remember { mutableStateOf<Float?>(null) }
     var bottom by remember { mutableStateOf<Float?>(null) }
     this
         .onFocusChanged { s ->
             focused = s.hasFocus
-            if (s.hasFocus) bottom?.let { peek.focusedBottom = it }
+            if (s.hasFocus) {
+                top?.let { peek.focusedTop = it }
+                bottom?.let { peek.focusedBottom = it }
+            }
         }
         .onGloballyPositioned { c ->
-            val b = c.positionInRoot().y + c.size.height
+            val t = c.positionInRoot().y
+            val b = t + c.size.height
+            top = t
             bottom = b
-            if (focused) peek.focusedBottom = b
+            if (focused) {
+                peek.focusedTop = t
+                peek.focusedBottom = b
+            }
         }
 }
 
 /**
- * Pe lista din Acasă: desenează doar până sub titlul rândului de după cel cu focus ([titleHeight] = cât ocupă
- * un titlu de rând). Fără rând cu focus (ex. focus în meniu), desenează tot.
+ * Pe lista din Acasă: desenează doar rândul cu focus și, sub el, titlul rândului următor ([titleHeight] = cât
+ * ocupă un titlu de rând). Fără rând cu focus (ex. focus în meniu), desenează tot.
  */
 fun Modifier.clipBelowNextTitle(peek: RowPeek, titleHeight: Dp): Modifier = composed {
     var top by remember { mutableStateOf(0f) }
@@ -112,7 +124,10 @@ fun Modifier.clipBelowNextTitle(peek: RowPeek, titleHeight: Dp): Modifier = comp
             if (b == null) {
                 drawContent()
             } else {
-                clipRect(bottom = (b - top + titlePx).coerceAtMost(size.height)) { this@drawWithContent.drawContent() }
+                val rowTop = peek.focusedTop?.let { (it - top).coerceAtLeast(0f) } ?: 0f
+                clipRect(top = rowTop, bottom = (b - top + titlePx).coerceAtMost(size.height)) {
+                    this@drawWithContent.drawContent()
+                }
             }
         }
 }

@@ -43,6 +43,9 @@ class PosterBadges @Inject constructor(
         apps
     }
 
+    /** Sigla deja aflată (fără așteptare), ca posterul s-o arate din primul cadru. */
+    fun peek(kind: TitleKind, id: Long): PosterBadge? = cache["${kind.path}:$id"]?.badge
+
     suspend fun badge(kind: TitleKind, id: Long): PosterBadge? {
         if (!catalog.isConfigured) return null
         val settings = playback.settings.first()

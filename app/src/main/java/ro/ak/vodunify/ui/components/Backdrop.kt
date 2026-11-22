@@ -48,6 +48,8 @@ data class FocusedTitle(
     val overview: String,
     val backdropUrl: String?,
     val rating: Double? = null,
+    /** Sigla de lângă note (aplicația, cinema…), ca pe poster; null = sigla platformei din catalog. */
+    val badge: BadgeSpec? = null,
 ) {
     companion object {
         fun of(item: CatalogItem) = FocusedTitle(
