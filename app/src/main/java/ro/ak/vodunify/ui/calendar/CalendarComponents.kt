@@ -143,7 +143,7 @@ val LocalCalendarIcons = staticCompositionLocalOf { CalendarIcons() }
  * și ora României (la filme, ora sau tipul lansării). „✓” = văzut.
  */
 @Composable
-private fun Poster(item: CalendarItem, modifier: Modifier) {
+internal fun Poster(item: CalendarItem, modifier: Modifier) {
     val icons = LocalCalendarIcons.current
     Box(modifier.clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surface)) {
         if (item.posterUrl != null) {
@@ -154,6 +154,10 @@ private fun Poster(item: CalendarItem, modifier: Modifier) {
         if (item.watched) {
             PosterLabel("✓", Modifier.align(Alignment.TopStart).padding(4.dp))
         }
+        // Ora, separat, sus în dreapta: jos, lângă siglă și episod, nu încăpea întreagă.
+        if (item.posterTime.isNotBlank()) {
+            PosterLabel(item.posterTime, Modifier.align(Alignment.TopEnd).padding(4.dp))
+        }
         // Jos, ca pe toate posterele: sigla (aplicația ta sau cinema RO / SUA) lângă episod / oră.
         PosterBottomRow(Modifier.align(Alignment.BottomStart).padding(4.dp), label = item.posterLabel) {
             val cinema = item.cinema
@@ -162,57 +166,6 @@ private fun Poster(item: CalendarItem, modifier: Modifier) {
             } else {
                 val pkg = item.watchAppId?.let { icons.apps[it] } ?: icons.player
                 pkg?.let { AppIconBadge(it) }
-            }
-        }
-    }
-}
-
-/** Vederea pe zi: rânduri mari, cu acțiunile titlului alături. */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun DayList(
-    items: List<CalendarItem>,
-    listState: LazyListState,
-    onOpen: (CalendarItem) -> Unit,
-    onWatch: (CalendarItem) -> Unit,
-    onFollow: (CalendarItem) -> Unit,
-    onHide: (CalendarItem) -> Unit,
-    onWatched: (CalendarItem) -> Unit,
-    onList: (CalendarItem) -> Unit,
-) {
-    val spec = layoutSpec()
-    LazyColumn(
-        state = listState,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 8.dp),
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        items(items, key = { it.key }) { item ->
-            Column(Modifier.alpha(if (item.passed) 1f else 0.5f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                PressableCard(onClick = { onOpen(item) }, onLongClick = { onWatch(item) }, focusScale = 1.02f, modifier = Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Poster(item, Modifier.width(if (spec.isCompact) 64.dp else 80.dp).height(if (spec.isCompact) 96.dp else 120.dp))
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(item.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(item.subtitle, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text("${item.time} · ${item.where}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-                            if (item.details.isNotEmpty()) {
-                                Text(
-                                    item.details.joinToString(" · "),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
-                }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    OutlinedButton(onClick = { onWatch(item) }) { Text("▶ Alege unde vezi") }
-                    OutlinedButton(onClick = { onWatched(item) }) { Text(if (item.watched) "✓ Văzut" else "Marchează văzut") }
-                    OutlinedButton(onClick = { onList(item) }) { Text("+ Lista mea") }
-                    OutlinedButton(onClick = { onFollow(item) }) { Text(if (item.followed) "★ Urmărești" else "Urmăresc") }
-                    if (!item.followed) OutlinedButton(onClick = { onHide(item) }) { Text("Ascunde") }
-                }
             }
         }
     }
@@ -251,7 +204,7 @@ fun WeekList(
             if (entries.isNotEmpty()) {
                 item(key = "row-$day") {
                     LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(ro.ak.vodunify.ui.components.rowSpacing()),
                         contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 8.dp),
                     ) {
                         items(entries, key = { it.key }) { item ->
@@ -264,98 +217,6 @@ fun WeekList(
                                     .semantics { contentDescription = "${item.title}, ${item.subtitle}, ${item.time}, ${item.where}" },
                             ) {
                                 Poster(item, Modifier.fillMaxSize())
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private val weekDays = listOf("Lun", "Mar", "Mie", "Joi", "Vin", "Sâm", "Dum")
-
-/**
- * Vederea pe lună: săptămâni pe rânduri, luni prima zi. Fiecare zi arată primele titluri
- * (apăsare = pagina titlului, apăsare lungă = Alege unde vezi); numărul zilei deschide ziua.
- */
-@Composable
-fun MonthGrid(
-    from: LocalDate,
-    to: LocalDate,
-    items: List<CalendarItem>,
-    listState: LazyListState,
-    onOpen: (CalendarItem) -> Unit,
-    onWatch: (CalendarItem) -> Unit,
-    onOpenDay: (LocalDate) -> Unit,
-) {
-    val spec = layoutSpec()
-    val perDay = if (spec.isCompact) 2 else 3
-    val byDay = items.groupBy { it.date }
-    val start = from.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-    val end = to.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY))
-    val weeks = generateSequence(start) { it.plusWeeks(1) }.takeWhile { !it.isAfter(end) }.toList()
-    val today = RomaniaTime.today()
-    val gap = if (spec.isCompact) 3.dp else 6.dp
-
-    LazyColumn(
-        state = listState,
-        verticalArrangement = Arrangement.spacedBy(gap),
-        contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 8.dp),
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        item(key = "weekdays") {
-            Row(horizontalArrangement = Arrangement.spacedBy(gap), modifier = Modifier.fillMaxWidth()) {
-                weekDays.forEach {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f).padding(start = 6.dp),
-                    )
-                }
-            }
-        }
-        weeks.forEach { monday ->
-            item(key = "week-$monday") {
-                Row(horizontalArrangement = Arrangement.spacedBy(gap), modifier = Modifier.fillMaxWidth()) {
-                    (0L..6L).map { monday.plusDays(it) }.forEach { day ->
-                        val inMonth = !day.isBefore(from) && !day.isAfter(to)
-                        val dayItems = if (inMonth) byDay[day].orEmpty() else emptyList()
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(3.dp),
-                            modifier = Modifier.weight(1f).height(if (spec.isCompact) 112.dp else 150.dp).alpha(if (inMonth) 1f else 0.35f),
-                        ) {
-                            PressableCard(onClick = { onOpenDay(day) }, onLongClick = { onOpenDay(day) }, modifier = Modifier.fillMaxWidth()) {
-                                Text(
-                                    day.dayOfMonth.toString() + (if (day == today && !spec.isCompact) " · azi" else "") +
-                                        (if (dayItems.isNotEmpty()) " (${dayItems.size})" else ""),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = if (day == today) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
-                                )
-                            }
-                            dayItems.take(perDay).forEach { item ->
-                                PressableCard(
-                                    onClick = { onOpen(item) },
-                                    onLongClick = { onWatch(item) },
-                                    modifier = Modifier.fillMaxWidth().alpha(if (item.passed) 1f else 0.5f),
-                                ) {
-                                    Text(
-                                        (if (item.watched) "✓ " else "") + item.shortLabel,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 3.dp),
-                                    )
-                                }
-                            }
-                            if (dayItems.size > perDay) {
-                                Text(
-                                    "+${dayItems.size - perDay}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
                             }
                         }
                     }

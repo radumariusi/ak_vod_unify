@@ -209,7 +209,8 @@ private fun WideCard(item: PersonalItem, rowKey: String) {
         onLongClick = { item.asCatalogItem()?.let(actions.titleMenu) },
     ) {
         Box(Modifier.fillMaxSize().semantics { contentDescription = listOfNotNull(item.title, item.subtitle).joinToString(", ") }) {
-            NetworkImage(item.backdropUrl ?: item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
+            // Cardul e mic: imaginea panoramică la 780 px, nu la 1280 (mai puțin de descărcat și decodat).
+            NetworkImage(item.backdropUrl?.replace("/w1280/", "/w780/") ?: item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
             Box(
                 Modifier
                     .fillMaxSize()

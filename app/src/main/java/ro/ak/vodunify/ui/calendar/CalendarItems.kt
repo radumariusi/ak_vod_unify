@@ -37,10 +37,15 @@ data class CalendarItem(
     val movie: MovieEntry? = null,
     /** Eticheta de jos de pe poster: „S02E05 · 21:00” (ora României) sau ora / tipul la filme. */
     val posterLabel: String = "",
+    /** Ora României („≈ 04:00”), arătată separat, sus în dreapta posterului, ca să încapă întreagă. */
+    val posterTime: String = "",
     /** Serviciul tău (id din calendar, ex. „netflix”) pe care îl găsești; null = nu e pe platformele tale. */
     val watchAppId: String? = null,
     /** „US” / „RO” la lansările în cinema (sigla de cinema de pe poster). */
     val cinema: String? = null,
+    /** Imaginea panoramică și descrierea, pentru panoul de sus din vederea pe zi. */
+    val backdropUrl: String? = null,
+    val overview: String = "",
 )
 
 fun EpisodeEntry.toItem(watched: Boolean) = CalendarItem(
@@ -64,8 +69,11 @@ fun EpisodeEntry.toItem(watched: Boolean) = CalendarItem(
     watched = watched,
     shortLabel = "$showName $code",
     episode = this,
-    posterLabel = "$code · ${timeLabel(this)}",
+    posterLabel = code,
+    posterTime = timeLabel(this),
     watchAppId = watchOn?.id,
+    backdropUrl = backdropUrl,
+    overview = overview?.takeIf { it.isNotBlank() } ?: showOverview.orEmpty(),
 )
 
 fun MovieEntry.toItem(watched: Boolean) = CalendarItem(
@@ -100,4 +108,6 @@ fun MovieEntry.toItem(watched: Boolean) = CalendarItem(
         MovieReleaseKind.CINEMA_RO -> "RO"
         else -> null
     },
+    backdropUrl = backdropUrl,
+    overview = overview.orEmpty(),
 )

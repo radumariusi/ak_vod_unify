@@ -70,9 +70,11 @@ import ro.ak.vodunify.ui.components.FocusedTitle
 import ro.ak.vodunify.ui.components.LocalBackdrop
 import ro.ak.vodunify.ui.components.LocalFocusRestore
 import ro.ak.vodunify.ui.components.PivotScroll
-import ro.ak.vodunify.ui.components.RowPeek
-import ro.ak.vodunify.ui.components.LocalRowPeek
-import ro.ak.vodunify.ui.components.clipBelowNextTitle
+import ro.ak.vodunify.ui.components.HomeRows
+import ro.ak.vodunify.ui.components.LocalHomeRows
+import ro.ak.vodunify.ui.components.FixedRowsScroll
+import ro.ak.vodunify.ui.components.homeRowsList
+import ro.ak.vodunify.core.prefs.UiPrefs
 import ro.ak.vodunify.ui.components.RatingChip
 import ro.ak.vodunify.ui.components.TitleBackdrop
 import ro.ak.vodunify.ui.components.TitleRow
@@ -157,13 +159,13 @@ private fun HomeContent(
         // fiecare rând cu focus urcă întreg sub hero (derulare cu pivot). Hero-ul se micșorează cât să încapă
         // un rând întreg de postere dedesubt.
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            // Sub hero încape exact un rând de postere cu titlul lui și, dedesubt, titlul rândului următor.
-            val heroHeight = minOf(
-                maxHeight * 0.52f,
-                240.dp,
-                maxHeight - spec.posterHeight - ROW_HEAD - ROW_TITLE_HEIGHT - 12.dp,
-            ).coerceAtLeast(140.dp)
-            val peek = remember { RowPeek() }
+            // Poziții fixe: fiecare rând are aceeași înălțime (titlu + cel mai înalt card + spațiu), deci titlul
+            // rândului cu focus și titlul rândului următor stau mereu în același loc, oricare ar fi cardurile.
+            val slot = ROW_TITLE_HEIGHT + maxOf(spec.posterHeight, spec.cardHeight) + ROW_CARDS_PADDING + ROW_GAP
+            val listHeight = slot + ROW_TITLE_HEIGHT
+            val heroHeight = (maxHeight - listHeight).coerceAtLeast(140.dp)
+            val animate by UiPrefs.rowAnimation.collectAsStateWithLifecycle()
+            val rows = remember(slot, animate) { HomeRows(slot, listState, scope, animate) }
             Column(Modifier.fillMaxSize()) {
                 Hero(
                     catalog.hero,
@@ -171,20 +173,23 @@ private fun HomeContent(
                     Modifier.fillMaxWidth().height(heroHeight),
                     compact = heroHeight < 200.dp,
                 )
-                // Rândul cu focus urcă sus, cu titlul lui; deasupra lui nu se vede nimic din rândul anterior,
-                // sub el doar titlul rândului următor.
-                // Pivotul se aplică posterului cu focus: deasupra lui încape titlul rândului, întreg.
-                PivotScroll(pivot = ROW_HEAD) {
-                    CompositionLocalProvider(LocalRowPeek provides peek) {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize().focusRequester(listFocus).clipBelowNextTitle(peek, ROW_TITLE_HEIGHT),
-                        contentPadding = PaddingValues(bottom = 240.dp),
-                    ) {
-                        personalRows()
-                        items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
-                        item(key = "attribution") { AttributionNote() }
-                    }
+                // Se vede doar rândul cu focus și, dedesubt, titlul rândului următor (lista e exact atât de înaltă).
+                FixedRowsScroll {
+                    CompositionLocalProvider(LocalHomeRows provides rows) {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(listHeight)
+                                .homeRowsList(rows)
+                                .focusRequester(listFocus),
+                            // Și ultimul rând poate urca sus.
+                            contentPadding = PaddingValues(bottom = slot),
+                        ) {
+                            personalRows()
+                            items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
+                            item(key = "attribution") { AttributionNote() }
+                        }
                     }
                 }
             }
@@ -311,8 +316,11 @@ private fun Hero(
 /** Cât ocupă titlul unui rând (SectionTitle): atât se vede din rândul de sub cel cu focus. */
 private val ROW_TITLE_HEIGHT = 40.dp
 
-/** De la marginea de sus a unui rând până la postere: titlul rândului și spațiul de deasupra posterelor. */
-private val ROW_HEAD = 54.dp
+/** Spațiul de deasupra și de dedesubt al cardurilor dintr-un rând (LazyRow, 10dp + 10dp). */
+private val ROW_CARDS_PADDING = 20.dp
+
+/** Spațiul în plus până la titlul rândului următor. */
+private val ROW_GAP = 22.dp
 
 /** Cât așteptăm rândurile personale înainte să punem focusul oricum (prima pornire, fără nimic salvat). */
 private const val PERSONAL_WAIT_MS = 4_000L

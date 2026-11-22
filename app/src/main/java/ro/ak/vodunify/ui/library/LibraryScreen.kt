@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -23,11 +22,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import ro.ak.vodunify.core.prefs.LibraryLayout
+import ro.ak.vodunify.ui.components.DefaultScroll
+import ro.ak.vodunify.ui.components.PivotScroll
+import ro.ak.vodunify.ui.components.SectionTitle
+import ro.ak.vodunify.ui.components.rowSpacing
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
 import ro.ak.vodunify.ui.components.Button
 import androidx.compose.material3.CircularProgressIndicator
 import ro.ak.vodunify.ui.components.FilterChip
@@ -63,12 +68,17 @@ fun LibraryScreen(viewModel: LibraryViewModel = hiltViewModel()) {
     val status by viewModel.syncStatus.collectAsStateWithLifecycle()
     val actions = LocalCatalogActions.current
 
+    if (state.layout == LibraryLayout.ROWS) {
+        LibraryRows(state, status, viewModel)
+        return
+    }
     LazyVerticalGrid(
         columns = GridCells.Adaptive(spec.posterWidth + 8.dp),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(if (spec.isTv) 20.dp else 12.dp),
-        verticalArrangement = Arrangement.spacedBy(if (spec.isTv) 24.dp else 16.dp),
+        // Aceeași distanță între postere ca în rândurile din Acasă.
+        horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
+        verticalArrangement = Arrangement.spacedBy(rowSpacing()),
     ) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -140,15 +150,70 @@ fun LibraryScreen(viewModel: LibraryViewModel = hiltViewModel()) {
     }
 }
 
+/** Lista mea pe rânduri orizontale, câte unul pe categorie și tip (ca în Acasă), fără filtre. */
 @Composable
-private fun LibraryCard(item: LibraryItem) {
+private fun LibraryRows(state: LibraryUiState, status: SyncStatus, viewModel: LibraryViewModel) {
+    val spec = layoutSpec()
+    val actions = LocalCatalogActions.current
+    PivotScroll(pivot = 54.dp, enabled = spec.isTv) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 8.dp, bottom = 120.dp)) {
+            item(key = "header") {
+                Row(
+                    Modifier.padding(horizontal = spec.screenPadding),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text("Lista mea", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    if (status is SyncStatus.Running) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    if (state.connected && ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED) {
+                        OutlinedButton(onClick = viewModel::syncNow, enabled = status !is SyncStatus.Running) { Text("Sincronizează") }
+                    }
+                }
+            }
+            when {
+                state.loading -> item(key = "loading") {
+                    Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                }
+                !state.connected -> item(key = "connect") {
+                    Column(Modifier.padding(horizontal = spec.screenPadding), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Conectează Trakt sau SIMKL ca să-ți vezi aici istoricul.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Button(onClick = actions.openSettings) { Text("Deschide Setări") }
+                    }
+                }
+                state.rows.isEmpty() -> item(key = "empty") {
+                    Text(
+                        if (status is SyncStatus.Running) "Se sincronizează…" else "Nimic aici încă. Ce vezi, prin AK Scrobbler, apare aici.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = spec.screenPadding),
+                    )
+                }
+                else -> items(state.rows, key = { it.title.substringBefore(" (") }) { row ->
+                    Column {
+                        SectionTitle(row.title)
+                        DefaultScroll {
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
+                            ) {
+                                items(row.items, key = { it.key }) { LibraryCard(it, rowKey = row.title.substringBefore(" (")) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryCard(item: LibraryItem, rowKey: String = "library") {
     val spec = layoutSpec()
     val actions = LocalCatalogActions.current
     // Fără text sub poster (ca peste tot): episodul / progresul stă pe poster.
     FocusCard(
         onClick = { item.tmdbId?.let { actions.openTitle(item.kind, it) } },
         modifier = Modifier.wrapContentSize().size(spec.posterWidth, spec.posterHeight),
-        restoreKey = "library|${item.key}",
+        restoreKey = "$rowKey|${item.key}",
     ) {
         Box(Modifier.fillMaxSize().semantics { contentDescription = listOf(item.title, item.subtitle).filter { it.isNotBlank() }.joinToString(", ") }) {
             NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
