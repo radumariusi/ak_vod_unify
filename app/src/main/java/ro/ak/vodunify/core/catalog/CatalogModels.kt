@@ -1,5 +1,6 @@
 package ro.ak.vodunify.core.catalog
 
+import kotlinx.serialization.Serializable
 import ro.ak.vodunify.core.prefs.Market
 
 enum class TitleKind(val path: String, val label: String) {
@@ -22,6 +23,7 @@ enum class StudioKind(val path: String, val label: String) {
     }
 }
 
+@Serializable
 data class CatalogItem(
     val id: Long,
     val kind: TitleKind,
@@ -63,6 +65,7 @@ enum class ReleaseChannel {
  * O lansare a unui film, pentru „În curând” / „Noutăți”: unde, în ce țară (RO / US), când și, la streaming,
  * pe ce serviciu ([serviceId] = id-ul din calendar, ex. „netflix”; [mine] = e pe aplicațiile tale).
  */
+@Serializable
 data class MovieReleaseEvent(
     val channel: ReleaseChannel,
     val region: String,
@@ -175,8 +178,10 @@ data class StudioDetails(
     val shows: List<CatalogItem>,
 )
 
+@Serializable
 data class CatalogRow(val id: String, val title: String, val items: List<CatalogItem>)
 
+@Serializable
 data class HomeCatalog(val hero: List<CatalogItem>, val rows: List<CatalogRow>)
 
 data class Genre(val id: Int, val name: String)

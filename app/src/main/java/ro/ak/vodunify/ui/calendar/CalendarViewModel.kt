@@ -1,5 +1,7 @@
 package ro.ak.vodunify.ui.calendar
 
+import ro.ak.vodunify.core.calendar.model.CalendarResult
+import ro.ak.vodunify.core.calendar.model.MovieCalendarResult
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -139,6 +141,9 @@ class CalendarViewModel @Inject constructor(
     /** Ultimul rezultat pentru aceeași perioadă: rămâne pe ecran cât se reîncarcă. */
     @Volatile private var last: Pair<String, CalendarUiState>? = null
 
+    /** Ultima apăsare pe „Reîncarcă” deja tratată. */
+    @Volatile private var handledRefresh = 0
+
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
@@ -195,26 +200,38 @@ class CalendarViewModel @Inject constructor(
             return@flow
         }
         val periodKey = "${q.tab}-${q.mode}-$from-$to"
+        // „Reîncarcă” cere din nou; altfel rezultatul păstrat (de la ultima vizită sau pregătit de Acasă) apare pe loc.
+        val force = q.refresh != handledRefresh
+        handledRefresh = q.refresh
+        fun episodesState(r: CalendarResult) = base.copy(
+            loading = false,
+            passed = r.entries.map { it.toItem(false) },
+            rejected = r.rejected.map { it.toItem(false) },
+            summary = CalendarSummary(r.entries.size, r.rejected.size, r.hiddenByCategory, r.hiddenByUser, r.notOnMyApps, r.usedImdb),
+        )
+        fun moviesState(r: MovieCalendarResult) = base.copy(
+            loading = false,
+            passed = r.entries.map { it.toItem(false) },
+            rejected = r.rejected.map { it.toItem(false) },
+            summary = CalendarSummary(r.entries.size, r.rejected.size, r.hiddenByCategory, r.hiddenByUser, r.notOnMyApps, r.usedImdb),
+        )
+        if (!force) {
+            val cached = when (q.tab) {
+                CalendarTab.SHOWS -> calendar.cachedEpisodes(from, to, q.settings)?.let(::episodesState)
+                CalendarTab.MOVIES -> calendar.cachedMovies(from, to, q.settings)?.let(::moviesState)
+            }
+            if (cached != null) {
+                last = periodKey to cached
+                emit(cached)
+                return@flow
+            }
+        }
         val previous = last?.takeIf { it.first == periodKey }?.second
         emit(base.copy(loading = true, passed = previous?.passed, rejected = previous?.rejected.orEmpty(), summary = previous?.summary ?: CalendarSummary()))
         try {
             val result = when (q.tab) {
-                CalendarTab.SHOWS -> calendar.episodes(from, to, q.settings).let { r ->
-                    base.copy(
-                        loading = false,
-                        passed = r.entries.map { it.toItem(false) },
-                        rejected = r.rejected.map { it.toItem(false) },
-                        summary = CalendarSummary(r.entries.size, r.rejected.size, r.hiddenByCategory, r.hiddenByUser, r.notOnMyApps, r.usedImdb),
-                    )
-                }
-                CalendarTab.MOVIES -> calendar.movies(from, to, q.settings).let { r ->
-                    base.copy(
-                        loading = false,
-                        passed = r.entries.map { it.toItem(false) },
-                        rejected = r.rejected.map { it.toItem(false) },
-                        summary = CalendarSummary(r.entries.size, r.rejected.size, r.hiddenByCategory, r.hiddenByUser, r.notOnMyApps, r.usedImdb),
-                    )
-                }
+                CalendarTab.SHOWS -> episodesState(calendar.episodes(from, to, q.settings, force))
+                CalendarTab.MOVIES -> moviesState(calendar.movies(from, to, q.settings, force))
             }
             last = periodKey to result
             emit(result)

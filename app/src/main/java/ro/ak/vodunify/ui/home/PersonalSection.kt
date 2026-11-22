@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import ro.ak.vodunify.ui.components.Button
 import androidx.compose.material3.Card
@@ -90,22 +91,45 @@ fun PersonalSection(rows: PersonalRows, status: SyncStatus, onSync: () -> Unit) 
             PosterRow("Noutăți din Lista mea · Episoade noi", rows.newEpisodes)
             PosterRow("În curând · Filme", rows.soonMovies)
             PosterRow("În curând · Episoade", rows.soonEpisodes)
-            if (status is SyncStatus.Failed) {
-                Row(
-                    Modifier.padding(horizontal = layoutSpec().screenPadding),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "Sincronizare eșuată: ${status.message}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    TextButton(onClick = onSync) { Text("Reîncearcă") }
-                }
-            }
+            if (status is SyncStatus.Failed) SyncFailedRow(status, onSync)
         }
     }
+}
+
+@Composable
+private fun SyncFailedRow(status: SyncStatus.Failed, onSync: () -> Unit) {
+    Row(
+        Modifier.padding(horizontal = layoutSpec().screenPadding),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "Sincronizare eșuată: ${status.message}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        TextButton(onClick = onSync) { Text("Reîncearcă") }
+    }
+}
+
+/**
+ * Rândurile personale ca elemente separate ale listei din Acasă: lista desenează doar rândurile de pe ecran,
+ * nu pe toate odată (pornire și derulare mai ușoare pe TV).
+ */
+fun LazyListScope.personalItems(rows: PersonalRows, status: SyncStatus, onSync: () -> Unit) {
+    if (rows.state != PersonalState.CONNECTED) {
+        item(key = "personal") { PersonalSection(rows, status, onSync) }
+        return
+    }
+    // Fără nimic început: mesajul (și, la nevoie, eroarea de sincronizare) din PersonalSection.
+    if (rows.continueEmpty) item(key = "p_empty") { PersonalSection(PersonalRows(PersonalState.CONNECTED), status, onSync) }
+    if (rows.continueMovies.isNotEmpty()) item(key = "p_continue_movies") { WideRow("Continuă vizionarea · Filme", rows.continueMovies) }
+    if (rows.continueShows.isNotEmpty()) item(key = "p_continue_shows") { WideRow("Continuă vizionarea · Seriale", rows.continueShows) }
+    if (rows.newMovies.isNotEmpty()) item(key = "p_new_movies") { PosterRow("Noutăți din Lista mea · Filme", rows.newMovies) }
+    if (rows.newEpisodes.isNotEmpty()) item(key = "p_new_episodes") { PosterRow("Noutăți din Lista mea · Episoade noi", rows.newEpisodes) }
+    if (rows.soonMovies.isNotEmpty()) item(key = "p_soon_movies") { PosterRow("În curând · Filme", rows.soonMovies) }
+    if (rows.soonEpisodes.isNotEmpty()) item(key = "p_soon_episodes") { PosterRow("În curând · Episoade", rows.soonEpisodes) }
+    if (status is SyncStatus.Failed && !rows.continueEmpty) item(key = "p_sync_failed") { SyncFailedRow(status, onSync) }
 }
 
 @Composable
@@ -307,7 +331,7 @@ private fun focusedTitle(item: PersonalItem, badge: BadgeSpec?): FocusedTitle? {
  * Continuă vizionarea: episodul, procentul și când l-ai văzut.
  */
 private fun heroMeta(item: PersonalItem): String {
-    val date = item.eventDate
+    val date = item.eventDate?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() }
     if (date != null) {
         return listOfNotNull(releaseText(item), item.episodeCode, HomeSections.fullDayLabel(date)).joinToString(" · ")
     }

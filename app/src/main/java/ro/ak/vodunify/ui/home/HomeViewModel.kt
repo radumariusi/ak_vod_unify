@@ -8,7 +8,11 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
@@ -55,7 +59,7 @@ import coil.request.ImageRequest
 import dagger.hilt.android.qualifiers.ApplicationContext
 
 /** Ecranul principal: rânduri personale (baza locală, AK Scrobbler) + rânduri din TMDb pentru piața și limba din Setări. */
-@OptIn(ExperimentalCoroutinesApi::class)
+@OptIn(ExperimentalCoroutinesApi::class, kotlinx.coroutines.FlowPreview::class)
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val catalog: CatalogRepository,
@@ -65,88 +69,79 @@ class HomeViewModel @Inject constructor(
     private val resolver: TargetResolver,
     private val calendar: CalendarRepository,
     @ApplicationContext private val context: Context,
+    private val snapshots: HomeSnapshotStore,
 ) : ViewModel() {
 
     private val reload = MutableStateFlow(0)
 
-    val state: StateFlow<LoadState<HomeCatalog>> = combine(prefs.settings, playbackPrefs.settings, reload) { s, p, _ -> s to p }
-        .flatMapLatest { (settings, playback) ->
-            flow {
-                emit(LoadState.Loading)
-                emit(
-                    loadCatching {
-                        val installed = withContext(Dispatchers.IO) { runCatching { resolver.installedApps().keys }.getOrDefault(emptySet()) }
-                        val shelves = StreamingService.owned(installed).map {
-                            ServiceShelf(it.displayName, it.tmdbProviderIds, playback.marketOf(it))
-                        }
-                        catalog.home(settings, shelves)
-                    },
-                )
-            }
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LoadState.Loading)
+    // Acasă apare pe loc cu ultimul ecran știut (din memorie sau de pe disc), apoi se reîmprospătează în fundal.
+    // Fără „Se încarcă…” la fiecare revenire pe filă: rândurile rămân pe ecran cât se cer datele noi.
+    private val _state = MutableStateFlow<LoadState<HomeCatalog>>(
+        snapshots.memory?.catalog?.let { LoadState.Data(it) } ?: LoadState.Loading,
+    )
+    val state: StateFlow<LoadState<HomeCatalog>> = _state.asStateFlow()
+
+    private val _personal = MutableStateFlow(snapshots.memory?.personal ?: PersonalRows(PersonalState.LOADING))
+    val personal: StateFlow<PersonalRows> = _personal.asStateFlow()
 
     private val configured = tracking.trackers.any { it.isConfigured }
 
-    val personal: StateFlow<PersonalRows> = combine(
-        tracking.anyConnected,
-        tracking.continueWatching,
-        tracking.watchlist,
-        tracking.seriesSummaries,
-        prefs.settings,
-    ) { connected, resume, list, series, settings -> Snapshot(connected, resume, list, series, settings) }
-        .mapLatest { s ->
-            // „Continuă vizionarea” vine din AK Scrobbler: se arată și fără Trakt/SIMKL conectat.
-            if (ExternalTrackers.ENABLED && s.resume.isEmpty()) {
-                if (!configured) return@mapLatest PersonalRows(PersonalState.NOT_CONFIGURED)
-                if (!s.connected) return@mapLatest PersonalRows(PersonalState.DISCONNECTED)
-            }
-            coroutineScope {
-                val followed = async { followed(s) }
-                val popular = async {
-                    if (!catalog.isConfigured) emptyList()
-                    else runCatching {
-                        catalog.upcomingPopular(s.settings, HomeSections.SOON_MOVIE_DAYS, POPULAR_EPISODE_DAYS, POPULAR_RECENT_DAYS)
-                    }.getOrDefault(emptyList()).map { FollowedTitle(it, null) }
-                }
-                val packages = async { servicePackages() }
-                val resume = s.resume.take(ROW_LIMIT * 2).map { e ->
-                    async { PersonalMapper.resume(e, art(PersonalMapper.kind(e.ref), e.ref.tmdbId, s.settings)) }
-                }.awaitAll()
-                val today = LocalDate.now()
-                val f = followed.await()
-                val p = popular.await()
-                // Filmele, cu lansările lor (cinema RO / US, streaming, digital) din calendar.
-                val movies = withReleases(f.filter { it.releases.item.kind == TitleKind.MOVIE })
-                val shows = f.filter { it.releases.item.kind == TitleKind.TV }
-                val popularMovies = withReleases(p.filter { it.releases.item.kind == TitleKind.MOVIE })
-                val popularShows = p.filter { it.releases.item.kind == TitleKind.TV }
-                val apps = packages.await()
-                fun List<PersonalItem>.withApps() = map { i ->
-                    val r = i.release
-                    val id = r?.serviceId?.takeIf { r.channel == ReleaseChannel.STREAMING }
-                    if (id != null) i.copy(appPackage = apps[id]) else i
-                }
-                // Întâi ce e din Lista mea, apoi ce e popular, ca rândurile să nu fie goale. Un titlu trece singur
-                // din „În curând” în „Noutăți” la data lansării (aceleași titluri, altă fereastră de timp).
-                PersonalRows(
-                    PersonalState.CONNECTED,
-                    continueMovies = resume.filter { it.kind == TitleKind.MOVIE }.take(ROW_LIMIT),
-                    continueShows = resume.filter { it.kind == TitleKind.TV }.take(ROW_LIMIT),
-                    newMovies = (HomeSections.newMovies(movies, today) + HomeSections.newMovies(popularMovies, today))
-                        .distinctBy { it.key }.take(ROW_LIMIT).withApps(),
-                    newEpisodes = (
-                        HomeSections.newEpisodes(shows, today) +
-                            HomeSections.newEpisodes(popularShows, today, POPULAR_RECENT_EPISODE_DAYS)
-                        ).distinctBy { it.key }.take(ROW_LIMIT),
-                    soonMovies = (HomeSections.soonMovies(movies, today) + HomeSections.soonMovies(popularMovies, today))
-                        .distinctBy { it.key }.take(ROW_LIMIT).withApps(),
-                    soonEpisodes = (HomeSections.soonEpisodes(shows, today) + HomeSections.soonEpisodes(popularShows, today))
-                        .distinctBy { it.key }.take(ROW_LIMIT),
-                )
-            }
+    private suspend fun personalRows(s: Snapshot): PersonalRows {
+        // „Continuă vizionarea” vine din AK Scrobbler: se arată și fără Trakt/SIMKL conectat.
+        if (ExternalTrackers.ENABLED && s.resume.isEmpty()) {
+            if (!configured) return PersonalRows(PersonalState.NOT_CONFIGURED)
+            if (!s.connected) return PersonalRows(PersonalState.DISCONNECTED)
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PersonalRows(PersonalState.LOADING))
+        return coroutineScope {
+            val followed = async { followed(s) }
+            val popular = async {
+                if (!catalog.isConfigured) {
+                    emptyList()
+                } else {
+                    snapshots.popular(s.settings.toString()) {
+                        runCatching {
+                            catalog.upcomingPopular(s.settings, HomeSections.SOON_MOVIE_DAYS, POPULAR_EPISODE_DAYS, POPULAR_RECENT_DAYS)
+                        }.getOrDefault(emptyList())
+                    }.map { FollowedTitle(it, null) }
+                }
+            }
+            val packages = async { snapshots.packages { servicePackages() } }
+            val resume = s.resume.take(ROW_LIMIT * 2).map { e ->
+                async { PersonalMapper.resume(e, art(PersonalMapper.kind(e.ref), e.ref.tmdbId, s.settings)) }
+            }.awaitAll()
+            val today = LocalDate.now()
+            val f = followed.await()
+            val p = popular.await()
+            // Filmele, cu lansările lor (cinema RO / US, streaming, digital) din calendar.
+            val movies = withReleases(f.filter { it.releases.item.kind == TitleKind.MOVIE })
+            val shows = f.filter { it.releases.item.kind == TitleKind.TV }
+            val popularMovies = withReleases(p.filter { it.releases.item.kind == TitleKind.MOVIE })
+            val popularShows = p.filter { it.releases.item.kind == TitleKind.TV }
+            val apps = packages.await()
+            fun List<PersonalItem>.withApps() = map { i ->
+                val r = i.release
+                val id = r?.serviceId?.takeIf { r.channel == ReleaseChannel.STREAMING }
+                if (id != null) i.copy(appPackage = apps[id]) else i
+            }
+            // Întâi ce e din Lista mea, apoi ce e popular, ca rândurile să nu fie goale. Un titlu trece singur
+            // din „În curând” în „Noutăți” la data lansării (aceleași titluri, altă fereastră de timp).
+            PersonalRows(
+                PersonalState.CONNECTED,
+                continueMovies = resume.filter { it.kind == TitleKind.MOVIE }.take(ROW_LIMIT),
+                continueShows = resume.filter { it.kind == TitleKind.TV }.take(ROW_LIMIT),
+                newMovies = (HomeSections.newMovies(movies, today) + HomeSections.newMovies(popularMovies, today))
+                    .distinctBy { it.key }.take(ROW_LIMIT).withApps(),
+                newEpisodes = (
+                    HomeSections.newEpisodes(shows, today) +
+                        HomeSections.newEpisodes(popularShows, today, POPULAR_RECENT_EPISODE_DAYS)
+                    ).distinctBy { it.key }.take(ROW_LIMIT),
+                soonMovies = (HomeSections.soonMovies(movies, today) + HomeSections.soonMovies(popularMovies, today))
+                    .distinctBy { it.key }.take(ROW_LIMIT).withApps(),
+                soonEpisodes = (HomeSections.soonEpisodes(shows, today) + HomeSections.soonEpisodes(popularShows, today))
+                    .distinctBy { it.key }.take(ROW_LIMIT),
+            )
+        }
+    }
 
     /**
      * Lista mea pentru „Noutăți” și „În curând”: titlurile din De văzut plus serialele pe care le-ai început
@@ -167,8 +162,9 @@ class HomeViewModel @Inject constructor(
         return coroutineScope {
             wanted.values.take(FOLLOW_LIMIT).map { (kind, id, seen) ->
                 async {
-                    artGate.withPermit { runCatching { catalog.releases(kind, id, s.settings) }.getOrNull() }
-                        ?.let { FollowedTitle(it, seen) }
+                    snapshots.releases("${kind.path}:$id:${s.settings.apiLanguage}") {
+                        artGate.withPermit { runCatching { catalog.releases(kind, id, s.settings) }.getOrNull() }
+                    }?.let { FollowedTitle(it, seen) }
                 }
             }.awaitAll().filterNotNull()
         }
@@ -178,8 +174,10 @@ class HomeViewModel @Inject constructor(
     private suspend fun withReleases(movies: List<FollowedTitle>): List<FollowedTitle> = coroutineScope {
         movies.take(RELEASES_LIMIT).map { f ->
             async {
-                val list = artGate.withPermit { runCatching { calendar.movieReleases(f.releases.item.id) }.getOrNull() }
-                if (list.isNullOrEmpty()) f else f.copy(releases = f.releases.copy(movieReleases = list.map(::toEvent)))
+                val list = snapshots.movieReleases(f.releases.item.id) {
+                    artGate.withPermit { runCatching { calendar.movieReleases(f.releases.item.id) }.getOrNull() }?.map(::toEvent)
+                }
+                if (list.isNullOrEmpty()) f else f.copy(releases = f.releases.copy(movieReleases = list))
             }
         }.awaitAll() + movies.drop(RELEASES_LIMIT)
     }
@@ -231,6 +229,11 @@ class HomeViewModel @Inject constructor(
 
     init {
         viewModelScope.launch { tracking.syncIfStale() }
+        // Calendarul de azi se pregătește în fundal, ca fila Calendar să apară pe loc.
+        viewModelScope.launch {
+            delay(CALENDAR_PREWARM_DELAY_MS)
+            runCatching { calendar.prewarmToday() }
+        }
     }
 
     private val logoCache = ConcurrentHashMap<String, String>()
@@ -274,8 +277,53 @@ class HomeViewModel @Inject constructor(
     }
 
     fun retry() {
+        snapshots.clearMemo()
         reload.value++
         syncNow()
+    }
+
+    init {
+        viewModelScope.launch {
+            snapshots.load()?.let { snap ->
+                if (_state.value is LoadState.Loading) snap.catalog?.let { _state.value = LoadState.Data(it) }
+                if (_personal.value.state == PersonalState.LOADING) snap.personal?.let { _personal.value = it }
+            }
+        }
+        viewModelScope.launch {
+            combine(prefs.settings, playbackPrefs.settings, reload) { s, p, _ -> s to p }.collectLatest { (settings, playback) ->
+                val result = loadCatching {
+                    val installed = withContext(Dispatchers.IO) { runCatching { resolver.installedApps().keys }.getOrDefault(emptySet()) }
+                    val shelves = StreamingService.owned(installed).map {
+                        ServiceShelf(it.displayName, it.tmdbProviderIds, playback.marketOf(it))
+                    }
+                    catalog.home(settings, shelves)
+                }
+                if (result is LoadState.Data) {
+                    _state.value = result
+                    snapshots.saveCatalog(result.value)
+                } else if (_state.value !is LoadState.Data) {
+                    // O eroare nu șterge rândurile deja afișate.
+                    _state.value = result
+                }
+            }
+        }
+        viewModelScope.launch {
+            combine(
+                tracking.anyConnected,
+                tracking.continueWatching,
+                tracking.watchlist,
+                tracking.seriesSummaries,
+                prefs.settings,
+            ) { connected, resume, list, series, settings -> Snapshot(connected, resume, list, series, settings) }
+                // AK Scrobbler scrie des (fiecare minut văzut): adunăm schimbările apropiate într-una singură.
+                .debounce(400)
+                .distinctUntilChanged()
+                .collectLatest { s ->
+                    val rows = withContext(Dispatchers.Default) { personalRows(s) }
+                    _personal.value = rows
+                    snapshots.savePersonal(rows)
+                }
+        }
     }
 
     private companion object {
@@ -291,5 +339,7 @@ class HomeViewModel @Inject constructor(
 
         /** Câte filme primesc lansările detaliate (cinema / streaming / digital). */
         const val RELEASES_LIMIT = 80
+
+        const val CALENDAR_PREWARM_DELAY_MS = 6_000L
     }
 }

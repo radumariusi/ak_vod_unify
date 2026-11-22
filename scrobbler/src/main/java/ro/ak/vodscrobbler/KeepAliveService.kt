@@ -24,14 +24,18 @@ import android.view.WindowManager
 /**
  * Serviciu în prim-plan care ține procesul AK Scrobbler „important” pentru Android, ca
  * televizoarele agresive (ex. TCL) să nu-l închidă. Tot el desenează bulina din dreapta sus,
- * peste celelalte aplicații (dacă i-ai dat voie să „apară peste alte aplicații”):
+ * peste celelalte aplicații (dacă i-ai dat voie să „apară peste alte aplicații”). Implicit:
  *  - verde: activ, nimic nu rulează;
  *  - roșu: urmărește acum o redare;
  *  - gri: ascultătorul nu are încă acces.
+ * Culorile, mărimea, colțul și transparența se schimbă din ecranul AK Scrobbler (vezi [Prefs]).
  */
 class KeepAliveService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var dot: View? = null
+
+    /** Mărimea, colțul și transparența cu care a fost pusă bulina; altele = o refacem. */
+    private var dotLayout: Triple<Int, Prefs.Corner, Int>? = null
 
     private val refresher = object : Runnable {
         override fun run() {
@@ -103,18 +107,20 @@ class KeepAliveService : Service() {
             removeDot()
             return
         }
-        val view = dot ?: addDot() ?: return
-        val color = when {
-            !ScrobblerState.listenerConnected -> Color.rgb(140, 140, 140)
-            ScrobblerState.live.any { it.state == PlayState.PLAYING } -> Color.rgb(229, 9, 20)
-            else -> Color.rgb(46, 204, 113)
+        val layout = Triple(Prefs.dotSizeDp(this), Prefs.dotCorner(this), Prefs.dotAlpha(this))
+        if (dot != null && layout != dotLayout) removeDot()
+        val view = dot ?: addDot(layout) ?: return
+        val state = when {
+            !ScrobblerState.listenerConnected -> Prefs.DotState.OFF
+            ScrobblerState.live.any { it.state == PlayState.PLAYING } -> Prefs.DotState.PLAYING
+            else -> Prefs.DotState.IDLE
         }
-        (view.background as? GradientDrawable)?.setColor(color)
+        (view.background as? GradientDrawable)?.setColor(Prefs.dotColor(this, state).value)
     }
 
-    private fun addDot(): View? = try {
+    private fun addDot(layout: Triple<Int, Prefs.Corner, Int>): View? = try {
         val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        val size = (12 * resources.displayMetrics.density).toInt()
+        val size = (layout.first * resources.displayMetrics.density).toInt()
         val margin = (10 * resources.displayMetrics.density).toInt()
         val view = View(this).apply {
             background = GradientDrawable().apply {
@@ -122,7 +128,7 @@ class KeepAliveService : Service() {
                 setColor(Color.rgb(46, 204, 113))
                 setStroke((1.5f * resources.displayMetrics.density).toInt(), Color.argb(160, 0, 0, 0))
             }
-            alpha = 0.85f
+            alpha = layout.third / 100f
         }
         val params = WindowManager.LayoutParams(
             size,
@@ -133,12 +139,18 @@ class KeepAliveService : Service() {
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT,
         ).apply {
-            gravity = Gravity.TOP or Gravity.END
+            gravity = when (layout.second) {
+                Prefs.Corner.TOP_END -> Gravity.TOP or Gravity.END
+                Prefs.Corner.TOP_START -> Gravity.TOP or Gravity.START
+                Prefs.Corner.BOTTOM_END -> Gravity.BOTTOM or Gravity.END
+                Prefs.Corner.BOTTOM_START -> Gravity.BOTTOM or Gravity.START
+            }
             x = margin
             y = margin
         }
         wm.addView(view, params)
         dot = view
+        dotLayout = layout
         view
     } catch (e: Exception) {
         Log.w(TAG, "Nu pot afișa bulina", e)
@@ -149,6 +161,7 @@ class KeepAliveService : Service() {
         val view = dot ?: return
         runCatching { (getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(view) }
         dot = null
+        dotLayout = null
     }
 
     companion object {

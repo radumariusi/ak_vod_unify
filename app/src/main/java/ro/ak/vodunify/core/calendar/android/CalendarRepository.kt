@@ -165,11 +165,42 @@ class CalendarRepository @Inject constructor(
 
     private suspend fun language(): String = catalogPrefs.settings.first().apiLanguage
 
-    suspend fun episodes(from: LocalDate, to: LocalDate, s: CalendarSettings): CalendarResult =
-        episodeRepo(language()).episodesBetween(from, to, s, apiKey = "", omdbKey = omdbKey(s))
+    // Ultimele rezultate, ținute în memorie cât trăiește aplicația: fila Calendar apare pe loc când revii pe ea
+    // (sau după ce Acasă a pregătit ziua de azi), apoi „Reîncarcă” le cere din nou.
+    private data class MemoKey(val from: LocalDate, val to: LocalDate, val settings: CalendarSettings, val language: String)
+    private class Memo<T>(val at: Long, val value: T)
+    private val episodeMemo = ConcurrentHashMap<MemoKey, Memo<CalendarResult>>()
+    private val movieMemo = ConcurrentHashMap<MemoKey, Memo<MovieCalendarResult>>()
+    private fun <T> Memo<T>?.fresh(): T? = this?.takeIf { System.currentTimeMillis() - it.at < MEMO_TTL_MS }?.value
 
-    suspend fun movies(from: LocalDate, to: LocalDate, s: CalendarSettings): MovieCalendarResult =
-        movieRepo(language()).moviesBetween(from, to, s, apiKey = "", omdbKey = omdbKey(s))
+    /** Rezultatul păstrat pentru perioada asta (fără nicio cerere), dacă e destul de nou. */
+    suspend fun cachedEpisodes(from: LocalDate, to: LocalDate, s: CalendarSettings): CalendarResult? =
+        episodeMemo[MemoKey(from, to, s, language())].fresh()
+
+    suspend fun cachedMovies(from: LocalDate, to: LocalDate, s: CalendarSettings): MovieCalendarResult? =
+        movieMemo[MemoKey(from, to, s, language())].fresh()
+
+    suspend fun episodes(from: LocalDate, to: LocalDate, s: CalendarSettings, force: Boolean = false): CalendarResult {
+        val key = MemoKey(from, to, s, language())
+        if (!force) episodeMemo[key].fresh()?.let { return it }
+        return episodeRepo(key.language).episodesBetween(from, to, s, apiKey = "", omdbKey = omdbKey(s))
+            .also { episodeMemo[key] = Memo(System.currentTimeMillis(), it) }
+    }
+
+    suspend fun movies(from: LocalDate, to: LocalDate, s: CalendarSettings, force: Boolean = false): MovieCalendarResult {
+        val key = MemoKey(from, to, s, language())
+        if (!force) movieMemo[key].fresh()?.let { return it }
+        return movieRepo(key.language).moviesBetween(from, to, s, apiKey = "", omdbKey = omdbKey(s))
+            .also { movieMemo[key] = Memo(System.currentTimeMillis(), it) }
+    }
+
+    /** Pregătește în fundal ziua de azi (seriale), cum o deschide fila Calendar. */
+    suspend fun prewarmToday() {
+        if (!isConfigured) return
+        val s = settings.first()
+        val today = RomaniaTime.today()
+        episodes(today, today, s)
+    }
 
     /** Notele IMDb ale episoadelor unui sezon (episod → notă); gol fără cheie OMDb. */
     suspend fun episodeImdbRatings(seriesImdbId: String, season: Int): Map<Int, Double> =
@@ -218,6 +249,7 @@ class CalendarRepository @Inject constructor(
     }
 
     private companion object {
+        const val MEMO_TTL_MS = 30 * 60 * 1000L
         val json = Json { ignoreUnknownKeys = true; coerceInputValues = true; explicitNulls = false }
     }
 }
