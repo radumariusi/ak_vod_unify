@@ -4,6 +4,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.semantics.contentDescription
 import ro.ak.vodunify.ui.components.PosterLabel
+import ro.ak.vodunify.ui.components.PosterBottomRow
 import ro.ak.vodunify.ui.components.FocusBorderWidth
 import ro.ak.vodunify.ui.theme.FocusBorder
 import ro.ak.vodunify.ui.components.AppIconBadge
@@ -150,19 +151,18 @@ private fun Poster(item: CalendarItem, modifier: Modifier) {
         } else {
             Text(item.title, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(6.dp))
         }
-        val top = Modifier.align(Alignment.TopEnd).padding(4.dp)
-        when {
-            item.cinema != null -> CinemaBadge(item.cinema, top)
-            else -> {
-                val pkg = item.watchAppId?.let { icons.apps[it] } ?: icons.player
-                pkg?.let { AppIconBadge(it, top) }
-            }
-        }
         if (item.watched) {
             PosterLabel("✓", Modifier.align(Alignment.TopStart).padding(4.dp))
         }
-        if (item.posterLabel.isNotBlank()) {
-            PosterLabel(item.posterLabel, Modifier.align(Alignment.BottomStart).padding(4.dp))
+        // Jos, ca pe toate posterele: sigla (aplicația ta sau cinema RO / SUA) lângă episod / oră.
+        PosterBottomRow(Modifier.align(Alignment.BottomStart).padding(4.dp), label = item.posterLabel) {
+            val cinema = item.cinema
+            if (cinema != null) {
+                CinemaBadge(cinema)
+            } else {
+                val pkg = item.watchAppId?.let { icons.apps[it] } ?: icons.player
+                pkg?.let { AppIconBadge(it) }
+            }
         }
     }
 }

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import ro.ak.vodunify.ui.components.PlatformBadge
+import ro.ak.vodunify.ui.components.PosterBottomRow
 import ro.ak.vodunify.ui.components.Dropdown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -151,21 +152,11 @@ private fun LibraryCard(item: LibraryItem) {
     ) {
         Box(Modifier.fillMaxSize().semantics { contentDescription = listOf(item.title, item.subtitle).filter { it.isNotBlank() }.joinToString(", ") }) {
             NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
-            PlatformBadge(item.kind, item.tmdbId, Modifier.align(Alignment.TopEnd).padding(4.dp))
-            if (item.subtitle.isNotBlank()) {
-                Text(
-                    item.subtitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.White,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(start = 4.dp, end = 4.dp, bottom = 8.dp)
-                        .background(Color(0xCC000000), MaterialTheme.shapes.extraSmall)
-                        .padding(horizontal = 4.dp, vertical = 1.dp),
-                )
-            }
+            // Jos, ca pe toate posterele: sigla aplicației și eticheta (episodul / progresul).
+            PosterBottomRow(
+                Modifier.align(Alignment.BottomStart).padding(start = 4.dp, end = 4.dp, bottom = 8.dp),
+                label = item.subtitle,
+            ) { PlatformBadge(item.kind, item.tmdbId) }
             if (item.showsProgress && item.progress != null) {
                 LinearProgressIndicator(
                     progress = { item.progress ?: 0f },

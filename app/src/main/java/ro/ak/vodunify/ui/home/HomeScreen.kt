@@ -10,6 +10,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.focus.onFocusChanged
 import ro.ak.vodunify.core.catalog.TitleKind
+import ro.ak.vodunify.ui.components.PosterRatings
 import ro.ak.vodunify.ui.components.LocalPosterLongPress
 import ro.ak.vodunify.ui.components.TitleLogo
 import androidx.compose.foundation.background
@@ -67,6 +68,9 @@ import ro.ak.vodunify.ui.components.FocusedTitle
 import ro.ak.vodunify.ui.components.LocalBackdrop
 import ro.ak.vodunify.ui.components.LocalFocusRestore
 import ro.ak.vodunify.ui.components.PivotScroll
+import ro.ak.vodunify.ui.components.RowPeek
+import ro.ak.vodunify.ui.components.LocalRowPeek
+import ro.ak.vodunify.ui.components.clipBelowNextTitle
 import ro.ak.vodunify.ui.components.RatingChip
 import ro.ak.vodunify.ui.components.TitleBackdrop
 import ro.ak.vodunify.ui.components.TitleRow
@@ -128,7 +132,9 @@ private fun HomeContent(
         // fiecare rând cu focus urcă întreg sub hero (derulare cu pivot). Hero-ul se micșorează cât să încapă
         // un rând întreg de postere dedesubt.
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            val heroHeight = minOf(maxHeight * 0.52f, 240.dp, maxHeight - spec.posterHeight - 92.dp).coerceAtLeast(140.dp)
+            // Sub hero încape exact un rând de postere cu titlul lui și, dedesubt, titlul rândului următor.
+            val heroHeight = minOf(maxHeight * 0.52f, 240.dp, maxHeight - spec.posterHeight - 108.dp).coerceAtLeast(140.dp)
+            val peek = remember { RowPeek() }
             Column(Modifier.fillMaxSize()) {
                 Hero(
                     catalog.hero,
@@ -136,15 +142,18 @@ private fun HomeContent(
                     Modifier.fillMaxWidth().height(heroHeight),
                     compact = heroHeight < 200.dp,
                 )
-                PivotScroll(pivot = 60.dp) {
+                // Rândul cu focus urcă sus, cu titlul lui; sub el se vede doar titlul rândului următor.
+                PivotScroll(pivot = 50.dp) {
+                    CompositionLocalProvider(LocalRowPeek provides peek) {
                     LazyColumn(
                         state = listState,
-                        modifier = Modifier.fillMaxSize().focusRequester(listFocus),
+                        modifier = Modifier.fillMaxSize().focusRequester(listFocus).clipBelowNextTitle(peek, ROW_TITLE_HEIGHT),
                         contentPadding = PaddingValues(bottom = 240.dp),
                     ) {
                         item(key = "personal") { personalRows() }
                         items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
                         item(key = "attribution") { AttributionNote() }
+                    }
                     }
                 }
             }
@@ -230,7 +239,7 @@ private fun Hero(
                 textStyle = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall,
             )
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                shown.rating?.takeIf { it > 0 }?.let { RatingChip(it) }
+                PosterRatings(shown.kind, shown.id, shown.rating)
                 Text(
                     shown.meta,
                     style = MaterialTheme.typography.labelLarge,
@@ -267,3 +276,6 @@ private fun Hero(
         }
     }
 }
+
+/** Cât ocupă titlul unui rând (SectionTitle): atât se vede din rândul de sub cel cu focus. */
+private val ROW_TITLE_HEIGHT = 40.dp

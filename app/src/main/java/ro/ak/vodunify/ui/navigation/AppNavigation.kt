@@ -3,6 +3,7 @@ package ro.ak.vodunify.ui.navigation
 import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.core.playback.PosterBadge
 import ro.ak.vodunify.ui.components.LocalPosterBadge
+import ro.ak.vodunify.ui.components.LocalImdbRating
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
@@ -141,9 +142,11 @@ fun AppNavigation() {
 
     val badgesModel: PosterBadgesViewModel = hiltViewModel()
     val posterBadge: suspend (TitleKind, Long) -> PosterBadge? = remember(badgesModel) { { kind, id -> badgesModel.badge(kind, id) } }
+    val imdbRating: suspend (TitleKind, Long) -> Double? = remember(badgesModel) { { kind, id -> badgesModel.imdbRating(kind, id) } }
 
     CompositionLocalProvider(
         LocalPosterBadge provides posterBadge,
+        LocalImdbRating provides imdbRating,
         LocalCatalogActions provides actions,
         LocalBackdrop provides backdrop,
         LocalFocusRestore provides restore,
@@ -191,8 +194,7 @@ fun AppNavigation() {
 }
 
 /**
- * Meniul de sus: marca AK VOD în stânga, apoi o capsulă din „sticlă” cu căutarea și filele, iar în dreapta
- * o capsulă cu Setările. Fila curentă = sticlă mai deschisă, fila cu focus = alb plin cu text închis
+ * Meniul de sus: marca AK VOD în stânga, apoi o singură capsulă din „sticlă”, simetrică: Caută, filele, Setări. Fila curentă = sticlă mai deschisă, fila cu focus = alb plin cu text închis
  * (aceeași identitate ca toate butoanele). Sus din conținut intră direct în fila curentă.
  */
 @OptIn(ExperimentalComposeUiApi::class)
@@ -208,12 +210,12 @@ private fun TopBar(
     val active = TopDestination.entries.firstOrNull { it.route == current }
     val scroll = rememberScrollState()
     val textTabs = TopDestination.entries.filter { !it.iconTab }
-    val iconTabs = TopDestination.entries.filter { it.iconTab && it != TopDestination.SEARCH }
+    val pad = if (spec.isCompact) 3.dp else 4.dp
     Row(
         Modifier
             .fillMaxWidth()
             .background(Brush.verticalGradient(listOf(Color(0xB3000000), Color.Transparent)))
-            .padding(horizontal = if (spec.isCompact) 8.dp else 24.dp, vertical = if (spec.isTv) 12.dp else 6.dp)
+            .padding(horizontal = if (spec.isCompact) 8.dp else 24.dp, vertical = if (spec.isTv) 10.dp else 6.dp)
             .focusProperties { enter = { tabs[active ?: TopDestination.HOME] ?: FocusRequester.Default } }
             .focusGroup(),
         verticalAlignment = Alignment.CenterVertically,
@@ -228,12 +230,13 @@ private fun TopBar(
             Brand(compact = spec.isCompact)
             Spacer(Modifier.width(if (spec.isCompact) 8.dp else 24.dp))
         }
+        // O singură capsulă, simetrică: Caută la stânga, filele, Setări la dreapta.
         Box(Modifier.weight(1f), contentAlignment = if (spec.isCompact) Alignment.CenterStart else Alignment.Center) {
             Row(
                 Modifier
                     .horizontalScroll(scroll)
                     .background(GlassBar, PillShape)
-                    .padding(if (spec.isCompact) 4.dp else 6.dp),
+                    .padding(pad),
                 horizontalArrangement = Arrangement.spacedBy(if (spec.isCompact) 2.dp else 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -253,25 +256,18 @@ private fun TopBar(
                         onClick = { onSelect(dest) },
                     )
                 }
-            }
-        }
-        Spacer(Modifier.width(if (spec.isCompact) 6.dp else 16.dp))
-        Row(
-            Modifier
-                .background(GlassBar, PillShape)
-                .padding(if (spec.isCompact) 4.dp else 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            iconTabs.forEach { dest ->
                 NavTab(
-                    dest = dest,
-                    active = dest == active,
+                    dest = TopDestination.SETTINGS,
+                    active = active == TopDestination.SETTINGS,
                     iconOnly = true,
-                    modifier = Modifier.focusRequester(tabs.getValue(dest)),
-                    onClick = { onSelect(dest) },
+                    modifier = Modifier.focusRequester(tabs.getValue(TopDestination.SETTINGS)),
+                    onClick = { onSelect(TopDestination.SETTINGS) },
                 )
             }
+        }
+        if (!spec.isCompact) {
+            // Echilibrează marca din stânga, ca bara să rămână centrată pe ecran.
+            Spacer(Modifier.width(if (showBack) 24.dp else 110.dp))
         }
     }
 }
@@ -329,12 +325,12 @@ private fun NavTab(
         interactionSource = interaction,
     ) {
         if (iconOnly) {
-            Box(Modifier.size(if (spec.isTv) 44.dp else 38.dp), contentAlignment = Alignment.Center) {
-                Icon(dest.icon, contentDescription = dest.label, modifier = Modifier.size(if (spec.isTv) 24.dp else 20.dp))
+            Box(Modifier.size(if (spec.isTv) 36.dp else 34.dp), contentAlignment = Alignment.Center) {
+                Icon(dest.icon, contentDescription = dest.label, modifier = Modifier.size(if (spec.isTv) 20.dp else 18.dp))
             }
         } else {
             Box(
-                Modifier.height(if (spec.isTv) 44.dp else 38.dp).padding(horizontal = if (spec.isTv) 22.dp else 16.dp),
+                Modifier.height(if (spec.isTv) 36.dp else 34.dp).padding(horizontal = if (spec.isTv) 18.dp else 14.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(

@@ -1,5 +1,6 @@
 package ro.ak.vodunify.ui.details
 
+import ro.ak.vodunify.ui.components.PosterRatings
 import ro.ak.vodunify.ui.components.PillRow
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -302,7 +303,7 @@ private fun Header(
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Column(Modifier.widthIn(max = 760.dp).fillMaxWidth(0.86f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                item.rating?.takeIf { it > 0 }?.let { RatingChip(it) }
+                PosterRatings(item.kind, item.id, item.rating)
                 Text(
                     metaLine(details),
                     style = MaterialTheme.typography.titleSmall,
