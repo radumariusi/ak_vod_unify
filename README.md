@@ -52,7 +52,7 @@ Nu se commit-uiesc niciodată. Local se pun în `local.properties` (ignorat de g
 | `TMDB_API_KEY` | Catalog TMDb | etapa 2 |
 | `TRAKT_CLIENT_ID` (`TRAKT_CLIENT_SECRET` doar pentru aplicații Trakt vechi, opțional) | Trakt | etapa 3 |
 | `SIMKL_CLIENT_ID` | SIMKL (aplicație OAuth 2.0, tip „TV, devices & command line”, fără secret) | etapa 5 |
-| `OMDB_API_KEY` (opțional) | Note IMDb în Calendar, prin OMDb; se poate pune și din aplicație | etapa 8 |
+| `OMDB_API_KEY` (opțional) | Note IMDb (Calendar, postere, episoade), prin OMDb; se poate pune și din aplicație (Setări → Calendar) | etapa 8 |
 | — | WeTrakr: nu are încă API public; conectorul (fără cheie) e în `core/wetrakr`, neactivat | — |
 
 Pașii exacți pentru obținerea fiecărei chei vin în etapa respectivă.

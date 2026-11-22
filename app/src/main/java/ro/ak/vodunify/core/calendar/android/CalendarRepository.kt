@@ -57,6 +57,9 @@ internal val CALENDAR_TO_SERVICE = mapOf(
     "voyo" to "voyo",
 )
 
+/** Răspunsul OMDb pentru o notă IMDb: [rating] null = fără notă (dacă [answered]) sau necunoscut. */
+data class OmdbAnswer(val rating: Double?, val answered: Boolean)
+
 /** Ce ai văzut deja, după trackere: episoade ("showId-sezon-episod") și filme (id TMDb). */
 data class WatchedSet(val episodes: Set<String> = emptySet(), val movies: Set<Int> = emptySet())
 
@@ -170,6 +173,17 @@ class CalendarRepository @Inject constructor(
     /** Notele IMDb ale episoadelor unui sezon (episod → notă); gol fără cheie OMDb. */
     suspend fun episodeImdbRatings(seriesImdbId: String, season: Int): Map<Int, Double> =
         omdb.seasonRatings(seriesImdbId, season, omdbKey(prefs.settings.first()))
+
+    /**
+     * Nota IMDb a unui titlu („tt…”) prin OMDb, cu cheia din Setări → Calendar (sau secretul OMDB_API_KEY).
+     * [answered] = OMDb a răspuns (titlul fără notă e un răspuns); false fără cheie, după limită sau fără rețea.
+     */
+    suspend fun imdbRating(imdbId: String): OmdbAnswer {
+        val key = omdbKey(prefs.settings.first())
+        if (key.isBlank()) return OmdbAnswer(null, answered = false)
+        val r = omdb.rating(imdbId, key)
+        return OmdbAnswer(r?.rating, answered = r != null || omdb.answered(imdbId))
+    }
 
     /** Toate lansările unui film (cinema RO / US, streaming, digital), pentru „În curând” / „Noutăți” din Acasă. */
     suspend fun movieReleases(movieId: Long): List<MovieRelease> =

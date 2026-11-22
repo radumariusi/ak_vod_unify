@@ -40,6 +40,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
+import coil.compose.AsyncImage
+import ro.ak.vodunify.core.playback.AppRole
+import ro.ak.vodunify.core.playback.TargetApp
 import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.core.playback.PosterBadge
 
@@ -76,36 +81,110 @@ fun PosterLabel(text: String, modifier: Modifier = Modifier) {
 }
 
 /**
- * Sigla unei aplicații instalate (Netflix, Stremio…), luată din sistem: cât o etichetă, cu aceleași colțuri,
- * fără chenar în jur. Dacă sistemul nu dă sigla, apare numele aplicației ([fallbackLabel]) ca etichetă.
+ * Cum află un poster sigla pătrată a unui serviciu de streaming (Netflix „N”…): după pachetul aplicației sau
+ * după id-ul serviciului ([ro.ak.vodunify.core.playback.StreamingService.id]). Dat de AppNavigation.
+ */
+class ServiceLogoLookup(
+    val byPackage: suspend (String) -> String?,
+    val byService: suspend (String) -> String?,
+)
+
+val LocalServiceLogos = staticCompositionLocalOf<ServiceLogoLookup?> { null }
+
+/** O siglă pătrată (imagine), cât o etichetă, cu aceleași colțuri, fără chenar. */
+@Composable
+private fun SquareLogo(url: String, fallback: Painter?, modifier: Modifier = Modifier) {
+    AsyncImage(
+        model = url,
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        error = fallback,
+        modifier = modifier.size(BadgeHeight).clip(BadgeShape),
+    )
+}
+
+/** Inițiala unui nume într-un pătrat (când nu există nicio siglă), niciodată numele întreg. */
+@Composable
+private fun LetterLogo(name: String, modifier: Modifier = Modifier) {
+    Box(
+        modifier.size(BadgeHeight).background(BadgeBackground, BadgeShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            name.trim().take(1).uppercase(),
+            fontSize = 10.sp,
+            lineHeight = 11.sp,
+            fontWeight = FontWeight.Black,
+            color = Color.White,
+            maxLines = 1,
+        )
+    }
+}
+
+/**
+ * Sigla pătrată a unei aplicații: pentru serviciile de streaming varianta pătrată a siglei (Netflix „N”, din
+ * TMDb / JustWatch), pentru playere (Stremio, Nuvio…) iconița pătrată din sistem. Niciodată numele întreg
+ * sau bannerul lat al aplicației.
  */
 @Composable
 fun AppIconBadge(packageName: String, modifier: Modifier = Modifier, fallbackLabel: String? = null) {
     val context = LocalContext.current
-    val icon: ImageBitmap? = remember(packageName) {
-        val pm = context.packageManager
-        runCatching { pm.getApplicationIcon(packageName).toBitmap(96, 96).asImageBitmap() }.getOrNull()
-            ?: runCatching { pm.getApplicationBanner(packageName)?.toBitmap(160, 90)?.asImageBitmap() }.getOrNull()
-    }
-    if (icon == null) {
-        val label = fallbackLabel ?: remember(packageName) {
-            runCatching {
-                context.packageManager.let { pm -> pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString() }
-            }.getOrNull()
+    val lookup = LocalServiceLogos.current
+    val isService = remember(packageName) { TargetApp.byPackage(packageName)?.role == AppRole.OFFICIAL }
+    var logoUrl by remember(packageName) { mutableStateOf<String?>(null) }
+    var looking by remember(packageName) { mutableStateOf(lookup != null && isService) }
+    LaunchedEffect(packageName, lookup) {
+        if (lookup != null && isService) {
+            logoUrl = runCatching { lookup.byPackage(packageName) }.getOrNull()
+            looking = false
         }
-        label?.let { PosterLabel(it, modifier) }
-        return
     }
-    val wide = icon.width > icon.height * 1.3f
-    Image(
-        icon,
-        contentDescription = null,
-        contentScale = ContentScale.Crop,
-        modifier = modifier
-            .height(BadgeHeight)
-            .width(if (wide) BadgeHeight * 16f / 9f else BadgeHeight)
-            .clip(BadgeShape),
-    )
+    val icon: ImageBitmap? = remember(packageName) {
+        runCatching { context.packageManager.getApplicationIcon(packageName).toBitmap(96, 96).asImageBitmap() }.getOrNull()
+    }
+    val iconPainter = remember(icon) { icon?.let { BitmapPainter(it) } }
+    val url = logoUrl
+    when {
+        url != null -> SquareLogo(url, iconPainter, modifier)
+        looking -> Box(modifier.size(BadgeHeight))
+        icon != null -> Image(
+            icon,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = modifier.size(BadgeHeight).clip(BadgeShape),
+        )
+        else -> {
+            val label = fallbackLabel ?: remember(packageName) {
+                runCatching {
+                    context.packageManager.let { pm -> pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString() }
+                }.getOrNull()
+            }
+            label?.takeIf { it.isNotBlank() }?.let { LetterLogo(it, modifier) }
+        }
+    }
+}
+
+/**
+ * Sigla pătrată a unui serviciu de streaming pe care nu-l ai instalat (ex. „apare pe Netflix”), după id-ul
+ * serviciului; fără siglă, inițiala numelui.
+ */
+@Composable
+fun ServiceLogoBadge(serviceId: String?, name: String, modifier: Modifier = Modifier) {
+    val lookup = LocalServiceLogos.current
+    var logoUrl by remember(serviceId) { mutableStateOf<String?>(null) }
+    var looking by remember(serviceId) { mutableStateOf(lookup != null && serviceId != null) }
+    LaunchedEffect(serviceId, lookup) {
+        if (lookup != null && serviceId != null) {
+            logoUrl = runCatching { lookup.byService(serviceId) }.getOrNull()
+            looking = false
+        }
+    }
+    val url = logoUrl
+    when {
+        url != null -> SquareLogo(url, null, modifier)
+        looking -> Box(modifier.size(BadgeHeight))
+        else -> LetterLogo(name, modifier)
+    }
 }
 
 /** Cum află un poster sigla lui (platforma ta pe care e titlul sau playerul standard); dat de AppNavigation. */
@@ -175,7 +254,7 @@ fun CinemaBadge(region: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** Cum află un poster nota IMDb (din setul local IMDb); dat de AppNavigation. */
+/** Cum află un poster nota IMDb (prin cheia OMDb); dat de AppNavigation. */
 val LocalImdbRating = staticCompositionLocalOf<(suspend (TitleKind, Long) -> Double?)?> { null }
 
 /** Notele de pe poster, sus: TMDb și, alături, IMDb (când se știe). */

@@ -30,6 +30,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -95,33 +103,79 @@ fun formatRating(rating: Double?): String? = rating?.let { String.format(Locale.
 /** Insigna TMDb de pe poster (ca în AK VOD Hub): sigla în culorile TMDb + nota, mică, să nu acopere posterul. */
 @Composable
 fun RatingChip(rating: Double, modifier: Modifier = Modifier) {
-    BrandRating("TMDB", Color(0xFF0D253F), Color(0xFF01D277), rating, modifier)
+    BrandRating(rating, modifier) { TmdbSquareLogo() }
 }
 
-/** Nota IMDb, în culorile IMDb. */
+/** Nota IMDb, cu sigla pătrată IMDb (galbenă). */
 @Composable
 fun ImdbChip(rating: Double, modifier: Modifier = Modifier) {
-    BrandRating("IMDb", Color(0xFFF5C518), Color.Black, rating, modifier)
+    BrandRating(rating, modifier) { ImdbSquareLogo() }
+}
+
+/** Textul siglelor mici: fără spațiu în plus deasupra / dedesubt, ca literele să stea în pătrat. */
+private val LogoText = TextStyle(
+    platformStyle = PlatformTextStyle(includeFontPadding = false),
+    lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both),
+)
+
+/** Sigla pătrată TMDb: pătrat bleumarin cu „TM / DB” în degradeul verde → albastru TMDb. */
+@Composable
+fun TmdbSquareLogo(modifier: Modifier = Modifier) {
+    val gradient = Brush.horizontalGradient(listOf(Color(0xFF90CEA1), Color(0xFF01B4E4)))
+    Box(
+        modifier
+            .size(BadgeHeight)
+            .background(Color(0xFF0D253F), BadgeShape)
+            .semantics { contentDescription = "TMDb" },
+        contentAlignment = Alignment.Center,
+    ) {
+        // Literele albe, colorate apoi cu degradeul TMDb (SrcIn păstrează doar forma literelor).
+        Column(
+            Modifier
+                .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+                .drawWithContent {
+                    drawContent()
+                    drawRect(gradient, blendMode = BlendMode.SrcIn)
+                },
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            val style = LogoText.copy(color = Color.White, fontSize = 6.5.sp, lineHeight = 6.5.sp, fontWeight = FontWeight.Black)
+            Text("TM", style = style, maxLines = 1, softWrap = false)
+            Text("DB", style = style, maxLines = 1, softWrap = false)
+        }
+    }
+}
+
+/** Sigla pătrată IMDb: pătrat galben cu „IMDb” negru (ca iconița aplicației IMDb). */
+@Composable
+fun ImdbSquareLogo(modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .size(BadgeHeight)
+            .background(Color(0xFFF5C518), BadgeShape)
+            .semantics { contentDescription = "IMDb" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            "IMDb",
+            style = LogoText.copy(color = Color.Black, fontSize = 5.5.sp, lineHeight = 5.5.sp, fontWeight = FontWeight.Black, letterSpacing = (-0.2).sp),
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
 }
 
 @Composable
-private fun BrandRating(label: String, background: Color, foreground: Color, rating: Double, modifier: Modifier) {
+private fun BrandRating(rating: Double, modifier: Modifier, logo: @Composable () -> Unit) {
     // Aceeași etichetă ca sigla platformei și „S01E02 · 25 nov” (PosterBadges): înălțime, fundal și colțuri.
-    // Mică, ca pe un poster să încapă alături TMDb și IMDb.
+    // Sigla pătrată lipită în stânga (ca siglele aplicațiilor), nota alături.
     Row(
         modifier
             .height(BadgeHeight)
-            .background(BadgeBackground, BadgeShape)
-            .padding(horizontal = 2.dp, vertical = 2.dp),
+            .background(BadgeBackground, BadgeShape),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Box(
-            Modifier.fillMaxHeight().background(background, RoundedCornerShape(2.dp)).padding(horizontal = 2.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(label, fontSize = 7.sp, lineHeight = 8.sp, fontWeight = FontWeight.Black, color = foreground, maxLines = 1)
-        }
+        logo()
         Text(
             String.format(Locale.US, "%.1f", rating),
             fontSize = 10.sp,
@@ -129,7 +183,7 @@ private fun BrandRating(label: String, background: Color, foreground: Color, rat
             fontWeight = FontWeight.SemiBold,
             color = Color.White,
             maxLines = 1,
-            modifier = Modifier.padding(end = 1.dp),
+            modifier = Modifier.padding(horizontal = 3.dp),
         )
     }
 }

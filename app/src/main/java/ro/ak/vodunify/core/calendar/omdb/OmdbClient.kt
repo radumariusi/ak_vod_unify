@@ -94,6 +94,9 @@ class OmdbClient(
         return parsed
     }
 
+    /** True după un răspuns OMDb pentru [imdbId] (chiar fără notă); false după o eroare de rețea sau cheie. */
+    fun answered(imdbId: String): Boolean = cache.containsKey(imdbId)
+
     private val seasonCache = ConcurrentHashMap<String, Pair<Long, Map<Int, Double>>>()
 
     /**

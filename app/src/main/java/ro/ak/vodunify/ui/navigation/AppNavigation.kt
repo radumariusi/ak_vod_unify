@@ -4,6 +4,8 @@ import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.core.playback.PosterBadge
 import ro.ak.vodunify.ui.components.LocalPosterBadge
 import ro.ak.vodunify.ui.components.LocalImdbRating
+import ro.ak.vodunify.ui.components.LocalServiceLogos
+import ro.ak.vodunify.ui.components.ServiceLogoLookup
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
@@ -143,10 +145,17 @@ fun AppNavigation() {
     val badgesModel: PosterBadgesViewModel = hiltViewModel()
     val posterBadge: suspend (TitleKind, Long) -> PosterBadge? = remember(badgesModel) { { kind, id -> badgesModel.badge(kind, id) } }
     val imdbRating: suspend (TitleKind, Long) -> Double? = remember(badgesModel) { { kind, id -> badgesModel.imdbRating(kind, id) } }
+    val serviceLogos = remember(badgesModel) {
+        ServiceLogoLookup(
+            byPackage = { pkg -> badgesModel.serviceLogoForPackage(pkg) },
+            byService = { id -> badgesModel.serviceLogo(id) },
+        )
+    }
 
     CompositionLocalProvider(
         LocalPosterBadge provides posterBadge,
         LocalImdbRating provides imdbRating,
+        LocalServiceLogos provides serviceLogos,
         LocalCatalogActions provides actions,
         LocalBackdrop provides backdrop,
         LocalFocusRestore provides restore,

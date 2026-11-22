@@ -39,6 +39,8 @@ import ro.ak.vodunify.ui.components.FocusCard
 import ro.ak.vodunify.ui.components.FocusedTitle
 import ro.ak.vodunify.ui.components.PosterLabel
 import ro.ak.vodunify.ui.components.RatingChip
+import ro.ak.vodunify.ui.components.ServiceLogoBadge
+import ro.ak.vodunify.core.calendar.android.CALENDAR_TO_SERVICE
 import ro.ak.vodunify.ui.components.PlatformBadge
 import ro.ak.vodunify.ui.components.PosterRatings
 import ro.ak.vodunify.ui.components.PosterBottomRow
@@ -279,7 +281,7 @@ private fun ReleaseBadge(item: PersonalItem, modifier: Modifier) {
         ReleaseChannel.CINEMA -> CinemaBadge(release.region, modifier)
         ReleaseChannel.STREAMING -> when {
             pkg != null -> AppIconBadge(pkg, modifier, fallbackLabel = service)
-            service != null -> PosterLabel(service, modifier)
+            service != null -> ServiceLogoBadge(release.serviceId?.let { CALENDAR_TO_SERVICE[it] ?: it }, service, modifier)
             else -> PosterLabel("Streaming", modifier)
         }
         ReleaseChannel.DIGITAL -> PosterLabel("Digital ${release.region}", modifier)
