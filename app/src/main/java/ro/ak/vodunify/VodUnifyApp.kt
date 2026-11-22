@@ -16,6 +16,8 @@ class VodUnifyApp : Application() {
         super.onCreate()
         // Aplicațiile și serviciile adăugate / eliminate de tine (citite sincron de liste).
         AppRegistry.init(this)
+        // Setările de interfață (derulare Acasă, aspect Lista mea).
+        ro.ak.vodunify.core.prefs.UiPrefs.init(this)
         // Calendar: notificarea zilnică și canalul „Azi apare”, după setări.
         CalendarWork.start(this)
     }

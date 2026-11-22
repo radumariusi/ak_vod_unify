@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.grid.GridCells
+import ro.ak.vodunify.ui.components.rowSpacing
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -49,8 +50,9 @@ fun DiscoverScreen(viewModel: DiscoverViewModel = hiltViewModel()) {
         columns = GridCells.Adaptive(spec.posterWidth + 8.dp),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(if (spec.isTv) 20.dp else 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        // Aceeași distanță între postere ca în rândurile din Acasă.
+        horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
+        verticalArrangement = Arrangement.spacedBy(rowSpacing()),
     ) {
         item(key = "filters", span = { GridItemSpan(maxLineSpan) }) {
             Filters(state.filters, state.genres, state.services, periods, viewModel)

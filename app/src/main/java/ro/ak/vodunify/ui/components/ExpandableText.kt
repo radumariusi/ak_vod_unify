@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +47,19 @@ fun ExpandableText(
     val less = if (romanian) "Arată mai puțin" else "Show less"
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
+    // Pe TV, când derulezi la descriere (primește focusul), ea se deschide întreagă; când pleci, se strânge la loc.
+    val tv = layoutSpec().isTv
+    var openedByFocus by remember(text) { mutableStateOf(false) }
+    LaunchedEffect(focused, tv) {
+        if (!tv) return@LaunchedEffect
+        if (focused && !expanded && cut != null) {
+            expanded = true
+            openedByFocus = true
+        } else if (!focused && openedByFocus) {
+            expanded = false
+            openedByFocus = false
+        }
+    }
     val c = cut
     val canToggle = c != null || expanded
 
@@ -81,7 +95,10 @@ fun ExpandableText(
                 if (canToggle) {
                     Modifier
                         .background(if (focused) MaterialTheme.colorScheme.secondary else Color.Transparent, RowShape)
-                        .clickable(interactionSource = interaction, indication = null) { expanded = !expanded }
+                        .clickable(interactionSource = interaction, indication = null) {
+                            expanded = !expanded
+                            openedByFocus = false
+                        }
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 } else {
                     Modifier

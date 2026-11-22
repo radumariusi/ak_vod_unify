@@ -5,6 +5,7 @@ import ro.ak.vodunify.ui.theme.PillShape
 import ro.ak.vodunify.ui.theme.GlassActive
 import ro.ak.vodunify.ui.theme.GlassIdle
 import ro.ak.vodunify.ui.components.Dropdown
+import ro.ak.vodunify.ui.components.OnOffDropdown
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -61,6 +62,7 @@ import ro.ak.vodunify.ui.components.readable
 private enum class SettingsCategory(val title: String, val subtitle: String) {
     APP("Aplicație", "Versiune, actualizări, aplicațiile AK"),
     CATALOG("Catalog", "Limba titlurilor, note IMDb (cheie OMDb)"),
+    INTERFACE("Interfață", "Derularea în Acasă, aspectul Listei mele"),
     APPS("Aplicații și servicii", "Ce citim din fiecare, biblioteci RO/US, playere"),
     PLAYBACK("Redare", "Player standard, unde se deschid serviciile"),
     SCROBBLER("AK Scrobbler", "Continuă vizionarea, automat"),
@@ -169,6 +171,7 @@ private fun CategoryContent(cat: SettingsCategory, viewModel: SettingsViewModel,
                 OmdbKeySection()
                 CatalogCategory(viewModel)
             }
+            SettingsCategory.INTERFACE -> InterfaceCategory()
             SettingsCategory.APPS -> AppsSection()
             SettingsCategory.PLAYBACK -> PlaybackSection()
             SettingsCategory.SCROBBLER -> ScrobblerSection()
@@ -245,6 +248,31 @@ private fun CatalogCategory(viewModel: SettingsViewModel) {
                 "Disponibilitatea pe servicii de streaming este furnizată de JustWatch.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun InterfaceCategory() {
+    val animation by ro.ak.vodunify.core.prefs.UiPrefs.rowAnimation.collectAsStateWithLifecycle()
+    val library by ro.ak.vodunify.core.prefs.UiPrefs.libraryLayout.collectAsStateWithLifecycle()
+    SettingsCard("Interfață") {
+        OnOffDropdown(
+            label = "Animație la schimbarea rândului (Acasă, TV)",
+            value = animation,
+            onSelect = ro.ak.vodunify.core.prefs.UiPrefs::setRowAnimation,
+            on = "Pornită: rândul urcă animat",
+            off = "Oprită: rândul apare pe loc",
+        )
+        SettingHint("Oprită, Acasă e mai fluidă pe televizoarele mai lente.")
+        Spacer(Modifier.height(4.dp))
+        Dropdown(
+            label = "Lista mea",
+            value = library,
+            options = ro.ak.vodunify.core.prefs.LibraryLayout.entries,
+            optionLabel = { it.label },
+            onSelect = ro.ak.vodunify.core.prefs.UiPrefs::setLibraryLayout,
+            optionDetail = { it.detail },
         )
     }
 }

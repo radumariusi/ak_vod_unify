@@ -24,6 +24,8 @@ import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.core.connector.ExternalTrackers
 import ro.ak.vodunify.core.prefs.CatalogPreferences
 import ro.ak.vodunify.core.prefs.CatalogSettings
+import ro.ak.vodunify.core.prefs.LibraryLayout
+import ro.ak.vodunify.core.prefs.UiPrefs
 import ro.ak.vodunify.core.tracking.SyncStatus
 import ro.ak.vodunify.core.tracking.TrackingRepository
 import java.util.concurrent.ConcurrentHashMap
@@ -37,7 +39,14 @@ data class LibraryUiState(
     val counts: Map<String?, Int> = emptyMap(),
     val items: List<LibraryItem> = emptyList(),
     val total: Int = 0,
+    /** Aspectul ales în Setări → Interfață. */
+    val layout: LibraryLayout = LibraryLayout.ROWS,
+    /** La aspectul pe rânduri: câte un rând pe categorie și tip (ex. „De văzut · Filme”). */
+    val rows: List<LibraryRow> = emptyList(),
 )
+
+/** Un rând din Lista mea (aspectul pe rânduri). */
+data class LibraryRow(val title: String, val items: List<LibraryItem>)
 
 /** Lista mea: tot ce știe baza locală (AK Scrobbler, importuri; plus trackerii externi când sunt activi), reconciliat. */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -56,10 +65,10 @@ class LibraryViewModel @Inject constructor(
     val state: StateFlow<LibraryUiState> = combine(
         tracking.library,
         tracking.seriesSummaries,
-        filter,
+        combine(filter, UiPrefs.libraryLayout) { f, l -> f to l },
         if (ExternalTrackers.ENABLED) tracking.anyConnected else flowOf(true),
         prefs.settings,
-    ) { entries, series, f, connected, settings -> Input(entries, series, f, connected, settings) }
+    ) { entries, series, fl, connected, settings -> Input(entries, series, fl.first, connected, settings, fl.second) }
         .mapLatest { raw ->
             // Serialele din istoricul local: numărul de episoade din TMDb decide „În curs” / „Văzute”.
             val totals = coroutineScope {
@@ -70,9 +79,8 @@ class LibraryViewModel @Inject constructor(
                     .toMap()
             }
             val input = raw.copy(entries = LibraryLogic.mergeSeries(raw.entries, raw.series, totals))
-            val filtered = LibraryLogic.filter(input.entries, input.filter)
-            val items = coroutineScope {
-                filtered.take(MAX_ITEMS).map { e ->
+            suspend fun toItems(list: List<ro.ak.vodunify.core.reconcile.LibraryEntry>, tab: LibraryTab): List<LibraryItem> = coroutineScope {
+                list.map { e ->
                     async {
                         val kind = if (e.ref.type == "MOVIE") TitleKind.MOVIE else TitleKind.TV
                         val art = art(kind, e.ref.tmdbId, input.settings)
@@ -84,15 +92,29 @@ class LibraryViewModel @Inject constructor(
                             kind = kind,
                             tmdbId = e.ref.tmdbId,
                             title = art?.title ?: e.ref.title.ifBlank { "Titlu necunoscut" },
-                            subtitle = series?.let { LibraryLogic.seriesLabel(it, total) } ?: LibraryLogic.subtitle(e, input.filter.tab),
+                            subtitle = series?.let { LibraryLogic.seriesLabel(it, total) } ?: LibraryLogic.subtitle(e, tab),
                             posterUrl = art?.posterUrl,
-                            progress = seriesProgress ?: LibraryLogic.progress(e, input.filter.tab),
-                            showsProgress = seriesProgress != null || LibraryLogic.showsProgress(e, input.filter.tab),
+                            progress = seriesProgress ?: LibraryLogic.progress(e, tab),
+                            showsProgress = seriesProgress != null || LibraryLogic.showsProgress(e, tab),
                             sources = e.sources.sorted().map { names[it] ?: it },
                         )
                     }
                 }.awaitAll()
             }
+            val filtered = LibraryLogic.filter(input.entries, input.filter)
+            val rows = if (input.layout == LibraryLayout.ROWS) {
+                // Câte un rând pe categorie (De văzut, În curs, Văzute…) și tip, ca în Acasă.
+                LibraryTab.visible.filter { it != LibraryTab.ALL }.flatMap { tab ->
+                    val inTab = LibraryLogic.filter(input.entries, LibraryFilter(tab, null))
+                    listOf(TitleKind.MOVIE to "Filme", TitleKind.TV to "Seriale").mapNotNull { (kind, label) ->
+                        val part = inTab.filter { (it.ref.type == "MOVIE") == (kind == TitleKind.MOVIE) }
+                        if (part.isEmpty()) null else LibraryRow("${tab.label} · $label (${part.size})", toItems(part.take(ROW_ITEMS), tab))
+                    }
+                }
+            } else {
+                emptyList()
+            }
+            val items = if (input.layout == LibraryLayout.GRID) toItems(filtered.take(MAX_ITEMS), input.filter.tab) else emptyList()
             val present = input.entries.flatMap { it.sources }.toSet()
             LibraryUiState(
                 loading = false,
@@ -106,7 +128,9 @@ class LibraryViewModel @Inject constructor(
                     ro.ak.vodunify.core.imports.ImportSources.labels.filterKeys { it in present }.map { (id, label) -> SourceOption(id, label) },
                 counts = LibraryLogic.countsBySource(input.entries, input.filter.tab),
                 items = items,
-                total = filtered.size,
+                total = if (input.layout == LibraryLayout.ROWS) input.entries.size else filtered.size,
+                layout = input.layout,
+                rows = rows,
             )
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState())
@@ -119,6 +143,7 @@ class LibraryViewModel @Inject constructor(
         val filter: LibraryFilter,
         val connected: Boolean,
         val settings: CatalogSettings,
+        val layout: LibraryLayout,
     )
 
     fun selectTab(tab: LibraryTab) {
@@ -156,5 +181,8 @@ class LibraryViewModel @Inject constructor(
 
         /** Afișăm primele 300; restul se văd filtrând. */
         const val MAX_ITEMS = 300
+
+        /** Câte titluri arată un rând (cele mai recente). */
+        const val ROW_ITEMS = 60
     }
 }

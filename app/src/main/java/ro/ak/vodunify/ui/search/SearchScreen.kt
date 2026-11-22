@@ -12,6 +12,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.ui.text.font.FontWeight
+import ro.ak.vodunify.core.catalog.TitleKind
+import ro.ak.vodunify.ui.components.rowSpacing
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -64,8 +67,9 @@ fun SearchScreen(viewModel: SearchViewModel = hiltViewModel()) {
         columns = GridCells.Adaptive(spec.posterWidth + 8.dp),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(if (spec.isTv) 20.dp else 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        // Aceeași distanță între postere ca în rândurile din Acasă.
+        horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
+        verticalArrangement = Arrangement.spacedBy(rowSpacing()),
     ) {
         item(key = "query", span = { GridItemSpan(maxLineSpan) }) {
             if (spec.isTv) {
@@ -122,11 +126,24 @@ fun SearchScreen(viewModel: SearchViewModel = hiltViewModel()) {
             }
         }
 
-        items(state.results, key = { resultKey(it) }) { result ->
-            when (result) {
-                is SearchResult.Title -> PosterCard(result.item)
-                is SearchResult.Person -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    PersonCard(result.person.copy(role = result.knownFor))
+        // Rezultatele pe secțiuni: Filme, Seriale, Persoane (fiecare cu titlul ei, pe tot rândul).
+        val groups = listOf(
+            "Filme" to state.results.filter { it is SearchResult.Title && it.item.kind == TitleKind.MOVIE },
+            "Seriale" to state.results.filter { it is SearchResult.Title && it.item.kind == TitleKind.TV },
+            "Persoane" to state.results.filter { it is SearchResult.Person },
+        ).filter { it.second.isNotEmpty() }
+        groups.forEach { (label, list) ->
+            if (groups.size > 1) {
+                item(key = "section_$label", span = { GridItemSpan(maxLineSpan) }) {
+                    Text("$label (${list.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            items(list, key = { resultKey(it) }) { result ->
+                when (result) {
+                    is SearchResult.Title -> PosterCard(result.item)
+                    is SearchResult.Person -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        PersonCard(result.person.copy(role = result.knownFor))
+                    }
                 }
             }
         }

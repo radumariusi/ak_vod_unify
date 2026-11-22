@@ -22,6 +22,13 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.lazy.LazyListState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 /**
  * Derulare verticală „cu pivot”, ca pe TV (preluată din AK VOD Hub): rândul cu focus ajunge mereu la aceeași
@@ -69,65 +76,67 @@ fun DefaultScroll(content: @Composable () -> Unit) {
 }
 
 /**
- * Pe TV, în Acasă: se vede doar rândul cu focus (cu titlul lui) și, sub el, titlul rândului următor; nici
- * începutul posterelor de dedesubt, nici partea de jos a rândului de deasupra. Rândurile își raportează
- * marginile când au focusul; lista se taie acolo.
+ * Acasă pe TV: rânduri cu poziții fixe. Fiecare rând ocupă exact [slotHeight] (titlu + postere + spațiu), oricât
+ * de înalte îi sunt cardurile (16:9 sau postere), iar lista arată un singur rând și, dedesubt, titlul celui
+ * următor. Rândul care primește focusul e adus sus (titlul lui mereu în același loc), pe loc sau animat ([animate]).
  */
-class RowPeek {
-    /** Marginea de sus a rândului cu focus, în coordonatele ecranului; null = niciun rând cu focus. */
-    var focusedTop by mutableStateOf<Float?>(null)
+class HomeRows(
+    val slotHeight: Dp,
+    private val state: LazyListState,
+    private val scope: CoroutineScope,
+    private val animate: Boolean,
+) {
+    /** Marginea de sus a listei, în coordonatele ecranului. */
+    var listTop: Float = 0f
 
-    /** Marginea de jos a rândului cu focus, în coordonatele ecranului; null = niciun rând cu focus. */
-    var focusedBottom by mutableStateOf<Float?>(null)
+    fun bringToTop(rowTop: Float) {
+        val delta = rowTop - listTop
+        if (abs(delta) < 1f) return
+        scope.launch {
+            if (animate) state.animateScrollBy(delta) else state.scrollBy(delta)
+        }
+    }
 }
 
-val LocalRowPeek = staticCompositionLocalOf<RowPeek?> { null }
+val LocalHomeRows = staticCompositionLocalOf<HomeRows?> { null }
 
-/** Pe un rând (titlu + postere): îi spune listei unde începe și unde se termină cât timp are focusul. */
+/** Lista din Acasă (TV): nu se derulează singură după focus; rândurile se aduc sus prin [HomeRows]. */
+@Composable
+fun FixedRowsScroll(content: @Composable () -> Unit) {
+    val default = LocalBringIntoViewSpec.current
+    val none = remember {
+        object : BringIntoViewSpec {
+            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = 0f
+        }
+    }
+    CompositionLocalProvider(LocalBringIntoViewSpec provides none, LocalDefaultScroll provides default) { content() }
+}
+
+/** Pe lista din Acasă: ține minte unde e lista pe ecran, ca rândurile să se poată alinia sus. */
+fun Modifier.homeRowsList(rows: HomeRows): Modifier = onGloballyPositioned { rows.listTop = it.positionInRoot().y }
+
+/**
+ * Pe un rând (titlu + postere) din Acasă, pe TV: înălțime fixă și, când primește focusul, rândul urcă sus.
+ * În afara Acasă (sau pe telefon) nu face nimic.
+ */
 fun Modifier.peekRow(): Modifier = composed {
-    val peek = LocalRowPeek.current ?: return@composed this
-    var focused by remember { mutableStateOf(false) }
+    val rows = LocalHomeRows.current ?: return@composed this
     var top by remember { mutableStateOf<Float?>(null) }
-    var bottom by remember { mutableStateOf<Float?>(null) }
+    var pending by remember { mutableStateOf(false) }
     this
+        .height(rows.slotHeight)
         .onFocusChanged { s ->
-            focused = s.hasFocus
             if (s.hasFocus) {
-                top?.let { peek.focusedTop = it }
-                bottom?.let { peek.focusedBottom = it }
+                val t = top
+                if (t != null) rows.bringToTop(t) else pending = true
             }
         }
         .onGloballyPositioned { c ->
             val t = c.positionInRoot().y
-            val b = t + c.size.height
             top = t
-            bottom = b
-            if (focused) {
-                peek.focusedTop = t
-                peek.focusedBottom = b
-            }
-        }
-}
-
-/**
- * Pe lista din Acasă: desenează doar rândul cu focus și, sub el, titlul rândului următor ([titleHeight] = cât
- * ocupă un titlu de rând). Fără rând cu focus (ex. focus în meniu), desenează tot.
- */
-fun Modifier.clipBelowNextTitle(peek: RowPeek, titleHeight: Dp): Modifier = composed {
-    var top by remember { mutableStateOf(0f) }
-    val density = LocalDensity.current
-    val titlePx = with(density) { titleHeight.toPx() }
-    this
-        .onGloballyPositioned { top = it.positionInRoot().y }
-        .drawWithContent {
-            val b = peek.focusedBottom
-            if (b == null) {
-                drawContent()
-            } else {
-                val rowTop = peek.focusedTop?.let { (it - top).coerceAtLeast(0f) } ?: 0f
-                clipRect(top = rowTop, bottom = (b - top + titlePx).coerceAtMost(size.height)) {
-                    this@drawWithContent.drawContent()
-                }
+            if (pending) {
+                pending = false
+                rows.bringToTop(t)
             }
         }
 }

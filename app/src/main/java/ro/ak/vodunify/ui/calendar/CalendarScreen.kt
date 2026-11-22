@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import ro.ak.vodunify.ui.components.ChoiceDialog
 import ro.ak.vodunify.ui.components.ChoiceOption
 import ro.ak.vodunify.ui.components.Dropdown
@@ -24,6 +25,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -73,7 +75,7 @@ fun CalendarScreen(
         }
     }
 
-    val dayList = rememberLazyListState()
+    val dayGrid = rememberLazyGridState()
     val weekList = rememberLazyListState()
     val monthList = rememberLazyListState()
     var shownPeriod by rememberSaveable { mutableStateOf("") }
@@ -81,7 +83,7 @@ fun CalendarScreen(
     LaunchedEffect(period) {
         // Înapoi sus când se schimbă perioada, dar nu la întoarcerea din pagina unui titlu.
         if (shownPeriod.isNotEmpty() && shownPeriod != period) {
-            dayList.scrollToItem(0)
+            dayGrid.scrollToItem(0)
             weekList.scrollToItem(0)
             monthList.scrollToItem(0)
         }
@@ -90,6 +92,16 @@ fun CalendarScreen(
 
     val open: (CalendarItem) -> Unit = { actions.openTitle(if (it.isMovie) TitleKind.MOVIE else TitleKind.TV, it.tmdbId) }
     val chooseWhere: (CalendarItem) -> Unit = viewModel::chooseWhere
+    val itemActions = remember(viewModel) {
+        CalendarItemActions(
+            open = open,
+            watch = viewModel::chooseWhere,
+            watched = viewModel::markWatched,
+            list = viewModel::addToList,
+            follow = viewModel::toggleFollow,
+            hide = viewModel::hide,
+        )
+    }
     var showFilters by rememberSaveable { mutableStateOf(false) }
 
     val icons by viewModel.icons.collectAsStateWithLifecycle()
@@ -141,19 +153,10 @@ fun CalendarScreen(
                 val noun = if (state.tab == CalendarTab.MOVIES) "filme" else "episoade"
                 when {
                     state.visible.isEmpty() -> Info("Nimic în perioada asta după filtrele tale.")
-                    state.mode == CalendarMode.DAY -> DayList(
-                        items = state.visible,
-                        listState = dayList,
-                        onOpen = open,
-                        onWatch = chooseWhere,
-                        onFollow = viewModel::toggleFollow,
-                        onHide = viewModel::hide,
-                        onWatched = viewModel::markWatched,
-                        onList = viewModel::addToList,
-                    )
+                    state.mode == CalendarMode.DAY -> DayView(state.visible, dayGrid, itemActions)
                     state.mode == CalendarMode.WEEK -> WeekList(state.days, state.visible, weekList, noun, open, chooseWhere)
                     state.mode == CalendarMode.UPCOMING -> WeekList(state.days, state.visible, weekList, noun, open, chooseWhere, skipEmpty = true)
-                    else -> MonthGrid(state.from, state.to, state.visible, monthList, open, chooseWhere, viewModel::openDay)
+                    else -> MonthCalendar(state.from, state.to, state.visible, monthList, viewModel::openDay)
                 }
             }
         }
