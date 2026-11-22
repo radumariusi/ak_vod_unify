@@ -34,15 +34,36 @@ class TargetResolver @Inject constructor(@ApplicationContext private val context
 
     /** Aplicațiile cunoscute instalate acum. Rapid (doar interogări locale); apelează din nou la revenire. */
     fun installedApps(): Map<TargetApp, InstalledApp> {
-        val launchables by lazy { launcherActivities() }
-        return TargetApp.entries.mapNotNull { app ->
-            val byPackage = app.packages.firstOrNull { launchIntent(it) != null }
-            val pkg = byPackage ?: app.labelHints.takeIf { it.isNotEmpty() }?.let {
-                launchables.firstOrNull { (p, label) -> p != context.packageName && app.matchesLabel(label) }?.first
+        AppRegistry.init(context)
+        val launchables by lazy { launcherActivities().filter { it.first != context.packageName } }
+        val result = LinkedHashMap<TargetApp, InstalledApp>()
+        val claimed = HashSet<String>()
+        fun take(app: TargetApp, pkg: String) {
+            result[app] = InstalledApp(app, pkg, labelOf(pkg) ?: app.displayName)
+            claimed += pkg
+        }
+        val active = TargetApp.active
+        // 1. Aplicația aleasă de tine pentru o intrare (Setări → Aplicații și servicii).
+        active.forEach { app -> AppRegistry.packageFor(app)?.takeIf { launchIntent(it) != null }?.let { take(app, it) } }
+        // 2. Pachetele cunoscute.
+        active.filter { it !in result }.forEach { app ->
+            app.packages.firstOrNull { it !in claimed && launchIntent(it) != null }?.let { take(app, it) }
+        }
+        // 3. Numele din launcher: fiecare aplicație instalată merge la intrarea care i se potrivește cel mai bine
+        //    (ex. „Nuvio RS” la Nuvio RS, nu la Nuvio).
+        val pending = active.filter { it !in result && it.labelHints.isNotEmpty() }
+        if (pending.isNotEmpty()) {
+            launchables.filter { it.first !in claimed }.forEach { (pkg, label) ->
+                val best = TargetApp.active.filter { it.labelScore(label) > 0 }.maxByOrNull { it.labelScore(label) }
+                if (best != null && best in pending && best !in result) take(best, pkg)
             }
-            pkg?.let { app to InstalledApp(app, it, labelOf(it) ?: app.displayName) }
-        }.toMap()
+        }
+        return result
     }
+
+    /** Toate aplicațiile din launcher (pachet, nume), ca să alegi una când adaugi o aplicație. */
+    fun launchableApps(): List<Pair<String, String>> =
+        launcherActivities().filter { it.first != context.packageName }.sortedBy { it.second.lowercase() }
 
     /** Cea mai precisă țintă validată; null doar dacă aplicația nu mai poate fi pornită deloc. */
     fun resolve(installed: InstalledApp, request: PlaybackRequest): ResolvedLaunch? {

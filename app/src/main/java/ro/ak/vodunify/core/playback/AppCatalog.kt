@@ -10,9 +10,9 @@ import java.net.URLEncoder
  */
 enum class StreamingService(
     val id: String,
-    val displayName: String,
+    private val baseName: String,
     /** Id-urile TMDb ale furnizorului (inclusiv variantele „cu reclame”). */
-    val tmdbProviderIds: Set<Int>,
+    private val baseProviderIds: Set<Int>,
     val appId: String,
     val defaultMarket: Market,
     val note: String? = null,
@@ -36,14 +36,35 @@ enum class StreamingService(
     ARTE("arte", "ARTE", emptySet(), "arte", Market.RO),
     MAGELLAN("magellan", "MagellanTV", emptySet(), "magellan", Market.US, "documentare"),
     CURIOSITY("curiosity", "CuriosityStream", setOf(190), "curiosity", Market.US, "documentare"),
+
+    // Locuri pentru serviciile adăugate de tine (Setări → Aplicații și servicii), cu furnizorul TMDb ales.
+    CUSTOM_1("custom1", "Serviciu adăugat 1", emptySet(), "customservice1", Market.RO),
+    CUSTOM_2("custom2", "Serviciu adăugat 2", emptySet(), "customservice2", Market.RO),
+    CUSTOM_3("custom3", "Serviciu adăugat 3", emptySet(), "customservice3", Market.RO),
     ;
+
+    /** Loc pentru un serviciu adăugat de tine. */
+    val isCustom: Boolean get() = id.startsWith("custom")
+
+    val displayName: String get() = if (isCustom) AppRegistry.customName(id) ?: baseName else baseName
+
+    val tmdbProviderIds: Set<Int> get() = if (isCustom) setOfNotNull(AppRegistry.customProvider(id)) else baseProviderIds
+
+    /** În liste: serviciile din catalog și cele adăugate de tine (locurile libere nu). */
+    val isActive: Boolean get() = !isCustom || AppRegistry.customProvider(id) != null
 
     companion object {
         fun byId(id: String): StreamingService? = entries.firstOrNull { it.id == id }
 
+        /** Serviciile din liste (fără locurile libere). */
+        val active: List<StreamingService> get() = entries.filter { it.isActive }
+
+        /** Un loc liber pentru un serviciu nou; null = toate ocupate. */
+        fun freeSlot(): StreamingService? = entries.firstOrNull { it.isCustom && !it.isActive }
+
         /** Serviciile „tale”: cele cu aplicația oficială instalată pe dispozitiv. */
         fun owned(installed: Set<TargetApp>): List<StreamingService> =
-            entries.filter { s -> TargetApp.byId(s.appId)?.let { it in installed } == true }
+            active.filter { s -> TargetApp.byId(s.appId)?.let { it in installed } == true }
 
         /**
          * Potrivire după id TMDb, apoi după nume (TMDb mai adaugă variante noi). Canalele vândute prin alt
@@ -52,7 +73,7 @@ enum class StreamingService(
         fun fromProvider(providerId: Int, providerName: String): StreamingService? {
             val n = providerName.lowercase().trim()
             if (n.endsWith(" channel") || " channel " in n) return null
-            entries.firstOrNull { providerId in it.tmdbProviderIds }?.let { return it }
+            active.firstOrNull { providerId in it.tmdbProviderIds }?.let { return it }
             fun word(w: String) = n == w || n.startsWith("$w ")
             return when {
                 "netflix" in n -> NETFLIX
@@ -95,7 +116,7 @@ enum class AppRole(val label: String) {
  */
 enum class TargetApp(
     val id: String,
-    val displayName: String,
+    private val baseName: String,
     val role: AppRole,
     /** Pachete cunoscute (TV întâi, apoi telefon). */
     val packages: List<String>,
@@ -150,7 +171,7 @@ enum class TargetApp(
     DEBRIFY("debrify", "Debrify", AppRole.PLAYER, emptyList(), listOf("debrify")),
     CLIPBOX("clipbox", "ClipBox", AppRole.PLAYER, emptyList(), listOf("clipbox")),
     ALDER("alder", "Alder", AppRole.PLAYER, emptyList(), listOf("alder")),
-    NICIO_RS("niciors", "Nicio RS", AppRole.PLAYER, emptyList(), listOf("niciors", "nicio")),
+    NUVIO_RS("nuviors", "Nuvio RS", AppRole.PLAYER, emptyList(), listOf("nuviors")),
     PARKY("parky", "Parky", AppRole.PLAYER, emptyList(), listOf("parky")),
 
     AK_VOD_HUB("akvodhub", "AK VoD Hub", AppRole.IPTV, listOf("io.github.radumariusi.akvodhub"), listOf("akvodhub")),
@@ -158,12 +179,36 @@ enum class TargetApp(
     SHOVA_TV("shovatv", "Shova TV", AppRole.IPTV, emptyList(), listOf("shovatv", "shova")),
     PLAYER_8K_VIP("8kvip", "8K Player VIP+", AppRole.IPTV, emptyList(), listOf("8kplayervip")),
     PLAYER_8K_PRIME("8kprime", "8K Player Prime", AppRole.IPTV, emptyList(), listOf("8kplayerprime")),
+
+    // Locuri pentru aplicațiile adăugate de tine (Setări → Aplicații și servicii): pachetul și numele le alegi tu.
+    CUSTOM_PLAYER_1("customplayer1", "Player adăugat 1", AppRole.PLAYER, emptyList()),
+    CUSTOM_PLAYER_2("customplayer2", "Player adăugat 2", AppRole.PLAYER, emptyList()),
+    CUSTOM_PLAYER_3("customplayer3", "Player adăugat 3", AppRole.PLAYER, emptyList()),
+    CUSTOM_PLAYER_4("customplayer4", "Player adăugat 4", AppRole.PLAYER, emptyList()),
+    CUSTOM_IPTV_1("customiptv1", "Player IPTV adăugat 1", AppRole.IPTV, emptyList()),
+    CUSTOM_IPTV_2("customiptv2", "Player IPTV adăugat 2", AppRole.IPTV, emptyList()),
+    CUSTOM_IPTV_3("customiptv3", "Player IPTV adăugat 3", AppRole.IPTV, emptyList()),
+    CUSTOM_SERVICE_1("customservice1", "Serviciu adăugat 1", AppRole.OFFICIAL, emptyList()),
+    CUSTOM_SERVICE_2("customservice2", "Serviciu adăugat 2", AppRole.OFFICIAL, emptyList()),
+    CUSTOM_SERVICE_3("customservice3", "Serviciu adăugat 3", AppRole.OFFICIAL, emptyList()),
     ;
 
+    /** Loc pentru o aplicație adăugată de tine. */
+    val isCustom: Boolean get() = id.startsWith("custom")
+
+    val displayName: String get() = if (isCustom) AppRegistry.customName(id) ?: baseName else baseName
+
+    /** În liste: neeliminată și, la locurile pentru aplicațiile tale, ocupată. */
+    val isActive: Boolean get() = !AppRegistry.isHidden(id) && (!isCustom || AppRegistry.packageFor(this) != null)
+
     /** Numele din launcher se potrivește cu unul din [labelHints]. */
-    fun matchesLabel(label: String): Boolean {
+    fun matchesLabel(label: String): Boolean = labelScore(label) > 0
+
+    /** Cât de bine se potrivește numele (lungimea indiciului potrivit; 0 = deloc): „Nuvio RS” e Nuvio RS, nu Nuvio. */
+    fun labelScore(label: String): Int {
         val n = label.lowercase().replace(" ", "")
-        return labelHints.any { h -> n == h || (h.length >= 5 && n.startsWith(h)) }
+        return labelHints.filter { h -> n == h || (h.length >= 5 && n.startsWith(h)) }
+            .maxOfOrNull { h -> if (n == h) h.length + 100 else h.length } ?: 0
     }
 
     /** Poate reda titluri pentru care nu ai serviciul (playere tip Stremio și IPTV cu VOD). */
@@ -171,10 +216,19 @@ enum class TargetApp(
 
     companion object {
         fun byId(id: String): TargetApp? = entries.firstOrNull { it.id == id }
-        val players: List<TargetApp> get() = entries.filter { it.isPlayer }
 
-        /** Aplicația unui pachet văzut de AK Scrobbler (după pachetele cunoscute). */
-        fun byPackage(pkg: String): TargetApp? = entries.firstOrNull { app -> app.packages.any { pkg == it || pkg.startsWith("$it.") } }
+        /** Aplicațiile din liste (fără cele eliminate și fără locurile libere). */
+        val active: List<TargetApp> get() = entries.filter { it.isActive }
+        val players: List<TargetApp> get() = active.filter { it.isPlayer }
+
+        /** Un loc liber pentru o aplicație nouă cu rolul [role]; null = toate ocupate. */
+        fun freeSlot(role: AppRole): TargetApp? =
+            entries.firstOrNull { it.isCustom && it.role == role && AppRegistry.packageFor(it) == null }
+
+        /** Aplicația unui pachet (cel ales de tine, apoi pachetele cunoscute). */
+        fun byPackage(pkg: String): TargetApp? =
+            entries.firstOrNull { app -> AppRegistry.packageFor(app) == pkg && !AppRegistry.isHidden(app.id) }
+                ?: entries.firstOrNull { app -> app.packages.any { pkg == it || pkg.startsWith("$it.") } }
     }
 }
 

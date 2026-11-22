@@ -44,7 +44,7 @@ fun PlaybackSection(viewModel: PlaybackSettingsViewModel = hiltViewModel()) {
         Text("Serviciile tale se deschid în", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 8.dp))
         SettingHint("Implicit aplicația oficială. Poți alege un player pentru un serviciu.")
         val installedPlayers = players.filter { it in installed }
-        val services = StreamingService.entries.filter { s ->
+        val services = StreamingService.active.filter { s ->
             val official = TargetApp.byId(s.appId)
             (official != null && official in installed) || settings.preferredApp(s) != official
         }
