@@ -114,4 +114,11 @@ class TmdbMappersTest {
         assertEquals("/a.png", TmdbMappers.logoPath(logos, "en"))
         assertNull(TmdbMappers.logoPath(emptyList(), "ro"))
     }
+
+    @Test
+    fun `spam overviews with phone numbers are dropped`() {
+        assertNull(TmdbMappers.cleanOverview("Guide to Name Update Rules, Ticket+1-888-805-5591 call now"))
+        assertNull(TmdbMappers.cleanOverview("  "))
+        assertEquals("Un film din 1999-2005.", TmdbMappers.cleanOverview(" Un film din 1999-2005. "))
+    }
 }

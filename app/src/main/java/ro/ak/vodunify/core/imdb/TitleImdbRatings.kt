@@ -71,7 +71,8 @@ class TitleImdbRatings @Inject constructor(
     }
 
     private companion object {
-        val HIT_TTL_MS = TimeUnit.DAYS.toMillis(5)
-        val MISS_TTL_MS = TimeUnit.DAYS.toMillis(2)
+        // Notele IMDb se schimbă încet: 3 săptămâni, ca limita zilnică OMDb să ajungă la titlurile noi.
+        val HIT_TTL_MS = TimeUnit.DAYS.toMillis(21)
+        val MISS_TTL_MS = TimeUnit.DAYS.toMillis(3)
     }
 }

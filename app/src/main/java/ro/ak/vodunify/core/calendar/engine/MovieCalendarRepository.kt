@@ -243,7 +243,7 @@ class MovieCalendarRepository(
                 originalTitle = details.originalTitle.takeIf { it.isNotBlank() && it != details.title },
                 posterUrl = CalendarImages.poster(details.posterPath),
                 backdropUrl = CalendarImages.backdrop(details.backdropPath),
-                overview = details.overview,
+                overview = ro.ak.vodunify.core.catalog.TmdbMappers.cleanOverview(details.overview),
                 tagline = details.tagline?.takeIf { it.isNotBlank() },
                 kind = release.kind,
                 region = release.region,

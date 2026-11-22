@@ -236,8 +236,8 @@ private fun Hero(
                 .padding(start = spec.screenPadding, end = spec.screenPadding, top = 4.dp, bottom = 8.dp)
                 .widthIn(max = 620.dp)
                 .fillMaxWidth(if (spec.isCompact) 1f else 0.6f),
-            // Sigla sus, ca descrierea să aibă loc dedesubt.
-            verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Top),
+            // Lipit de jos: descrierea ține mereu 3 rânduri, deci sigla stă la aceeași înălțime la orice titlu.
+            verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Bottom),
         ) {
             TitleLogo(
                 shown.title,
@@ -258,11 +258,12 @@ private fun Hero(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (shown.overview.isNotBlank()) {
+            if (shown.overview.isNotBlank() || spec.isTv) {
                 Text(
                     shown.overview,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onBackground,
+                    minLines = if (spec.isTv) 3 else 1,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
