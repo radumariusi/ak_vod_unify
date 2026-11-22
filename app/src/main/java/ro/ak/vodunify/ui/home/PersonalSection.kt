@@ -39,6 +39,9 @@ import ro.ak.vodunify.ui.components.FocusedTitle
 import ro.ak.vodunify.ui.components.PosterLabel
 import ro.ak.vodunify.ui.components.RatingChip
 import ro.ak.vodunify.ui.components.PlatformBadge
+import ro.ak.vodunify.ui.components.AppIconBadge
+import ro.ak.vodunify.ui.components.CinemaBadge
+import ro.ak.vodunify.core.catalog.ReleaseChannel
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import ro.ak.vodunify.ui.components.LocalBackdrop
@@ -182,21 +185,14 @@ private fun WideCard(item: PersonalItem, rowKey: String) {
                     .fillMaxSize()
                     .background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to Color(0xCC000000))),
             )
-            // Fără text sub card: episodul / procentul stă pe imagine, ca în AK VOD Hub.
+            // Fără text sub card: episodul (S01E02) și procentul stau pe imagine, ca etichetele de pe postere.
             item.subtitle?.takeIf { it.isNotBlank() }?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.White,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(start = 6.dp, end = 6.dp, bottom = 8.dp)
-                        .background(Color(0xCC000000), MaterialTheme.shapes.extraSmall)
-                        .padding(horizontal = 4.dp, vertical = 1.dp),
-                )
+                PosterLabel(it, Modifier.align(Alignment.BottomStart).padding(start = 6.dp, end = 6.dp, bottom = 10.dp))
             }
+            // Sigla aplicației în care ai văzut ultima dată: acolo continui standard (dacă nu alegi altceva).
+            val badge = Modifier.align(Alignment.TopEnd).padding(6.dp)
+            val lastApp = item.appPackage
+            if (lastApp != null) AppIconBadge(lastApp, badge) else PlatformBadge(item.kind, item.tmdbId, badge)
             if (item.showsProgress || item.progress != null) {
                 val p = item.progress
                 if (p != null) {
@@ -253,11 +249,36 @@ private fun PersonalPoster(item: PersonalItem, rowKey: String) {
         Box(Modifier.fillMaxSize().semantics { contentDescription = listOfNotNull(item.title, item.subtitle).joinToString(", ") }) {
             NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
             item.rating?.takeIf { it > 0 }?.let { RatingChip(it, Modifier.align(Alignment.TopStart).padding(4.dp)) }
-            PlatformBadge(item.kind, item.tmdbId, Modifier.align(Alignment.TopEnd).padding(4.dp))
+            ReleaseBadge(item, Modifier.align(Alignment.TopEnd).padding(4.dp))
             item.subtitle?.takeIf { it.isNotBlank() }?.let {
                 PosterLabel(it, Modifier.align(Alignment.BottomStart).padding(4.dp))
             }
         }
+    }
+}
+
+/**
+ * Sigla de sus a posterelor din „În curând” / „Noutăți”: la filme, unde apare la data de jos (cinema România
+ * sau SUA, aplicația serviciului de streaming ori „Digital”); altfel sigla obișnuită a titlului.
+ */
+@Composable
+private fun ReleaseBadge(item: PersonalItem, modifier: Modifier) {
+    val release = item.release
+    if (release == null) {
+        PlatformBadge(item.kind, item.tmdbId, modifier)
+        return
+    }
+    val pkg = item.appPackage
+    val service = release.serviceName
+    when (release.channel) {
+        ReleaseChannel.CINEMA -> CinemaBadge(release.region, modifier)
+        ReleaseChannel.STREAMING -> when {
+            pkg != null -> AppIconBadge(pkg, modifier, fallbackLabel = service)
+            service != null -> PosterLabel(service, modifier)
+            else -> PosterLabel("Streaming", modifier)
+        }
+        ReleaseChannel.DIGITAL -> PosterLabel("Digital ${release.region}", modifier)
+        ReleaseChannel.UNKNOWN -> PlatformBadge(item.kind, item.tmdbId, modifier)
     }
 }
 
@@ -267,9 +288,20 @@ private fun focusedTitle(item: PersonalItem): FocusedTitle? {
         kind = item.kind,
         id = id,
         title = item.title,
-        meta = item.subtitle.orEmpty(),
+        meta = listOfNotNull(releaseText(item), item.subtitle?.takeIf { it.isNotBlank() }).joinToString(" · "),
         overview = item.overview,
         backdropUrl = item.backdropUrl,
         rating = item.rating,
     )
+}
+
+/** Unde apare filmul, pentru hero: „În cinema în România · 25 nov”. */
+private fun releaseText(item: PersonalItem): String? {
+    val r = item.release ?: return null
+    return when (r.channel) {
+        ReleaseChannel.CINEMA -> if (r.region == "RO") "În cinema în România" else "În cinema în SUA"
+        ReleaseChannel.STREAMING -> "Pe ${r.serviceName ?: "streaming"}" + if (r.region == "US" && !r.mine) " (SUA)" else ""
+        ReleaseChannel.DIGITAL -> "Digital, închiriere / cumpărare (${r.region})"
+        ReleaseChannel.UNKNOWN -> null
+    }
 }

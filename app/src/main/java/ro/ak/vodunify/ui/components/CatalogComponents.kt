@@ -1,5 +1,6 @@
 package ro.ak.vodunify.ui.components
 
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -105,31 +106,29 @@ fun ImdbChip(rating: Double, modifier: Modifier = Modifier) {
 
 @Composable
 private fun BrandRating(label: String, background: Color, foreground: Color, rating: Double, modifier: Modifier) {
+    // Aceeași etichetă ca sigla platformei și „S01E02 · 25 nov” (PosterBadges): înălțime, fundal și colțuri.
     Row(
         modifier
-            .background(Color(0xCC000000), RoundedCornerShape(3.dp))
-            .padding(horizontal = 2.dp, vertical = 1.dp),
+            .height(BadgeHeight)
+            .background(BadgeBackground, BadgeShape)
+            .padding(horizontal = 3.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        Text(
-            label,
-            fontSize = 9.sp,
-            lineHeight = 11.sp,
-            fontWeight = FontWeight.Black,
-            color = foreground,
-            maxLines = 1,
-            modifier = Modifier
-                .background(background, RoundedCornerShape(2.dp))
-                .padding(horizontal = 2.dp),
-        )
+        Box(
+            Modifier.fillMaxHeight().background(background, RoundedCornerShape(3.dp)).padding(horizontal = 3.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(label, fontSize = 9.sp, lineHeight = 10.sp, fontWeight = FontWeight.Black, color = foreground, maxLines = 1)
+        }
         Text(
             String.format(Locale.US, "%.1f", rating),
-            fontSize = 10.sp,
-            lineHeight = 11.sp,
+            fontSize = 11.sp,
+            lineHeight = 12.sp,
             fontWeight = FontWeight.SemiBold,
             color = Color.White,
             maxLines = 1,
+            modifier = Modifier.padding(end = 1.dp),
         )
     }
 }

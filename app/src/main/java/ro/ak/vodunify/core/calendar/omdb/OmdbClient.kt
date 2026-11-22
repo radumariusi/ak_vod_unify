@@ -27,6 +27,19 @@ internal data class OmdbResponse(
     val imdbVotes: String? = null,
 )
 
+@Serializable
+internal data class OmdbSeasonEpisode(
+    @SerialName("Episode") val episode: String? = null,
+    val imdbRating: String? = null,
+)
+
+@Serializable
+internal data class OmdbSeasonResponse(
+    @SerialName("Response") val response: String = "False",
+    @SerialName("Error") val error: String? = null,
+    @SerialName("Episodes") val episodes: List<OmdbSeasonEpisode> = emptyList(),
+)
+
 /**
  * IMDb rating and votes through OMDb (free key: 1,000 requests a day).
  * Results are cached for [ttlMillis], misses included, so a week view does not
@@ -81,7 +94,55 @@ class OmdbClient(
         return parsed
     }
 
+    private val seasonCache = ConcurrentHashMap<String, Pair<Long, Map<Int, Double>>>()
+
+    /**
+     * Notele IMDb ale episoadelor dintr-un sezon (episod → notă), cu o singură cerere pe sezon.
+     * Gol când serialul nu e găsit, cheia lipsește sau limita zilnică e atinsă.
+     */
+    suspend fun seasonRatings(seriesImdbId: String, season: Int, apiKey: String): Map<Int, Double> {
+        if (apiKey.isBlank() || seriesImdbId.isBlank() || apiKey == blockedKey) return emptyMap()
+        val key = "$seriesImdbId:$season"
+        seasonCache[key]?.let { (at, value) -> if (now() - at < ttlMillis) return value }
+        val url = base.newBuilder()
+            .addQueryParameter("i", seriesImdbId)
+            .addQueryParameter("Season", season.toString())
+            .addQueryParameter("apikey", apiKey)
+            .build()
+        val response = try {
+            withContext(Dispatchers.IO) {
+                http.newCall(Request.Builder().url(url).get().build()).execute().use { r ->
+                    if (r.code == 401) {
+                        blockedKey = apiKey
+                        return@withContext null
+                    }
+                    if (!r.isSuccessful) return@withContext null
+                    json.decodeFromString(OmdbSeasonResponse.serializer(), r.body?.string().orEmpty())
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        } ?: return emptyMap()
+        if (response.response != "True") {
+            val error = response.error.orEmpty()
+            if (error.contains("limit", ignoreCase = true) || error.contains("key", ignoreCase = true)) blockedKey = apiKey
+            return emptyMap()
+        }
+        val parsed = parseSeason(response)
+        seasonCache[key] = now() to parsed
+        return parsed
+    }
+
     companion object {
+        internal fun parseSeason(response: OmdbSeasonResponse): Map<Int, Double> =
+            response.episodes.mapNotNull { e ->
+                val n = e.episode?.toIntOrNull() ?: return@mapNotNull null
+                val r = e.imdbRating?.toDoubleOrNull() ?: return@mapNotNull null
+                n to r
+            }.toMap()
+
         const val DEFAULT_BASE_URL = "https://www.omdbapi.com/"
         private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
 

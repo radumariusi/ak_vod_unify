@@ -103,6 +103,10 @@ private sealed interface ChooserAction {
 
 @Composable
 private fun ChooserList(s: ChooserState, options: WatchOptions, vm: WatchChooserViewModel) {
+    // Aplicația în care ai văzut ultima dată: marcată și aleasă din start (acolo continui standard).
+    fun isLast(app: TargetApp?): Boolean =
+        app != null && s.resume.appPackage != null && s.launches[app]?.installed?.packageName == s.resume.appPackage
+    val lastMark = " · ultima dată aici"
     val entries = buildList {
         options.services.forEachIndexed { i, opt ->
             val app = opt.app
@@ -110,7 +114,7 @@ private fun ChooserList(s: ChooserState, options: WatchOptions, vm: WatchChooser
                 app != null && opt.usesPreferredPlayer -> "Se deschide în ${app.displayName}"
                 else -> app?.let { s.launches[it]?.precision?.label } ?: LinkPrecision.APP.label
             }
-            add(ChoiceOption(opt.label, detail, heading = if (i == 0) "Serviciile tale" else null) to ChooserAction.Service(opt))
+            add(ChoiceOption(opt.label + if (isLast(app)) lastMark else "", detail, heading = if (i == 0) "Serviciile tale" else null) to ChooserAction.Service(opt))
         }
         options.elsewhere.forEachIndexed { i, opt ->
             add(
@@ -125,7 +129,7 @@ private fun ChooserList(s: ChooserState, options: WatchOptions, vm: WatchChooser
             val launch = s.launches[app]
             add(
                 ChoiceOption(
-                    label = (launch?.installed?.label ?: app.displayName) + if (i == 0) " · standard" else "",
+                    label = (launch?.installed?.label ?: app.displayName) + (if (i == 0) " · standard" else "") + if (isLast(app)) lastMark else "",
                     detail = launch?.precision?.label ?: "Nu poate fi pornit",
                     enabled = launch != null,
                     heading = if (i == 0) "Redă într-un player" else null,
@@ -147,7 +151,9 @@ private fun ChooserList(s: ChooserState, options: WatchOptions, vm: WatchChooser
     ChoiceDialog(
         title = "Unde vezi · $title",
         options = entries.map { it.first },
-        selected = null,
+        selected = entries.indexOfFirst { (_, action) ->
+            (action is ChooserAction.Service && isLast(action.option.app)) || (action is ChooserAction.Player && isLast(action.app))
+        }.takeIf { it >= 0 },
         onPick = { index ->
             when (val action = entries[index].second) {
                 is ChooserAction.Service -> vm.chooseService(action.option)

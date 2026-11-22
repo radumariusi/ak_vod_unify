@@ -1,6 +1,9 @@
 package ro.ak.vodunify.ui.components
 
-import androidx.compose.foundation.BorderStroke
+import ro.ak.vodunify.ui.theme.RowShape
+import ro.ak.vodunify.ui.theme.PillShape
+import ro.ak.vodunify.ui.theme.GlassActive
+import ro.ak.vodunify.ui.theme.GlassIdle
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -42,7 +45,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import ro.ak.vodunify.ui.theme.FocusBorder
 import androidx.compose.ui.window.Dialog
 
 /** O opțiune dintr-o listă de alegere. [enabled] = false: afișată (ex. „neinstalat”), dar nu se poate alege. */
@@ -77,7 +79,7 @@ fun ChoiceDialog(
         Surface(
             shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surface,
-            modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth(),
+            modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth().ignoreHeldOk(),
         ) {
             Column(Modifier.padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
@@ -135,10 +137,10 @@ private fun ChoiceRow(option: ChoiceOption, selected: Boolean, modifier: Modifie
     Surface(
         onClick = onClick,
         enabled = option.enabled,
-        shape = MaterialTheme.shapes.small,
+        shape = RowShape,
         color = when {
             focused -> c.secondary
-            selected -> c.surfaceVariant
+            selected -> GlassActive
             else -> Color.Transparent
         },
         contentColor = when {
@@ -151,7 +153,7 @@ private fun ChoiceRow(option: ChoiceOption, selected: Boolean, modifier: Modifie
     ) {
         Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(option.label, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(option.label, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 option.detail?.let {
                     Text(
                         it,
@@ -193,17 +195,16 @@ fun <T> Dropdown(
     val c = MaterialTheme.colorScheme
     Surface(
         onClick = { open = true },
-        shape = MaterialTheme.shapes.small,
-        color = if (focused) c.secondary else c.surfaceVariant.copy(alpha = 0.85f),
+        shape = PillShape,
+        color = if (focused) c.secondary else GlassIdle,
         contentColor = if (focused) c.onSecondary else c.onSurface,
-        border = if (focused) BorderStroke(2.dp, FocusBorder) else BorderStroke(1.dp, c.outline),
         interactionSource = interaction,
         modifier = modifier
             .then(if (fillWidth) Modifier.fillMaxWidth().widthIn(max = 640.dp) else Modifier)
             .semantics { role = Role.DropdownList },
     ) {
         Row(
-            Modifier.padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            Modifier.padding(start = 18.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (label != null) {

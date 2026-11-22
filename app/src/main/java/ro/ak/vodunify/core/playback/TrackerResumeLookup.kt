@@ -33,7 +33,7 @@ class TrackerResumeLookup @Inject constructor(
             // Poziția setată de tine e exactă: nu mai e estimată din procent.
             exactPositionMs = point.positionMs?.takeIf { point.source == LOCAL_SOURCE },
             local = point.source == LOCAL_SOURCE,
-        )
+        ).copy(appPackage = point.appPackage)
     }
 
     override suspend fun sync(request: PlaybackRequest): ResumeInfo {

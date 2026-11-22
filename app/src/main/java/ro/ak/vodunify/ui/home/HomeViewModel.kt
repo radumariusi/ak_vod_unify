@@ -29,6 +29,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
 import ro.ak.vodunify.core.catalog.TitleKind
+import ro.ak.vodunify.core.catalog.MovieReleaseEvent
+import ro.ak.vodunify.core.catalog.ReleaseChannel
+import ro.ak.vodunify.core.calendar.android.CALENDAR_TO_SERVICE
+import ro.ak.vodunify.core.calendar.android.CalendarRepository
+import ro.ak.vodunify.core.calendar.model.MovieRelease
+import ro.ak.vodunify.core.calendar.model.MovieReleaseKind
+import ro.ak.vodunify.core.playback.TargetApp
 import ro.ak.vodunify.core.connector.ExternalTrackers
 import ro.ak.vodunify.core.db.ResumePointEntity
 import ro.ak.vodunify.core.tracking.SeriesSummary
@@ -56,6 +63,7 @@ class HomeViewModel @Inject constructor(
     private val prefs: CatalogPreferences,
     playbackPrefs: PlaybackPreferences,
     private val resolver: TargetResolver,
+    private val calendar: CalendarRepository,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -98,28 +106,41 @@ class HomeViewModel @Inject constructor(
                 val popular = async {
                     if (!catalog.isConfigured) emptyList()
                     else runCatching {
-                        catalog.upcomingPopular(s.settings, HomeSections.SOON_MOVIE_DAYS, POPULAR_EPISODE_DAYS)
+                        catalog.upcomingPopular(s.settings, HomeSections.SOON_MOVIE_DAYS, POPULAR_EPISODE_DAYS, POPULAR_RECENT_DAYS)
                     }.getOrDefault(emptyList()).map { FollowedTitle(it, null) }
                 }
+                val packages = async { servicePackages() }
                 val resume = s.resume.take(ROW_LIMIT * 2).map { e ->
                     async { PersonalMapper.resume(e, art(PersonalMapper.kind(e.ref), e.ref.tmdbId, s.settings)) }
                 }.awaitAll()
                 val today = LocalDate.now()
                 val f = followed.await()
-                val movies = f.filter { it.releases.item.kind == TitleKind.MOVIE }
-                val shows = f.filter { it.releases.item.kind == TitleKind.TV }
                 val p = popular.await()
-                val popularMovies = p.filter { it.releases.item.kind == TitleKind.MOVIE }
+                // Filmele, cu lansările lor (cinema RO / US, streaming, digital) din calendar.
+                val movies = withReleases(f.filter { it.releases.item.kind == TitleKind.MOVIE })
+                val shows = f.filter { it.releases.item.kind == TitleKind.TV }
+                val popularMovies = withReleases(p.filter { it.releases.item.kind == TitleKind.MOVIE })
                 val popularShows = p.filter { it.releases.item.kind == TitleKind.TV }
+                val apps = packages.await()
+                fun List<PersonalItem>.withApps() = map { i ->
+                    val r = i.release
+                    val id = r?.serviceId?.takeIf { r.channel == ReleaseChannel.STREAMING }
+                    if (id != null) i.copy(appPackage = apps[id]) else i
+                }
+                // Întâi ce e din Lista mea, apoi ce e popular, ca rândurile să nu fie goale. Un titlu trece singur
+                // din „În curând” în „Noutăți” la data lansării (aceleași titluri, altă fereastră de timp).
                 PersonalRows(
                     PersonalState.CONNECTED,
                     continueMovies = resume.filter { it.kind == TitleKind.MOVIE }.take(ROW_LIMIT),
                     continueShows = resume.filter { it.kind == TitleKind.TV }.take(ROW_LIMIT),
-                    newMovies = HomeSections.newMovies(movies, today).take(ROW_LIMIT),
-                    newEpisodes = HomeSections.newEpisodes(shows, today).take(ROW_LIMIT),
-                    // Întâi ce e din Lista mea, apoi ce e popular, ca rândul să nu fie gol.
+                    newMovies = (HomeSections.newMovies(movies, today) + HomeSections.newMovies(popularMovies, today))
+                        .distinctBy { it.key }.take(ROW_LIMIT).withApps(),
+                    newEpisodes = (
+                        HomeSections.newEpisodes(shows, today) +
+                            HomeSections.newEpisodes(popularShows, today, POPULAR_RECENT_EPISODE_DAYS)
+                        ).distinctBy { it.key }.take(ROW_LIMIT),
                     soonMovies = (HomeSections.soonMovies(movies, today) + HomeSections.soonMovies(popularMovies, today))
-                        .distinctBy { it.key }.take(ROW_LIMIT),
+                        .distinctBy { it.key }.take(ROW_LIMIT).withApps(),
                     soonEpisodes = (HomeSections.soonEpisodes(shows, today) + HomeSections.soonEpisodes(popularShows, today))
                         .distinctBy { it.key }.take(ROW_LIMIT),
                 )
@@ -151,6 +172,38 @@ class HomeViewModel @Inject constructor(
                 }
             }.awaitAll().filterNotNull()
         }
+    }
+
+    /** Lansările fiecărui film (din calendar, păstrate în cache-ul TMDb); fără ele rămâne doar data. */
+    private suspend fun withReleases(movies: List<FollowedTitle>): List<FollowedTitle> = coroutineScope {
+        movies.take(RELEASES_LIMIT).map { f ->
+            async {
+                val list = artGate.withPermit { runCatching { calendar.movieReleases(f.releases.item.id) }.getOrNull() }
+                if (list.isNullOrEmpty()) f else f.copy(releases = f.releases.copy(movieReleases = list.map(::toEvent)))
+            }
+        }.awaitAll() + movies.drop(RELEASES_LIMIT)
+    }
+
+    private fun toEvent(r: MovieRelease) = MovieReleaseEvent(
+        channel = when (r.kind) {
+            MovieReleaseKind.CINEMA_RO, MovieReleaseKind.CINEMA_US -> ReleaseChannel.CINEMA
+            MovieReleaseKind.STREAMING -> ReleaseChannel.STREAMING
+            MovieReleaseKind.DIGITAL -> ReleaseChannel.DIGITAL
+        },
+        region = r.region.code,
+        date = r.date.toString(),
+        serviceId = r.service?.id,
+        serviceName = r.service?.name,
+        mine = r.onMyApp,
+    )
+
+    /** Pachetul aplicației instalate pentru fiecare serviciu din calendar (ex. „netflix”), pentru siglă. */
+    private suspend fun servicePackages(): Map<String, String> = withContext(Dispatchers.IO) {
+        val installed = runCatching { resolver.installedApps() }.getOrDefault(emptyMap())
+        CALENDAR_TO_SERVICE.mapNotNull { (calendarId, serviceId) ->
+            val app = StreamingService.byId(serviceId)?.let { TargetApp.byId(it.appId) } ?: return@mapNotNull null
+            installed[app]?.let { calendarId to it.packageName }
+        }.toMap()
     }
 
     val syncStatus: StateFlow<SyncStatus> = tracking.status
@@ -231,5 +284,12 @@ class HomeViewModel @Inject constructor(
         /** Câte titluri din Lista mea verificăm pentru noutăți (cele mai recente întâi). */
         const val FOLLOW_LIMIT = 120
         const val POPULAR_EPISODE_DAYS = 14L
+
+        /** Titlurile populare apărute de curând („Noutăți”): filme din ultima lună, episoade din ultima săptămână. */
+        const val POPULAR_RECENT_DAYS = 30L
+        const val POPULAR_RECENT_EPISODE_DAYS = 7L
+
+        /** Câte filme primesc lansările detaliate (cinema / streaming / digital). */
+        const val RELEASES_LIMIT = 80
     }
 }

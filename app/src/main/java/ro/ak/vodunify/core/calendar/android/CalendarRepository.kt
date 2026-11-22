@@ -27,6 +27,7 @@ import ro.ak.vodunify.core.calendar.engine.MovieCalendarRepository
 import ro.ak.vodunify.core.calendar.model.CalendarResult
 import ro.ak.vodunify.core.calendar.model.CalendarSettings
 import ro.ak.vodunify.core.calendar.model.MovieCalendarResult
+import ro.ak.vodunify.core.calendar.model.MovieRelease
 import ro.ak.vodunify.core.calendar.model.SavedShow
 import ro.ak.vodunify.core.calendar.omdb.OmdbClient
 import ro.ak.vodunify.core.calendar.time.RomaniaTime
@@ -165,6 +166,14 @@ class CalendarRepository @Inject constructor(
 
     suspend fun movies(from: LocalDate, to: LocalDate, s: CalendarSettings): MovieCalendarResult =
         movieRepo(language()).moviesBetween(from, to, s, apiKey = "", omdbKey = omdbKey(s))
+
+    /** Notele IMDb ale episoadelor unui sezon (episod → notă); gol fără cheie OMDb. */
+    suspend fun episodeImdbRatings(seriesImdbId: String, season: Int): Map<Int, Double> =
+        omdb.seasonRatings(seriesImdbId, season, omdbKey(prefs.settings.first()))
+
+    /** Toate lansările unui film (cinema RO / US, streaming, digital), pentru „În curând” / „Noutăți” din Acasă. */
+    suspend fun movieReleases(movieId: Long): List<MovieRelease> =
+        movieRepo(language()).releasesOf(movieId.toInt(), settings.first())
 
     /** Ce apare azi (pentru notificare și canalul TV), fără ce ai văzut deja. Null fără cheie TMDb. */
     suspend fun today(): TodayDigest? {

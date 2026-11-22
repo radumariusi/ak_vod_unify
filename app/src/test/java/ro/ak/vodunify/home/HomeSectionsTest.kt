@@ -10,6 +10,8 @@ import ro.ak.vodunify.core.catalog.DiscoverQuery
 import ro.ak.vodunify.core.catalog.DiscoverService
 import ro.ak.vodunify.core.catalog.DiscoverSort
 import ro.ak.vodunify.core.catalog.EpisodeAir
+import ro.ak.vodunify.core.catalog.MovieReleaseEvent
+import ro.ak.vodunify.core.catalog.ReleaseChannel
 import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.core.catalog.TitleReleases
 import ro.ak.vodunify.core.prefs.Market
@@ -31,6 +33,35 @@ class HomeSectionsTest {
         val list = listOf(movie(1, "2026-11-01"), movie(2, "2026-11-20"), movie(3, "2026-09-01"), movie(4, "2026-12-05"), movie(5, null))
         assertEquals(listOf(2L, 1L), HomeSections.newMovies(list, today).map { it.tmdbId })
         assertEquals(listOf(4L), HomeSections.soonMovies(list, today).map { it.tmdbId })
+    }
+
+    private fun movieWith(id: Long, vararg r: MovieReleaseEvent) =
+        FollowedTitle(TitleReleases(item(id, TitleKind.MOVIE), null, null, null, r.toList()))
+
+    @Test fun romanianCinemaBeatsUs() {
+        val t = movieWith(
+            1,
+            MovieReleaseEvent(ReleaseChannel.CINEMA, "US", "2026-11-26"),
+            MovieReleaseEvent(ReleaseChannel.CINEMA, "RO", "2026-12-05"),
+        ).releases
+        assertEquals(listOf("RO"), HomeSections.homeReleases(t).map { it.region })
+    }
+
+    @Test fun movieMovesFromSoonToNewAndCanBeInBoth() {
+        val m = movieWith(
+            7,
+            MovieReleaseEvent(ReleaseChannel.CINEMA, "RO", "2026-11-14"),
+            MovieReleaseEvent(ReleaseChannel.DIGITAL, "US", "2026-12-09"),
+            MovieReleaseEvent(ReleaseChannel.STREAMING, "US", "2027-01-20", serviceId = "netflix", serviceName = "Netflix"),
+        )
+        val new = HomeSections.newMovies(listOf(m), today)
+        val soon = HomeSections.soonMovies(listOf(m), today)
+        assertEquals(ReleaseChannel.CINEMA, new.single().release?.channel)
+        // Streaming bate digitalul: „acasă” înseamnă Netflix.
+        assertEquals(ReleaseChannel.STREAMING, soon.single().release?.channel)
+        assertEquals("20 ian", soon.single().subtitle)
+        // După data lansării în cinema, filmul trece în Noutăți.
+        assertEquals(emptyList<Long>(), HomeSections.soonMovies(listOf(m), LocalDate.of(2027, 1, 21)).map { it.tmdbId })
     }
 
     @Test fun newEpisodesSkipWhatYouAlreadySaw() {

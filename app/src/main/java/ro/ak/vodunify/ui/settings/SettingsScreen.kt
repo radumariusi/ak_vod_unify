@@ -1,5 +1,9 @@
 package ro.ak.vodunify.ui.settings
 
+import ro.ak.vodunify.ui.theme.RowShape
+import ro.ak.vodunify.ui.theme.PillShape
+import ro.ak.vodunify.ui.theme.GlassActive
+import ro.ak.vodunify.ui.theme.GlassIdle
 import ro.ak.vodunify.ui.components.Dropdown
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -51,7 +55,6 @@ import ro.ak.vodunify.ui.components.FilterChip
 import ro.ak.vodunify.ui.components.OutlinedButton
 import ro.ak.vodunify.ui.components.TextButton
 import ro.ak.vodunify.ui.components.layoutSpec
-import ro.ak.vodunify.ui.theme.Accent
 import ro.ak.vodunify.ui.components.readable
 
 /** Categoriile setărilor (stânga pe TV / tabletă, listă pe telefon). */
@@ -135,24 +138,23 @@ private fun CategoryItem(cat: SettingsCategory, selected: Boolean, selectOnFocus
     val c = MaterialTheme.colorScheme
     val bg = when {
         focused -> c.secondary
-        selected -> c.surfaceVariant
+        selected -> GlassActive
         else -> Color.Transparent
     }
     val fg = if (focused) c.onSecondary else c.onSurface
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(MaterialTheme.shapes.small)
+            .clip(RowShape)
             .background(bg)
             .onFocusChanged { if (it.isFocused && selectOnFocus && !selected) onSelect() }
             .clickable(interactionSource = interaction, indication = null, onClick = onSelect)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.width(3.dp).height(32.dp).background(if (selected && !focused) Accent else Color.Transparent))
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(6.dp))
         Column {
-            Text(cat.title, color = fg, fontWeight = FontWeight.SemiBold)
+            Text(cat.title, color = fg, fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold)
             Text(cat.subtitle, style = MaterialTheme.typography.bodySmall, color = if (focused) fg else c.onSurfaceVariant)
         }
     }

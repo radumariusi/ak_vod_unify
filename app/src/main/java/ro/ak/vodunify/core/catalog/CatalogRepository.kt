@@ -141,33 +141,35 @@ class CatalogRepository @Inject constructor(
     }
 
     /**
-     * „În curând” pentru toată lumea, nu doar din Lista mea: filmele populare care se lansează în următoarele
-     * [movieDays] zile (data premierei mondiale) și serialele populare cu episod nou în următoarele [tvDays] zile.
+     * Titlurile populare pentru „În curând” și „Noutăți”: filme care apar în următoarele [movieDays] zile sau au
+     * apărut în ultimele [recentDays], seriale cu un episod între acum [recentDays] zile și peste [tvDays].
      */
-    suspend fun upcomingPopular(settings: CatalogSettings, movieDays: Long, tvDays: Long): List<TitleReleases> = supervisorScope {
+    suspend fun upcomingPopular(settings: CatalogSettings, movieDays: Long, tvDays: Long, recentDays: Long = 0): List<TitleReleases> = supervisorScope {
         val today = java.time.LocalDate.now()
         val lang = settings.apiLanguage
-        val movies = async {
+        suspend fun movies(from: java.time.LocalDate, to: java.time.LocalDate): List<TitleReleases> {
             val r = list(
                 "discover/movie",
                 mapOf(
                     "language" to lang,
-                    "primary_release_date.gte" to today.plusDays(1).toString(),
-                    "primary_release_date.lte" to today.plusDays(movieDays).toString(),
+                    "primary_release_date.gte" to from.toString(),
+                    "primary_release_date.lte" to to.toString(),
                     "sort_by" to "popularity.desc",
                 ),
             )
             val dates = r.results.associate { it.id to it.releaseDate }
-            TmdbMappers.items(r.results, settings.language, TitleKind.MOVIE).map {
+            return TmdbMappers.items(r.results, settings.language, TitleKind.MOVIE).map {
                 TitleReleases(item = it, releaseDate = dates[it.id]?.takeIf { d -> d.isNotBlank() }, lastEpisode = null, nextEpisode = null)
             }
         }
+        val upcoming = async { movies(today.plusDays(1), today.plusDays(movieDays)) }
+        val recent = async { if (recentDays > 0) movies(today.minusDays(recentDays), today) else emptyList() }
         val shows = async {
             val r = list(
                 "discover/tv",
                 mapOf(
                     "language" to lang,
-                    "air_date.gte" to today.toString(),
+                    "air_date.gte" to today.minusDays(recentDays).toString(),
                     "air_date.lte" to today.plusDays(tvDays).toString(),
                     "sort_by" to "popularity.desc",
                 ),
@@ -177,7 +179,7 @@ class CatalogRepository @Inject constructor(
                 async { runCatching { releases(TitleKind.TV, item.id, settings) }.getOrNull() }
             }.awaitAll().filterNotNull()
         }
-        val m = runCatching { movies.await() }.getOrDefault(emptyList())
+        val m = runCatching { upcoming.await() }.getOrDefault(emptyList()) + runCatching { recent.await() }.getOrDefault(emptyList())
         val t = runCatching { shows.await() }.getOrDefault(emptyList())
         m + t
     }
@@ -305,7 +307,7 @@ class CatalogRepository @Inject constructor(
             imdbId = dto.imdbId ?: dto.externalIds?.imdbId,
             trailerYoutubeKey = trailer,
             nextEpisode = dto.nextEpisodeToAir?.let { e ->
-                "Următorul episod: S${e.seasonNumber} E${e.episodeNumber}" + (e.airDate?.let { " · $it" } ?: "")
+                "Următorul episod: " + "S%02dE%02d".format(e.seasonNumber, e.episodeNumber) + (e.airDate?.let { " · $it" } ?: "")
             },
             logoUrl = TmdbImages.titleLogo(TmdbMappers.logoPath(dto.images?.logos.orEmpty(), settings.logoLanguage)),
         )
@@ -387,6 +389,7 @@ class CatalogRepository @Inject constructor(
                     stillUrl = TmdbImages.still(it.stillPath),
                     airDate = it.airDate,
                     runtimeMinutes = it.runtime,
+                    rating = it.voteAverage?.takeIf { v -> v > 0 },
                 )
             },
         )

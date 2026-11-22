@@ -12,14 +12,15 @@ import java.time.Instant
 
 class PersonalMapperTest {
     @Test fun unknownProgressIsLabelledNotZero() {
-        assertEquals("Poziție necunoscută", PersonalMapper.progressLabel(null))
-        assertEquals("0% văzut", PersonalMapper.progressLabel(0f))
-        assertEquals("42% văzut", PersonalMapper.progressLabel(0.42f))
+        assertEquals(null, PersonalMapper.progressLabel(null))
+        assertEquals("0%", PersonalMapper.progressLabel(0f))
+        assertEquals("42%", PersonalMapper.progressLabel(0.42f))
     }
 
     @Test fun episodeLabel() {
-        assertEquals("S01E02 · Pilot", PersonalMapper.episodeLabel(1, 2, "Pilot"))
-        assertEquals("S10E11", PersonalMapper.episodeLabel(10, 11, null))
+        // Fără numele episodului pe carduri: doar sezonul și numărul.
+        assertEquals("S01E02", PersonalMapper.episodeLabel(1, 2))
+        assertEquals(null, PersonalMapper.episodeLabel(null, 11))
     }
 
     @Test fun resumeEntityRoundTrip() {
@@ -30,7 +31,7 @@ class PersonalMapperTest {
         assertEquals(null, entity.progress)
         assertEquals(media, TrackingEntities.media(entity.ref))
         val card = PersonalMapper.resume(entity, null)
-        assertEquals("S01E03 · Lord Snow · Poziție necunoscută", card.subtitle)
+        assertEquals("S01E03", card.subtitle)
         assertEquals(null, card.progress)
     }
 
