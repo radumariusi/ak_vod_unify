@@ -49,7 +49,6 @@ class CatalogRepository @Inject constructor(
         val l = settings.language
         val region = Market.RO.code
 
-        val trending = async { list("trending/all/week", mapOf("language" to lang)) }
         val movies = async { list("movie/popular", mapOf("language" to lang, "region" to region)) }
         val shows = async { list("tv/popular", mapOf("language" to lang)) }
         val topMovies = async { list("movie/top_rated", mapOf("language" to lang, "region" to region)) }
@@ -66,11 +65,12 @@ class CatalogRepository @Inject constructor(
             null
         }
 
-        val trendingItems = safe { TmdbMappers.items(trending.await().results, l) }.orEmpty()
+        // Fără „În tendințe”: amesteca filme apărute cu filme care încă nu au apărut.
         val rows = mutableListOf<CatalogRow>()
-        rows += CatalogRow("trending", "În tendințe", trendingItems)
-        safe { TmdbMappers.items(movies.await().results, l, TitleKind.MOVIE) }?.let { rows += CatalogRow("movies", "Filme populare", it) }
-        safe { TmdbMappers.items(shows.await().results, l, TitleKind.TV) }?.let { rows += CatalogRow("shows", "Seriale populare", it) }
+        val popularMovies = safe { TmdbMappers.items(movies.await().results, l, TitleKind.MOVIE) }
+        val popularShows = safe { TmdbMappers.items(shows.await().results, l, TitleKind.TV) }
+        popularMovies?.let { rows += CatalogRow("movies", "Filme populare", it) }
+        popularShows?.let { rows += CatalogRow("shows", "Seriale populare", it) }
         safe { TmdbMappers.items(topMovies.await().results, l, TitleKind.MOVIE) }?.let { rows += CatalogRow("top_movies", "Filme apreciate", it) }
 
         val serviceRows = shelves.filter { it.providerIds.isNotEmpty() }.map { shelf ->
@@ -90,7 +90,7 @@ class CatalogRepository @Inject constructor(
         val nonEmpty = rows.filter { it.items.isNotEmpty() }
         if (nonEmpty.isEmpty() && errors.isNotEmpty()) throw errors.first()
         HomeCatalog(
-            hero = trendingItems.filter { it.backdropUrl != null }.take(6),
+            hero = TmdbMappers.interleave(popularMovies.orEmpty(), popularShows.orEmpty()).filter { it.backdropUrl != null }.take(6),
             rows = nonEmpty,
         )
     }

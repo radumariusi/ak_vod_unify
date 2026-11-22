@@ -39,6 +39,11 @@ class StatusActivity : Activity() {
     private lateinit var batteryButton: Button
     private lateinit var overlayButton: Button
     private lateinit var dotButton: Button
+    private lateinit var dotSettings: LinearLayout
+    private lateinit var sizeButton: Button
+    private lateinit var cornerButton: Button
+    private lateinit var alphaButton: Button
+    private val colorButtons = mutableMapOf<Prefs.DotState, Button>()
 
     private val refresher = object : Runnable {
         override fun run() {
@@ -79,6 +84,27 @@ class StatusActivity : Activity() {
             render()
         }
         column.addView(dotButton)
+        // Aspectul bulinei: fiecare apăsare trece la următoarea variantă.
+        dotSettings = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        Prefs.DotState.entries.forEach { state ->
+            colorButtons[state] = button("") {
+                Prefs.nextDotColor(this, state)
+                render()
+            }.also(dotSettings::addView)
+        }
+        sizeButton = button("") {
+            Prefs.nextDotSize(this)
+            render()
+        }.also(dotSettings::addView)
+        cornerButton = button("") {
+            Prefs.nextDotCorner(this)
+            render()
+        }.also(dotSettings::addView)
+        alphaButton = button("") {
+            Prefs.nextDotAlpha(this)
+            render()
+        }.also(dotSettings::addView)
+        column.addView(dotSettings)
         column.addView(button("Deschide AK VOD Unify") { openMainApp() })
 
         adb = text("", 14f).also { it.setTextIsSelectable(true) }.also(column::addView)
@@ -152,7 +178,10 @@ class StatusActivity : Activity() {
             append(
                 when {
                     !overlay -> "\nℹ️ Bulina nu are voie să apară peste aplicații"
-                    Prefs.dotEnabled(this@StatusActivity) -> "\n✅ Bulina e afișată (verde = activ, roșu = urmărește o redare)"
+                    Prefs.dotEnabled(this@StatusActivity) -> "\n✅ Bulina e afișată: " +
+                        Prefs.DotState.entries.joinToString(", ") { st ->
+                            "${Prefs.dotColor(this@StatusActivity, st).name.lowercase()} = ${st.label}"
+                        }
                     else -> "\nℹ️ Bulina e ascunsă"
                 },
             )
@@ -161,6 +190,12 @@ class StatusActivity : Activity() {
         overlayButton.visibility = if (overlay) View.GONE else View.VISIBLE
         dotButton.visibility = if (overlay) View.VISIBLE else View.GONE
         dotButton.text = if (Prefs.dotEnabled(this)) "Ascunde bulina" else "Arată bulina"
+        dotSettings.visibility = if (overlay && Prefs.dotEnabled(this)) View.VISIBLE else View.GONE
+        colorButtons.forEach { (st, b) -> b.text = "Culoare când ${st.label}: ${Prefs.dotColor(this, st).name}" }
+        val (sizeDp, sizeName) = Prefs.SIZES[Prefs.dotSizeIndex(this)]
+        sizeButton.text = "Mărimea bulinei: $sizeName ($sizeDp dp)"
+        cornerButton.text = "Locul bulinei: ${Prefs.dotCorner(this).label}"
+        alphaButton.text = "Vizibilitatea bulinei: ${Prefs.dotAlpha(this)}%"
         accessButton.visibility = if (enabled) View.GONE else View.VISIBLE
         screenButton.visibility = if (screenOn) View.GONE else View.VISIBLE
         batteryButton.visibility = if (battery) View.GONE else View.VISIBLE

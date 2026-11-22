@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -83,7 +84,7 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val personal by viewModel.personal.collectAsStateWithLifecycle()
     val sync by viewModel.syncStatus.collectAsStateWithLifecycle()
-    val personalRows: @Composable () -> Unit = { PersonalSection(personal, sync, viewModel::syncNow) }
+    val personalRows: LazyListScope.() -> Unit = { personalItems(personal, sync, viewModel::syncNow) }
     // Siglele titlurilor din rândurile personale (Continuă, Noutăți, În curând) se pregătesc din timp, ca hero-ul
     // să le arate pe loc la focus.
     LaunchedEffect(personal) {
@@ -95,22 +96,23 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
     }
     when (val s = state) {
         LoadState.Loading -> LazyColumn(Modifier.fillMaxSize()) {
-            item { personalRows() }
+            personalRows()
             item { LoadingPanel() }
         }
         is LoadState.Failed -> LazyColumn(Modifier.fillMaxSize()) {
             item { ErrorPanel(s.error, onRetry = viewModel::retry) }
-            item { personalRows() }
+            personalRows()
         }
-        is LoadState.Data -> HomeContent(s.value, personalRows, viewModel)
+        is LoadState.Data -> HomeContent(s.value, personalRows, viewModel, personalReady = personal.state != PersonalState.LOADING)
     }
 }
 
 @Composable
 private fun HomeContent(
     catalog: HomeCatalog,
-    personalRows: @Composable () -> Unit,
+    personalRows: LazyListScope.() -> Unit,
     viewModel: HomeViewModel,
+    personalReady: Boolean,
 ) {
     val spec = layoutSpec()
     val listFocus = remember { FocusRequester() }
@@ -125,8 +127,21 @@ private fun HomeContent(
 
     // Pe TV focusul pornește pe primul poster (nu mai e buton „Detalii”: OK pe orice poster deschide fișa);
     // la întoarcerea dintr-o fișă focusul revine pe cardul deschis (vezi FocusRestore).
+    // Acasă pornește mereu de sus, de la Continuă vizionarea: focusul se pune abia după ce rândurile personale
+    // sunt pe ecran (altfel ar cădea pe primul rând din catalog, iar rândurile apărute deasupra l-ar lăsa jos).
     if (spec.isTv) {
-        LaunchedEffect(Unit) { if (restore.pending == null) runCatching { listFocus.requestFocus() } }
+        var started by remember { mutableStateOf(false) }
+        LaunchedEffect(personalReady) {
+            if (started) return@LaunchedEffect
+            if (restore.pending != null) {
+                started = true
+                return@LaunchedEffect
+            }
+            if (!personalReady) delay(PERSONAL_WAIT_MS)
+            started = true
+            listState.scrollToItem(0)
+            runCatching { listFocus.requestFocus() }
+        }
     }
     // Înapoi de pe un rând de jos urcă la primul rând; abia de acolo întreabă dacă ieși din aplicație.
     val scrolled by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 } }
@@ -143,7 +158,11 @@ private fun HomeContent(
         // un rând întreg de postere dedesubt.
         BoxWithConstraints(Modifier.fillMaxSize()) {
             // Sub hero încape exact un rând de postere cu titlul lui și, dedesubt, titlul rândului următor.
-            val heroHeight = minOf(maxHeight * 0.52f, 240.dp, maxHeight - spec.posterHeight - 84.dp).coerceAtLeast(140.dp)
+            val heroHeight = minOf(
+                maxHeight * 0.52f,
+                240.dp,
+                maxHeight - spec.posterHeight - ROW_HEAD - ROW_TITLE_HEIGHT - 12.dp,
+            ).coerceAtLeast(140.dp)
             val peek = remember { RowPeek() }
             Column(Modifier.fillMaxSize()) {
                 Hero(
@@ -154,14 +173,15 @@ private fun HomeContent(
                 )
                 // Rândul cu focus urcă sus, cu titlul lui; deasupra lui nu se vede nimic din rândul anterior,
                 // sub el doar titlul rândului următor.
-                PivotScroll(pivot = 24.dp) {
+                // Pivotul se aplică posterului cu focus: deasupra lui încape titlul rândului, întreg.
+                PivotScroll(pivot = ROW_HEAD) {
                     CompositionLocalProvider(LocalRowPeek provides peek) {
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize().focusRequester(listFocus).clipBelowNextTitle(peek, ROW_TITLE_HEIGHT),
                         contentPadding = PaddingValues(bottom = 240.dp),
                     ) {
-                        item(key = "personal") { personalRows() }
+                        personalRows()
                         items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
                         item(key = "attribution") { AttributionNote() }
                     }
@@ -179,7 +199,7 @@ private fun HomeContent(
             if (catalog.hero.isNotEmpty()) {
                 item(key = "hero") { Hero(catalog.hero, viewModel, Modifier.fillMaxWidth().height(spec.heroHeight)) }
             }
-            item(key = "personal") { personalRows() }
+            personalRows()
             items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
             item(key = "attribution") { AttributionNote() }
         }
@@ -290,3 +310,9 @@ private fun Hero(
 
 /** Cât ocupă titlul unui rând (SectionTitle): atât se vede din rândul de sub cel cu focus. */
 private val ROW_TITLE_HEIGHT = 40.dp
+
+/** De la marginea de sus a unui rând până la postere: titlul rândului și spațiul de deasupra posterelor. */
+private val ROW_HEAD = 54.dp
+
+/** Cât așteptăm rândurile personale înainte să punem focusul oricum (prima pornire, fără nimic salvat). */
+private const val PERSONAL_WAIT_MS = 4_000L

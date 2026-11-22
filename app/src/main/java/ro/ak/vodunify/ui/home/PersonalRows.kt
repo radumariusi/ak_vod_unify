@@ -1,5 +1,6 @@
 package ro.ak.vodunify.ui.home
 
+import kotlinx.serialization.Serializable
 import ro.ak.vodunify.core.catalog.CatalogItem
 import ro.ak.vodunify.core.catalog.MovieReleaseEvent
 import ro.ak.vodunify.core.catalog.ReleaseChannel
@@ -14,6 +15,7 @@ import ro.ak.vodunify.core.db.UpNextEntity
 import ro.ak.vodunify.core.db.WatchlistEntity
 
 /** Card din rândurile personale (Continuă / Următorul episod / De văzut). */
+@Serializable
 data class PersonalItem(
     val key: String,
     val kind: TitleKind,
@@ -35,8 +37,8 @@ data class PersonalItem(
      * la o lansare pe streaming aplicația serviciului. Null = sigla obișnuită a titlului.
      */
     val appPackage: String? = null,
-    /** Data lansării / episodului (Noutăți, În curând), scrisă complet în hero. */
-    val eventDate: LocalDate? = null,
+    /** Data lansării / episodului (Noutăți, În curând), ISO („2026-11-26”), scrisă complet în hero. */
+    val eventDate: String? = null,
     /** Codul episodului („S01E02”) la Noutăți / În curând seriale. */
     val episodeCode: String? = null,
     /** Când ai văzut ultima dată (Continuă vizionarea), epoch ms. */
@@ -54,6 +56,7 @@ enum class PersonalState { LOADING, NOT_CONFIGURED, DISCONNECTED, CONNECTED }
  * Rândurile personale din Acasă, în ordinea lor: Continuă (filme / seriale, din AK Scrobbler),
  * Noutăți din Lista mea (filme apărute în ultima lună / episoade noi nevăzute) și În curând.
  */
+@Serializable
 data class PersonalRows(
     val state: PersonalState,
     val continueMovies: List<PersonalItem> = emptyList(),
@@ -189,7 +192,7 @@ object HomeSections {
             overview = i.overview,
             rating = i.rating,
             release = release?.takeIf { it.channel != ReleaseChannel.UNKNOWN },
-            eventDate = date,
+            eventDate = date?.toString(),
             episodeCode = code,
         )
     }
