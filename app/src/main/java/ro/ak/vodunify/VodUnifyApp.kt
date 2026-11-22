@@ -3,6 +3,7 @@ package ro.ak.vodunify
 import android.app.Application
 import dagger.hilt.android.HiltAndroidApp
 import ro.ak.vodunify.core.calendar.android.CalendarWork
+import ro.ak.vodunify.core.playback.AppRegistry
 import ro.ak.vodunify.core.publish.PublishRepository
 import javax.inject.Inject
 
@@ -13,6 +14,8 @@ class VodUnifyApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Aplicațiile și serviciile adăugate / eliminate de tine (citite sincron de liste).
+        AppRegistry.init(this)
         // Calendar: notificarea zilnică și canalul „Azi apare”, după setări.
         CalendarWork.start(this)
     }

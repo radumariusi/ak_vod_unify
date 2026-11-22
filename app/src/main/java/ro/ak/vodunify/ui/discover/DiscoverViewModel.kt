@@ -64,7 +64,7 @@ class DiscoverViewModel @Inject constructor(
             combine(prefs.settings, playback.settings) { c, p -> c to p }.collect { (c, p) ->
                 settings = c
                 val installed = withContext(Dispatchers.IO) { runCatching { resolver.installedApps().keys }.getOrDefault(emptySet()) }
-                val services = StreamingService.entries.map { s ->
+                val services = StreamingService.active.map { s ->
                     val app = TargetApp.byId(s.appId)
                     DiscoverService(s.displayName, s.tmdbProviderIds, p.marketOf(s), owned = app != null && app in installed)
                 }.sortedBy { !it.owned }

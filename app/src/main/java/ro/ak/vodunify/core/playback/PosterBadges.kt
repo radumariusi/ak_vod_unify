@@ -31,12 +31,15 @@ class PosterBadges @Inject constructor(
     private val appsLock = Mutex()
     @Volatile private var apps: Map<TargetApp, InstalledApp> = emptyMap()
     @Volatile private var appsAt = 0L
+    @Volatile private var appsVersion = -1
 
     private data class Result(val badge: PosterBadge?, val settingsKey: String, val appsAt: Long)
 
     private suspend fun installed(): Map<TargetApp, InstalledApp> = appsLock.withLock {
         val now = System.currentTimeMillis()
-        if (now - appsAt > APPS_TTL_MS) {
+        val version = AppRegistry.version.value
+        if (now - appsAt > APPS_TTL_MS || version != appsVersion) {
+            appsVersion = version
             apps = withContext(Dispatchers.IO) { runCatching { resolver.installedApps() }.getOrDefault(apps) }
             appsAt = now
         }

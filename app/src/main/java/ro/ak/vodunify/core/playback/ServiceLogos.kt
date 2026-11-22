@@ -39,22 +39,39 @@ class ServiceLogos @Inject constructor(private val tmdb: TmdbClient) {
 
     suspend fun forService(service: StreamingService): String? = pick(load(), service)
 
+    @Volatile private var names: List<Pair<Int, String>> = emptyList()
+
+    /** Toți furnizorii TMDb (RO + US, filme + seriale): id și nume, pentru „Adaugă serviciu”. */
+    suspend fun providers(): List<Pair<Int, String>> {
+        load()
+        return names
+    }
+
     private suspend fun load(): Map<Int, String> {
         logos?.let { return it }
         return lock.withLock {
             logos?.let { return@withLock it }
             if (!tmdb.isConfigured || System.currentTimeMillis() - failedAt < RETRY_MS) return@withLock emptyMap()
             val map = HashMap<Int, String>()
+            val all = LinkedHashMap<Int, String>()
             var ok = false
             for (kind in listOf("movie", "tv")) for (region in listOf("RO", "US")) {
                 runCatching {
                     tmdb.get("watch/providers/$kind", mapOf("watch_region" to region), TmdbProviderList.serializer(), TmdbClient.LONG_TTL)
                 }.onSuccess { list ->
                     ok = true
-                    list.results.forEach { p -> p.logoPath?.let { map.putIfAbsent(p.providerId, IMAGE_BASE + it) } }
+                    list.results.forEach { p ->
+                        p.logoPath?.let { map.putIfAbsent(p.providerId, IMAGE_BASE + it) }
+                        all.putIfAbsent(p.providerId, p.providerName)
+                    }
                 }
             }
-            if (ok) logos = map else failedAt = System.currentTimeMillis()
+            if (ok) {
+                logos = map
+                names = all.entries.map { it.key to it.value }.sortedBy { it.second.lowercase() }
+            } else {
+                failedAt = System.currentTimeMillis()
+            }
             map
         }
     }
