@@ -71,6 +71,7 @@ class WebLoginActivity : Activity() {
 
         web = WebView(this)
         root.addView(web, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.keepClearOfSystemBars()
         setContentView(root)
 
         CookieManager.getInstance().setAcceptCookie(true)

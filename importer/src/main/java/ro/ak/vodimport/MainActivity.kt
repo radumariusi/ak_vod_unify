@@ -74,7 +74,7 @@ class MainActivity : Activity() {
             statusViews[TraktImport.SERVICE] = text(statusLine(prefs.getString("last_${TraktImport.SERVICE}", null)), 14f).also(column::addView)
             column.addView(button("Conectează-te și importă din Trakt") { startActivity(Intent(this, TraktActivity::class.java)) })
         }
-        setContentView(ScrollView(this).apply { addView(column) })
+        setContentView(ScrollView(this).apply { addView(column); keepClearOfSystemBars() })
         first?.requestFocus()
         checkRoute()
     }

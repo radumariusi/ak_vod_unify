@@ -54,7 +54,7 @@ class TraktActivity : Activity() {
             prefs.edit().remove(KEY_TOKEN).remove(KEY_EXPIRES).apply()
             refresh()
         }.also(column::addView)
-        setContentView(ScrollView(this).apply { addView(column) })
+        setContentView(ScrollView(this).apply { addView(column); keepClearOfSystemBars() })
         refresh()
     }
 

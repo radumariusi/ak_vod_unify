@@ -130,7 +130,7 @@ class StatusActivity : Activity() {
         })
         diag = focusableText().also { it.textSize = 12f }.also(column::addView)
 
-        setContentView(ScrollView(this).apply { addView(column) })
+        setContentView(ScrollView(this).apply { addView(column); keepClearOfSystemBars() })
         accessButton.requestFocus()
     }
 
