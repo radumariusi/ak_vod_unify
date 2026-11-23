@@ -135,6 +135,16 @@ interface TrackingDao {
     @Query("DELETE FROM watch_events WHERE source = :source AND mediaKey = :mediaKey AND season IS :season AND episode IS :episode")
     suspend fun deleteHistory(source: String, mediaKey: String, season: Int?, episode: Int?)
 
+    /**
+     * Șterge vizionările sursei [drop] pentru filmele / episoadele care există deja în sursa [keep]
+     * (ex. din Trakt nu păstrăm ce vine din istoricul Netflix). Întoarce câte rânduri a șters.
+     */
+    @Query(
+        "DELETE FROM watch_events WHERE source = :drop AND EXISTS (SELECT 1 FROM watch_events k WHERE k.source = :keep " +
+            "AND k.mediaKey = watch_events.mediaKey AND k.season IS watch_events.season AND k.episode IS watch_events.episode)",
+    )
+    suspend fun deleteHistoryCoveredBy(drop: String, keep: String): Int
+
     @Query("SELECT * FROM watch_events WHERE mediaKey = :mediaKey ORDER BY watchedAt DESC")
     fun historyFor(mediaKey: String): Flow<List<WatchEventEntity>>
 
