@@ -20,5 +20,7 @@ class VodUnifyApp : Application() {
         ro.ak.vodunify.core.prefs.UiPrefs.init(this)
         // Calendar: notificarea zilnică și canalul „Azi apare”, după setări.
         CalendarWork.start(this)
+        // Istoricul importat rămas neprocesat (aplicația a fost oprită): continuăm.
+        ro.ak.vodunify.core.imports.HistoryImportRepository.resumeIfPending(this)
     }
 }
