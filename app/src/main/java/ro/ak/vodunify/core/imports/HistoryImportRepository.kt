@@ -2,6 +2,7 @@ package ro.ak.vodunify.core.imports
 
 import android.content.Context
 import android.content.pm.PackageManager
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
@@ -26,9 +27,11 @@ import ro.ak.vodunify.core.db.ResumePointEntity
 import ro.ak.vodunify.core.db.TrackingDao
 import ro.ak.vodunify.core.scrobble.ScrobbleMatch
 import ro.ak.vodunify.core.scrobble.ScrobbleMatcher
+import ro.ak.vodunify.core.tmdb.TmdbHttpException
 import ro.ak.vodunify.core.tracking.TrackingEntities
 import java.io.File
 import java.time.Instant
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -89,14 +92,34 @@ class HistoryImportRepository @Inject constructor(
 
     /** Procesează toată coada. Aruncă excepție la erori de rețea (lucrul se reîncearcă). */
     suspend fun processQueue() = mutex.withLock {
+        _pending.value = countPending()
         while (true) {
             val next = queueFiles().firstOrNull() ?: break
             val batch = runCatching { json.decodeFromString(ImportBatch.serializer(), next.readText()) }.getOrNull()
-            if (batch != null) process(batch)
-            next.delete()
-            _pending.value = countPending()
+            if (batch == null || batch.items.isEmpty()) {
+                next.delete()
+                continue
+            }
+            // Câte puțin, cu progresul salvat după fiecare bucată: numărul scade pe ecran, iar dacă
+            // Android oprește lucrul (limita de 10 minute, rețea), continuăm de unde am rămas.
+            val chunk = batch.items.take(CHUNK)
+            val rest = batch.items.drop(CHUNK)
+            process(batch.copy(items = chunk, last = rest.isEmpty() && batch.last))
+            if (rest.isEmpty()) {
+                next.delete()
+            } else {
+                val tmp = File(queueDir, next.name + ".tmp")
+                tmp.writeText(json.encodeToString(ImportBatch.serializer(), batch.copy(items = rest)))
+                if (!tmp.renameTo(next)) {
+                    next.delete()
+                    tmp.renameTo(next)
+                }
+            }
+            _pending.value = (_pending.value - chunk.size).coerceAtLeast(0)
         }
+        _pending.value = countPending()
     }
+
 
     suspend fun clear(service: String) = withContext(Dispatchers.IO) {
         dao.clearSource(service)
@@ -113,9 +136,16 @@ class HistoryImportRepository @Inject constructor(
         val finishedAt = mutableMapOf<String, Long>()
 
         for (item in batch.items) {
-            val match = direct(item) ?: run {
-                val guesses = ImportParser.guesses(item)
-                if (guesses.isEmpty()) null else matcher.match(guesses, item.duration?.times(1000))
+            val match = try {
+                direct(item) ?: run {
+                    val guesses = ImportParser.guesses(item)
+                    if (guesses.isEmpty()) null else matcher.match(guesses, item.duration?.times(1000))
+                }
+            } catch (e: TmdbHttpException) {
+                // Un titlu pe care TMDb îl refuză (404 / 422) nu oprește tot importul; rețeaua da (reîncercăm).
+                if (e.code in 400..499 && e.code != 429) null else throw e
+            } catch (e: kotlinx.serialization.SerializationException) {
+                null
             }
             if (match == null) {
                 unmatched++
@@ -156,7 +186,7 @@ class HistoryImportRepository @Inject constructor(
         if (resumes.isNotEmpty()) dao.upsertResume(resumes)
         // Din Trakt aducem tot, în afară de ce vine din istoricul Netflix (acela e mai exact).
         // Merge în orice ordine: la importul Trakt și la cel Netflix.
-        if (service == ImportSources.TRAKT || service == ImportSources.NETFLIX) {
+        if (batch.last && (service == ImportSources.TRAKT || service == ImportSources.NETFLIX)) {
             dao.deleteHistoryCoveredBy(drop = ImportSources.TRAKT, keep = ImportSources.NETFLIX)
         }
 
@@ -255,11 +285,23 @@ class HistoryImportRepository @Inject constructor(
         private const val FRESH_AFTER_MS = 10 * 60_000L
         private const val WORK = "history_import"
 
+        /** Câte elemente procesăm între două salvări ale progresului. */
+        private const val CHUNK = 25
+
+        /** La pornirea aplicației: dacă a rămas ceva în coadă (aplicația a fost oprită), îl reluăm. */
+        fun resumeIfPending(context: Context) {
+            val left = File(context.filesDir, "import_queue").listFiles { f -> f.isFile && f.name.endsWith(".json") }.orEmpty()
+            if (left.isNotEmpty()) start(context)
+        }
+
         fun start(context: Context) {
             val request = OneTimeWorkRequestBuilder<HistoryImportWorker>()
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .setBackoffCriteria(BackoffPolicy.LINEAR, 30, TimeUnit.SECONDS)
                 .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(WORK, ExistingWorkPolicy.APPEND_OR_REPLACE, request)
+            // REPLACE, nu APPEND: o încercare veche aflată în așteptare (reîncercare după o eroare, cu pauze
+            // tot mai lungi) nu mai blochează importul nou. Progresul e salvat pe bucăți, deci nu pierdem nimic.
+            WorkManager.getInstance(context).enqueueUniqueWork(WORK, ExistingWorkPolicy.REPLACE, request)
         }
     }
 }

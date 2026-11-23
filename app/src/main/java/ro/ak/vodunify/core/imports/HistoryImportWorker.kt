@@ -25,6 +25,7 @@ class HistoryImportWorker(context: Context, params: WorkerParameters) : Coroutin
         throw e
     } catch (e: Exception) {
         Log.w("HistoryImportWorker", "import eșuat, reîncerc", e)
-        if (runAttemptCount < 8) Result.retry() else Result.failure()
+        // Progresul e salvat pe bucăți; reîncercăm cât timp mai e ceva în coadă.
+        Result.retry()
     }
 }
