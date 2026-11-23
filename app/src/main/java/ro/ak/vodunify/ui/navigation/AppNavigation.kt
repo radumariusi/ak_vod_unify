@@ -373,6 +373,8 @@ private fun NavBackStackEntry.concreteRoute(): String? {
     }
 }
 
+// currentBackStack e public în Kotlin, dar marcat „doar pentru biblioteca Navigation”; e stabil din 2.6.
+@android.annotation.SuppressLint("RestrictedApi")
 private fun NavHostController.navigateTop(dest: TopDestination) {
     val stack = currentBackStack.value.filter { it.destination.route != null && it.destination !is androidx.navigation.NavGraph }
     val tops = TopDestination.entries.map { it.route }.toSet()
