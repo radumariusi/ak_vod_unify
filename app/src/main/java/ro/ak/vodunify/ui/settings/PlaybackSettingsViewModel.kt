@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -53,7 +54,7 @@ class PlaybackSettingsViewModel @Inject constructor(
         viewModelScope.launch { _providers.value = runCatching { logos.providers() }.getOrDefault(emptyList()) }
     }
 
-    /** Aplicația instalată [pkg] e intrarea [app] din listă (ex. Shova TV cu pachet necunoscut). */
+    /** Leagă o intrare din listă de pachetul ales de utilizator. */
     fun assign(app: TargetApp, pkg: String) {
         AppRegistry.assign(app, pkg)
         refreshInstalled()
@@ -90,6 +91,7 @@ class PlaybackSettingsViewModel @Inject constructor(
 
     private val _installed = MutableStateFlow<Map<TargetApp, InstalledApp>>(emptyMap())
     val installed: StateFlow<Map<TargetApp, InstalledApp>> = _installed.asStateFlow()
+    private var refreshJob: Job? = null
 
     /** Ce a prins AK Scrobbler din fiecare aplicație (pe pachet). */
     val proofs: StateFlow<Map<String, AppProof>> = scrobbles.proofs
@@ -99,7 +101,8 @@ class PlaybackSettingsViewModel @Inject constructor(
     }
 
     fun refreshInstalled() {
-        viewModelScope.launch { _installed.value = withContext(Dispatchers.IO) { resolver.installedApps() } }
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch { _installed.value = withContext(Dispatchers.IO) { resolver.installedApps() } }
     }
 
     fun setPlaybackMarket(market: Market) {
@@ -118,14 +121,14 @@ class PlaybackSettingsViewModel @Inject constructor(
         viewModelScope.launch { prefs.setDefaultPlayer(app) }
     }
 
-    /** Dovada pentru o aplicație: după pachetul instalat, pachetele cunoscute sau numele. */
-    fun proofFor(app: TargetApp, proofs: Map<String, AppProof>, installed: Map<TargetApp, InstalledApp>): AppProof? =
-        proofs.values.filter { p ->
-            p.pkg == installed[app]?.packageName || TargetApp.byPackage(p.pkg) == app || app.matchesLabel(p.app)
-        }.maxByOrNull { it.at }
-
-    /** Aplicații văzute de AK Scrobbler care nu sunt în listă. */
-    fun unknownProofs(proofs: Map<String, AppProof>, installed: Map<TargetApp, InstalledApp>): List<AppProof> =
-        proofs.values.filter { p -> TargetApp.active.none { proofFor(it, mapOf(p.pkg to p), installed) != null } }
-            .sortedByDescending { it.at }
+    /** Atribuie o dovadă unei singure aplicații. Pachetul identifică mai precis decât numele din launcher. */
+    fun groupProofs(proofs: Collection<AppProof>, installed: Map<TargetApp, InstalledApp>): Map<TargetApp?, List<AppProof>> {
+        val active = TargetApp.active
+        val byPackage = installed.values.associate { it.packageName to it.app }
+        return proofs.groupBy { proof ->
+            byPackage[proof.pkg]
+                ?: TargetApp.byPackage(proof.pkg)?.takeIf { it in active }
+                ?: active.maxByOrNull { it.labelScore(proof.app) }?.takeIf { it.matchesLabel(proof.app) }
+        }
+    }
 }

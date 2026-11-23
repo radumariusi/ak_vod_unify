@@ -3,22 +3,16 @@ package ro.ak.vodunify.ui.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.mapLatest
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -59,7 +53,6 @@ import coil.request.ImageRequest
 import dagger.hilt.android.qualifiers.ApplicationContext
 
 /** Ecranul principal: rânduri personale (baza locală, AK Scrobbler) + rânduri din TMDb pentru piața și limba din Setări. */
-@OptIn(ExperimentalCoroutinesApi::class, kotlinx.coroutines.FlowPreview::class)
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val catalog: CatalogRepository,
@@ -86,68 +79,56 @@ class HomeViewModel @Inject constructor(
 
     private val configured = tracking.trackers.any { it.isConfigured }
 
-    private suspend fun personalRows(s: Snapshot): PersonalRows {
-        // „Continuă vizionarea” vine din AK Scrobbler: se arată și fără Trakt/SIMKL conectat.
-        if (ExternalTrackers.ENABLED && s.resume.isEmpty()) {
-            if (!configured) return PersonalRows(PersonalState.NOT_CONFIGURED)
-            if (!s.connected) return PersonalRows(PersonalState.DISCONNECTED)
-        }
-        return coroutineScope {
-            val followed = async { followed(s) }
-            val popular = async {
-                if (!catalog.isConfigured) {
-                    emptyList()
-                } else {
-                    snapshots.popular(s.settings.toString()) {
-                        runCatching {
-                            catalog.upcomingPopular(s.settings, HomeSections.SOON_MOVIE_DAYS, POPULAR_EPISODE_DAYS, POPULAR_RECENT_DAYS)
-                        }.getOrDefault(emptyList())
-                    }.map { FollowedTitle(it, null) }
-                }
+    private suspend fun releaseRows(s: ReleaseInput): PersonalRows = coroutineScope {
+        val followed = async { followed(s) }
+        val popular = async {
+            if (!catalog.isConfigured) {
+                emptyList()
+            } else {
+                snapshots.popular(s.settings.toString()) {
+                    runCatching {
+                        catalog.upcomingPopular(s.settings, HomeSections.SOON_MOVIE_DAYS, POPULAR_EPISODE_DAYS, POPULAR_RECENT_DAYS)
+                    }.getOrDefault(emptyList())
+                }.map { FollowedTitle(it, null) }
             }
-            val packages = async { snapshots.packages { servicePackages() } }
-            val resume = s.resume.take(ROW_LIMIT * 2).map { e ->
-                async { PersonalMapper.resume(e, art(PersonalMapper.kind(e.ref), e.ref.tmdbId, s.settings)) }
-            }.awaitAll()
-            val today = LocalDate.now()
-            val f = followed.await()
-            val p = popular.await()
-            // Filmele, cu lansările lor (cinema RO / US, streaming, digital) din calendar.
-            val movies = withReleases(f.filter { it.releases.item.kind == TitleKind.MOVIE })
-            val shows = f.filter { it.releases.item.kind == TitleKind.TV }
-            val popularMovies = withReleases(p.filter { it.releases.item.kind == TitleKind.MOVIE })
-            val popularShows = p.filter { it.releases.item.kind == TitleKind.TV }
-            val apps = packages.await()
-            fun List<PersonalItem>.withApps() = map { i ->
-                val r = i.release
-                val id = r?.serviceId?.takeIf { r.channel == ReleaseChannel.STREAMING }
-                if (id != null) i.copy(appPackage = apps[id]) else i
-            }
-            // Întâi ce e din Lista mea, apoi ce e popular, ca rândurile să nu fie goale. Un titlu trece singur
-            // din „În curând” în „Noutăți” la data lansării (aceleași titluri, altă fereastră de timp).
-            PersonalRows(
-                PersonalState.CONNECTED,
-                continueMovies = resume.filter { it.kind == TitleKind.MOVIE }.take(ROW_LIMIT),
-                continueShows = resume.filter { it.kind == TitleKind.TV }.take(ROW_LIMIT),
-                newMovies = (HomeSections.newMovies(movies, today) + HomeSections.newMovies(popularMovies, today))
-                    .distinctBy { it.key }.take(ROW_LIMIT).withApps(),
-                newEpisodes = (
-                    HomeSections.newEpisodes(shows, today) +
-                        HomeSections.newEpisodes(popularShows, today, POPULAR_RECENT_EPISODE_DAYS)
-                    ).distinctBy { it.key }.take(ROW_LIMIT),
-                soonMovies = (HomeSections.soonMovies(movies, today) + HomeSections.soonMovies(popularMovies, today))
-                    .distinctBy { it.key }.take(ROW_LIMIT).withApps(),
-                soonEpisodes = (HomeSections.soonEpisodes(shows, today) + HomeSections.soonEpisodes(popularShows, today))
-                    .distinctBy { it.key }.take(ROW_LIMIT),
-            )
         }
+        val packages = async { snapshots.packages { servicePackages() } }
+        val today = LocalDate.now()
+        val f = followed.await()
+        val p = popular.await()
+        // Filmele, cu lansările lor (cinema RO / US, streaming, digital) din calendar.
+        val movies = withReleases(f.filter { it.releases.item.kind == TitleKind.MOVIE })
+        val shows = f.filter { it.releases.item.kind == TitleKind.TV }
+        val popularMovies = withReleases(p.filter { it.releases.item.kind == TitleKind.MOVIE })
+        val popularShows = p.filter { it.releases.item.kind == TitleKind.TV }
+        val apps = packages.await()
+        fun List<PersonalItem>.withApps() = map { i ->
+            val r = i.release
+            val id = r?.serviceId?.takeIf { r.channel == ReleaseChannel.STREAMING }
+            if (id != null) i.copy(appPackage = apps[id]) else i
+        }
+        // Întâi ce e din Lista mea, apoi ce e popular, ca rândurile să nu fie goale. Un titlu trece singur
+        // din „În curând” în „Noutăți” la data lansării (aceleași titluri, altă fereastră de timp).
+        PersonalRows(
+            PersonalState.CONNECTED,
+            newMovies = (HomeSections.newMovies(movies, today) + HomeSections.newMovies(popularMovies, today))
+                .distinctBy { it.key }.take(ROW_LIMIT).withApps(),
+            newEpisodes = (
+                HomeSections.newEpisodes(shows, today) +
+                    HomeSections.newEpisodes(popularShows, today, POPULAR_RECENT_EPISODE_DAYS)
+                ).distinctBy { it.key }.take(ROW_LIMIT),
+            soonMovies = (HomeSections.soonMovies(movies, today) + HomeSections.soonMovies(popularMovies, today))
+                .distinctBy { it.key }.take(ROW_LIMIT).withApps(),
+            soonEpisodes = (HomeSections.soonEpisodes(shows, today) + HomeSections.soonEpisodes(popularShows, today))
+                .distinctBy { it.key }.take(ROW_LIMIT),
+        )
     }
 
     /**
      * Lista mea pentru „Noutăți” și „În curând”: titlurile din De văzut plus serialele pe care le-ai început
      * (din istoricul local), fiecare cu datele lui de lansare din TMDb.
      */
-    private suspend fun followed(s: Snapshot): List<FollowedTitle> {
+    private suspend fun followed(s: ReleaseInput): List<FollowedTitle> {
         if (!catalog.isConfigured) return emptyList()
         val wanted = LinkedHashMap<String, Triple<TitleKind, Long, Pair<Int, Int>?>>()
         s.series.values.sortedByDescending { it.lastAt }.forEach { sum ->
@@ -206,9 +187,7 @@ class HomeViewModel @Inject constructor(
 
     val syncStatus: StateFlow<SyncStatus> = tracking.status
 
-    private data class Snapshot(
-        val connected: Boolean,
-        val resume: List<ResumePointEntity>,
+    private data class ReleaseInput(
         val list: List<WatchlistEntity>,
         val series: Map<String, SeriesSummary>,
         val settings: CatalogSettings,
@@ -218,12 +197,18 @@ class HomeViewModel @Inject constructor(
     private val artCache = ConcurrentHashMap<String, CatalogItem>()
     private val artGate = Semaphore(6)
 
+    private fun artKey(kind: TitleKind, tmdbId: Long, settings: CatalogSettings) =
+        "${kind.path}:$tmdbId:${settings.apiLanguage}"
+
+    private fun cachedArt(item: ResumePointEntity, settings: CatalogSettings): CatalogItem? =
+        item.ref.tmdbId?.let { artCache[artKey(PersonalMapper.kind(item.ref), it, settings)] }
+
     private suspend fun art(kind: TitleKind, tmdbId: Long?, settings: CatalogSettings): CatalogItem? {
         if (tmdbId == null || !catalog.isConfigured) return null
-        val key = "${kind.path}:$tmdbId:${settings.apiLanguage}"
+        val key = artKey(kind, tmdbId, settings)
         artCache[key]?.let { return it }
         return artGate.withPermit {
-            runCatching { catalog.basic(kind, tmdbId, settings) }.getOrNull()?.also { artCache[key] = it }
+            artCache[key] ?: runCatching { catalog.basic(kind, tmdbId, settings) }.getOrNull()?.also { artCache[key] = it }
         }
     }
 
@@ -283,13 +268,14 @@ class HomeViewModel @Inject constructor(
     }
 
     init {
-        viewModelScope.launch {
+        val initialSnapshot = viewModelScope.launch {
             snapshots.load()?.let { snap ->
                 if (_state.value is LoadState.Loading) snap.catalog?.let { _state.value = LoadState.Data(it) }
                 if (_personal.value.state == PersonalState.LOADING) snap.personal?.let { _personal.value = it }
             }
         }
         viewModelScope.launch {
+            initialSnapshot.join()
             combine(prefs.settings, playbackPrefs.settings, reload) { s, p, _ -> s to p }.collectLatest { (settings, playback) ->
                 val result = loadCatching {
                     val installed = withContext(Dispatchers.IO) { runCatching { resolver.installedApps().keys }.getOrDefault(emptySet()) }
@@ -308,22 +294,62 @@ class HomeViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            combine(
-                tracking.anyConnected,
-                tracking.continueWatching,
-                tracking.watchlist,
-                tracking.seriesSummaries,
-                prefs.settings,
-            ) { connected, resume, list, series, settings -> Snapshot(connected, resume, list, series, settings) }
-                // AK Scrobbler scrie des (fiecare minut văzut): adunăm schimbările apropiate într-una singură.
-                .debounce(400)
+            initialSnapshot.join()
+            combine(tracking.continueWatching, prefs.settings, tracking.anyConnected, ::Triple)
                 .distinctUntilChanged()
-                .collectLatest { s ->
-                    val rows = withContext(Dispatchers.Default) { personalRows(s) }
-                    _personal.value = rows
-                    snapshots.savePersonal(rows)
+                .collectLatest { (resume, settings, connected) ->
+                    val status = when {
+                        !ExternalTrackers.ENABLED || resume.isNotEmpty() -> PersonalState.CONNECTED
+                        !configured -> PersonalState.NOT_CONFIGURED
+                        !connected -> PersonalState.DISCONNECTED
+                        else -> PersonalState.CONNECTED
+                    }
+                    val entries = resume.take(ROW_LIMIT * 2)
+                    val previous = (_personal.value.continueMovies + _personal.value.continueShows).associateBy { it.key }
+                    val ready = entries.map { item ->
+                        val art = cachedArt(item, settings) ?: previous["resume:${item.id}"]?.asCatalogItem()
+                        PersonalMapper.resume(item, art)
+                    }
+                    publishResume(status, ready)
+                    val enriched = withContext(Dispatchers.Default) {
+                        entries.zip(ready).map { (item, fallback) ->
+                            async {
+                                art(PersonalMapper.kind(item.ref), item.ref.tmdbId, settings)
+                                    ?.let { PersonalMapper.resume(item, it) } ?: fallback
+                            }
+                        }.awaitAll()
+                    }
+                    publishResume(status, enriched)
                 }
         }
+        viewModelScope.launch {
+            initialSnapshot.join()
+            combine(tracking.watchlist, tracking.seriesSummaries, prefs.settings, ::ReleaseInput)
+                .distinctUntilChanged()
+                .collectLatest { input ->
+                    val rows = withContext(Dispatchers.Default) { releaseRows(input) }
+                    publishPersonal(_personal.value.copy(
+                        newMovies = rows.newMovies,
+                        newEpisodes = rows.newEpisodes,
+                        soonMovies = rows.soonMovies,
+                        soonEpisodes = rows.soonEpisodes,
+                    ))
+                }
+        }
+    }
+
+    private fun publishResume(status: PersonalState, resume: List<PersonalItem>) {
+        publishPersonal(_personal.value.copy(
+            state = status,
+            continueMovies = resume.filter { it.kind == TitleKind.MOVIE }.take(ROW_LIMIT),
+            continueShows = resume.filter { it.kind == TitleKind.TV }.take(ROW_LIMIT),
+        ))
+    }
+
+    private fun publishPersonal(rows: PersonalRows) {
+        if (_personal.value == rows) return
+        _personal.value = rows
+        snapshots.savePersonal(rows)
     }
 
     private companion object {

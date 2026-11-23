@@ -38,6 +38,7 @@ class HomeSnapshotStore @Inject constructor(@ApplicationContext context: Context
     private val file = File(context.filesDir, "home_snapshot.json")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val writeLock = Mutex()
+    private var written: HomeSnapshot? = null
 
     @Volatile var memory: HomeSnapshot? = null
         private set
@@ -68,13 +69,12 @@ class HomeSnapshotStore @Inject constructor(@ApplicationContext context: Context
         memory = next
         scope.launch {
             writeLock.withLock {
+                val latest = memory ?: return@withLock
+                if (latest == written) return@withLock
                 runCatching {
                     val tmp = File(file.parentFile, file.name + ".tmp")
-                    tmp.writeText(json.encodeToString(HomeSnapshot.serializer(), next))
-                    if (!tmp.renameTo(file)) {
-                        file.delete()
-                        tmp.renameTo(file)
-                    }
+                    tmp.writeText(json.encodeToString(HomeSnapshot.serializer(), latest))
+                    if (tmp.renameTo(file)) written = latest
                 }
             }
         }

@@ -53,7 +53,8 @@ fun AppsSection(viewModel: PlaybackSettingsViewModel = hiltViewModel()) {
     val installed by viewModel.installed.collectAsStateWithLifecycle()
     val proofs by viewModel.proofs.collectAsStateWithLifecycle()
     // Recitește numele și listele după fiecare aplicație adăugată / eliminată.
-    viewModel.registryVersion.collectAsStateWithLifecycle().value
+    val registryVersion by viewModel.registryVersion.collectAsStateWithLifecycle()
+    val groupedProofs = remember(proofs, installed, registryVersion) { viewModel.groupProofs(proofs.values, installed) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshInstalled() }
 
     ManageAppsCard(viewModel, installed)
@@ -71,9 +72,10 @@ fun AppsSection(viewModel: PlaybackSettingsViewModel = hiltViewModel()) {
             compareBy<TargetApp> { it !in installed }.thenBy { it.role.ordinal },
         )
         sorted.forEach { app ->
-            AppMethodRow(app, installed[app], viewModel.proofFor(app, proofs, installed), onRemove = { viewModel.remove(app) })
+            val proof = groupedProofs[app]?.maxByOrNull { it.at }
+            AppMethodRow(app, installed[app], proof, onRemove = { viewModel.remove(app) })
         }
-        val unknown = viewModel.unknownProofs(proofs, installed)
+        val unknown = groupedProofs[null].orEmpty().sortedByDescending { it.at }
         if (unknown.isNotEmpty()) {
             Text("Alte aplicații prinse de AK Scrobbler", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 8.dp))
             unknown.forEach { p ->
@@ -81,7 +83,7 @@ fun AppsSection(viewModel: PlaybackSettingsViewModel = hiltViewModel()) {
                 ProofLine(p)
             }
         }
-        OutlinedButton(onClick = viewModel::refreshInstalled) { Text("Detectează din nou") }
+        OutlinedButton(onClick = viewModel::refreshInstalled) { Text("Actualizează lista aplicațiilor instalate") }
     }
 
     SettingsCard(
@@ -136,8 +138,11 @@ private fun AppMethodRow(app: TargetApp, installed: InstalledApp?, proof: AppPro
             fontWeight = FontWeight.Medium,
         )
         InstallLine(installed)
-        Text("Metoda: ${app.method}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.readable())
-        if (proof != null) ProofLine(proof)
+        if (proof != null) {
+            ProofLine(proof)
+        } else {
+            Text("Metoda: ${app.method}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.readable())
+        }
     }
     OutlinedButton(onClick = onRemove) { Text("Elimină") }
     }
@@ -199,7 +204,7 @@ private fun ServiceRow(
 }
 
 /**
- * Adaugă o aplicație instalată (ca intrare cunoscută nerecunoscută, ex. Shova TV, ca player nou sau ca serviciu
+ * Adaugă o aplicație instalată (ca intrare cunoscută nerecunoscută, ca player nou sau ca serviciu
  * de streaming nou) și readuce ce ai eliminat.
  */
 @Composable

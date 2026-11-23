@@ -12,7 +12,9 @@ import androidx.compose.ui.focus.onFocusChanged
 import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.ui.components.PosterRatings
 import ro.ak.vodunify.ui.components.LocalPosterLongPress
-import ro.ak.vodunify.ui.components.TitleLogo
+import ro.ak.vodunify.ui.components.TitleHero
+import ro.ak.vodunify.ui.components.tvHomeRowHeight
+import ro.ak.vodunify.ui.components.tvTitleHeroHeight
 import ro.ak.vodunify.ui.components.TitleBadge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -22,14 +24,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -55,6 +55,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -161,9 +162,9 @@ private fun HomeContent(
         BoxWithConstraints(Modifier.fillMaxSize()) {
             // Poziții fixe: fiecare rând are aceeași înălțime (titlu + cel mai înalt card + spațiu), deci titlul
             // rândului cu focus și titlul rândului următor stau mereu în același loc, oricare ar fi cardurile.
-            val slot = ROW_TITLE_HEIGHT + maxOf(spec.posterHeight, spec.cardHeight) + ROW_CARDS_PADDING + ROW_GAP
-            val listHeight = slot + ROW_TITLE_HEIGHT
-            val heroHeight = (maxHeight - listHeight).coerceAtLeast(140.dp)
+            val slot = tvHomeRowHeight(spec)
+            val heroHeight = tvTitleHeroHeight(maxHeight, spec)
+            val listHeight = maxHeight - heroHeight
             val animate by UiPrefs.rowAnimation.collectAsStateWithLifecycle()
             val rows = remember(slot, listState, scope) { HomeRows(slot, listState, scope) }
             val allRows = personalRows + catalog.rows.map { row -> HomeRow(row.id, row.items.isNotEmpty()) { TitleRow(row.title, row.items) } }
@@ -172,8 +173,8 @@ private fun HomeContent(
                 Hero(
                     catalog.hero,
                     viewModel,
+                    heroHeight,
                     Modifier.fillMaxWidth().height(heroHeight),
-                    compact = heroHeight < 200.dp,
                 )
                 // Se vede doar rândul cu focus și, dedesubt, titlul rândului următor (lista e exact atât de înaltă).
                 FixedRowsScroll {
@@ -205,7 +206,7 @@ private fun HomeContent(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (catalog.hero.isNotEmpty()) {
-                item(key = "hero") { Hero(catalog.hero, viewModel, Modifier.fillMaxWidth().height(spec.heroHeight)) }
+                item(key = "hero") { Hero(catalog.hero, viewModel, spec.heroHeight, Modifier.fillMaxWidth().height(spec.heroHeight)) }
             }
             items(personalRows, key = { it.key }) { it.content() }
             items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
@@ -222,8 +223,8 @@ private fun HomeContent(
 private fun Hero(
     items: List<CatalogItem>,
     viewModel: HomeViewModel,
+    heroHeight: Dp,
     modifier: Modifier = Modifier,
-    compact: Boolean = false,
 ) {
     val spec = layoutSpec()
     val actions = LocalCatalogActions.current
@@ -257,23 +258,12 @@ private fun Hero(
     // Pe telefon, atingerea hero-ului deschide fișa (pe TV hero-ul doar arată titlul cu focus).
     Box(if (spec.isTv) modifier else modifier.clickable { actions.openTitle(shown.kind, shown.id) }) {
         if (backdrop == null) TitleBackdrop(shown.backdropUrl, Modifier.matchParentSize())
-        Column(
-            Modifier
-                .align(Alignment.TopStart)
-                .fillMaxHeight()
-                .padding(start = spec.screenPadding, end = spec.screenPadding, top = 4.dp, bottom = 8.dp)
-                .widthIn(max = 620.dp)
-                .fillMaxWidth(if (spec.isCompact) 1f else 0.6f),
-            // Lipit de jos: descrierea ține mereu 3 rânduri, deci sigla stă la aceeași înălțime la orice titlu.
-            verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Bottom),
-        ) {
-            TitleLogo(
-                shown.title,
-                logo?.ifEmpty { null },
-                pending = logo == null,
-                height = if (compact) 48.dp else 60.dp,
-                textStyle = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall,
-            )
+        TitleHero(
+            title = shown.title,
+            logoUrl = logo?.ifEmpty { null },
+            pendingLogo = logo == null,
+            heroHeight = heroHeight,
+        ) { lines ->
             // Ca pe poster: notele, sigla aplicației / serviciului / cinema, apoi data sau episodul.
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 PosterRatings(shown.kind, shown.id, shown.rating)
@@ -291,8 +281,8 @@ private fun Hero(
                     shown.overview,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onBackground,
-                    minLines = if (spec.isTv) 3 else 1,
-                    maxLines = 3,
+                    minLines = if (spec.isTv) lines else 1,
+                    maxLines = lines,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -315,15 +305,6 @@ private fun Hero(
         }
     }
 }
-
-/** Cât ocupă titlul unui rând (SectionTitle): atât se vede din rândul de sub cel cu focus. */
-private val ROW_TITLE_HEIGHT = 40.dp
-
-/** Spațiul de deasupra și de dedesubt al cardurilor dintr-un rând (LazyRow, 10dp + 10dp). */
-private val ROW_CARDS_PADDING = 20.dp
-
-/** Spațiul în plus până la titlul rândului următor. */
-private val ROW_GAP = 22.dp
 
 /** Cât așteptăm rândurile personale înainte să punem focusul oricum (prima pornire, fără nimic salvat). */
 private const val PERSONAL_WAIT_MS = 4_000L

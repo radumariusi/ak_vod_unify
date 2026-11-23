@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -44,6 +45,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -53,6 +55,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -85,6 +88,8 @@ import ro.ak.vodunify.ui.components.SectionTitle
 import ro.ak.vodunify.ui.components.TextButton
 import ro.ak.vodunify.ui.components.TitleBackdrop
 import ro.ak.vodunify.ui.components.TitleLogo
+import ro.ak.vodunify.ui.components.TitleHero
+import ro.ak.vodunify.ui.components.tvTitleHeroHeight
 import ro.ak.vodunify.ui.components.TitleRow
 import ro.ak.vodunify.ui.components.layoutSpec
 import ro.ak.vodunify.ui.components.openUrl
@@ -201,24 +206,18 @@ private fun Overview(
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(top = if (spec.isTv) 14.dp else 8.dp)) {
-        TitleLogo(
-            details.item.title,
-            details.logoUrl,
-            height = if (spec.isCompact) 52.dp else 68.dp,
-            modifier = Modifier.padding(horizontal = spec.screenPadding),
-        )
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val heroHeight = if (spec.isTv) tvTitleHeroHeight(maxHeight, spec) else 0.dp
         LazyColumn(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.fillMaxSize().clipToBounds(),
+            contentPadding = PaddingValues(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            item(key = "hero") {
+                DetailsHero(details, heroHeight)
+            }
             item(key = "header") {
-                Header(
-                    details = details,
-                    watch = watch,
-                    modifier = Modifier.padding(horizontal = spec.screenPadding),
-                ) {
+                Header(details, watch, Modifier.padding(horizontal = spec.screenPadding)) {
                     PrimaryActions(watch, primaryFocus, onPlay, onChoose)
                     if (isTvShow) {
                         OutlinedButton(onClick = onEpisodes, modifier = Modifier.focusRequester(episodesFocus)) { Text("Episoade") }
@@ -301,6 +300,25 @@ private fun PrimaryActions(watch: WatchOptions?, focus: FocusRequester, onPlay: 
     }
 }
 
+@Composable
+private fun DetailsHero(details: TitleDetails, heroHeight: Dp) {
+    val item = details.item
+    TitleHero(item.title, details.logoUrl, heroHeight, Modifier.heightIn(min = heroHeight)) { lines ->
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PosterRatings(item.kind, item.id, item.rating)
+            Text(
+                metaLine(details),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        val text = item.overview.ifBlank { details.tagline.orEmpty() }
+        if (text.isNotBlank()) ExpandableText(text, collapsedLines = lines)
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun Header(
@@ -309,35 +327,16 @@ private fun Header(
     modifier: Modifier = Modifier,
     actions: @Composable () -> Unit,
 ) {
-    val item = details.item
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Column(Modifier.widthIn(max = 760.dp).fillMaxWidth(0.86f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PosterRatings(item.kind, item.id, item.rating)
-                Text(
-                    metaLine(details),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            details.originalTitle?.let {
-                Text("Titlu original: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            details.nextEpisode?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
-            }
-            val text = item.overview.ifBlank { details.tagline.orEmpty() }
-            if (text.isNotBlank()) {
-                // Întreagă dacă încape; altfel tăiată, cu „… Arată mai mult” (îngroșat) care o deschide.
-                ExpandableText(text)
-            }
-            WhereToWatch(watch)
-        }
-        // Acțiunile pe un rând (trec pe rândul următor doar dacă nu încap), ca restul fișei să rămână pe ecran.
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             actions()
+        }
+        WhereToWatch(watch)
+        details.nextEpisode?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+        }
+        details.originalTitle?.let {
+            Text("Titlu original: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

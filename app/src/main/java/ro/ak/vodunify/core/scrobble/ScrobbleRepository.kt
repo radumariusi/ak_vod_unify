@@ -6,7 +6,6 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
@@ -185,11 +184,11 @@ class ScrobbleRepository @Inject constructor(
      * Activitatea profilului Netflix: potrivim vizionările Netflix fără titlu după zi + minut și le
      * procesăm ca pe orice vizionare (minut salvat / văzut).
      */
-    suspend fun applyNetflixRecent(result: NetflixRecentResult): Unit = mutex.withLock {
+    suspend fun applyNetflixRecent(result: NetflixRecentResult) {
         var matched = 0
         if (result.status == "ok") {
-            for (e in readUnresolved().sortedBy { it.at }) {
-                if (!NetflixActivity.isNetflix(e.pkg)) continue
+            val pending = mutex.withLock { readUnresolved() }
+            for (e in pending.filter { NetflixActivity.isNetflix(it.pkg) }.sortedBy { it.at }) {
                 val item = NetflixActivity.match(e, result.items) ?: continue
                 val bookmark = item.bookmark?.takeIf { it > 0 && e.estimated }?.times(1_000)
                 val recovered = e.copy(
@@ -198,12 +197,15 @@ class ScrobbleRepository @Inject constructor(
                     positionMs = bookmark ?: e.positionMs,
                     estimated = bookmark == null && e.estimated,
                 )
-                val r = process(recovered, fromQueue = true)
-                if (r == ScrobbleResult.SAVED || r == ScrobbleResult.WATCHED || r == ScrobbleResult.IGNORED || r == ScrobbleResult.TOO_SHORT) {
-                    matched++
-                    writeUnresolved(readUnresolved().filterNot { unresolvedKey(it) == unresolvedKey(e) })
-                } else {
-                    keepUnresolved(recovered)
+                mutex.withLock {
+                    if (e !in readUnresolved()) return@withLock
+                    val r = process(recovered, fromQueue = true)
+                    if (r == ScrobbleResult.SAVED || r == ScrobbleResult.WATCHED || r == ScrobbleResult.IGNORED || r == ScrobbleResult.TOO_SHORT) {
+                        matched++
+                        writeUnresolved(readUnresolved().filterNot { unresolvedKey(it) == unresolvedKey(e) })
+                    } else {
+                        keepUnresolved(recovered)
+                    }
                 }
             }
         }
@@ -213,14 +215,16 @@ class ScrobbleRepository @Inject constructor(
             "not_logged_in" -> "$time · ${result.message ?: "neconectat"}"
             else -> "$time · eroare: ${result.message ?: "-"}"
         }
-        prefs.edit().putString(KEY_NETFLIX_STATUS + result.route.ifBlank { "?" }, line).apply()
-        _netflix.value = readNetflixStatus()
+        mutex.withLock {
+            prefs.edit().putString(KEY_NETFLIX_STATUS + result.route.ifBlank { "?" }, line).apply()
+            _netflix.value = readNetflixStatus()
+        }
     }
 
     private fun readNetflixStatus(): List<String> = listOfNotNull(prefs.getString(KEY_NETFLIX_STATUS + "RO", null))
 
     private suspend fun knownPosition(media: MediaRef): Long? =
-        trackingDao.allResume().first().firstOrNull { it.id == "$LOCAL_SOURCE|${media.itemKey}" }?.positionMs
+        trackingDao.resumeById("$LOCAL_SOURCE|${media.itemKey}")?.positionMs
 
     // ---------- Vizionări neidentificate încă ----------
 
@@ -299,8 +303,12 @@ class ScrobbleRepository @Inject constructor(
             title = label(media),
         )
         val current = _proofs.value[event.pkg]
-        // O dată la 10 minute e destul (punctele intermediare vin des).
-        if (current != null && current.method == proof.method && proof.at - current.at < TimeUnit.MINUTES.toMillis(10)) return
+        if (current != null) {
+            if (proof.at < current.at) return
+            if (current.method == proof.method && current.title == proof.title &&
+                proof.at - current.at < TimeUnit.MINUTES.toMillis(10)
+            ) return
+        }
         val next = _proofs.value + (event.pkg to proof)
         _proofs.value = next
         prefs.edit().putString(KEY_PROOFS, json.encodeToString(proofSerializer, next)).apply()

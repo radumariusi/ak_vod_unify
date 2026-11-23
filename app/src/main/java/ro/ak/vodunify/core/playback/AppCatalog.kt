@@ -176,7 +176,7 @@ enum class TargetApp(
 
     AK_VOD_HUB("akvodhub", "AK VoD Hub", AppRole.IPTV, listOf("io.github.radumariusi.akvodhub"), listOf("akvodhub")),
     WAVEO("waveo", "Waveo", AppRole.IPTV, emptyList(), listOf("waveo")),
-    SHOVA_TV("shovatv", "Shova TV", AppRole.IPTV, emptyList(), listOf("shovatv", "shova")),
+    SHOVA_TV("shovatv", "Sohva TV", AppRole.IPTV, listOf("com.streammate.tv"), listOf("sohvatv", "sohva", "shovatv", "shova")),
     PLAYER_8K_VIP("8kvip", "8K Player VIP+", AppRole.IPTV, emptyList(), listOf("8kplayervip")),
     PLAYER_8K_PRIME("8kprime", "8K Player Prime", AppRole.IPTV, emptyList(), listOf("8kplayerprime")),
 

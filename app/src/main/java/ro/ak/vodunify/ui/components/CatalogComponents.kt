@@ -1,5 +1,6 @@
 package ro.ak.vodunify.ui.components
 
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -194,7 +195,7 @@ private fun BrandRating(rating: Double, modifier: Modifier, logo: @Composable ()
  * pe acest card la întoarcerea din fișă.
  */
 @Composable
-fun PosterCard(item: CatalogItem, modifier: Modifier = Modifier, rowKey: String = "") {
+fun PosterCard(item: CatalogItem, modifier: Modifier = Modifier, rowKey: String = "", fillCell: Boolean = false) {
     val spec = layoutSpec()
     val actions = LocalCatalogActions.current
     val backdrop = LocalBackdrop.current
@@ -203,7 +204,8 @@ fun PosterCard(item: CatalogItem, modifier: Modifier = Modifier, rowKey: String 
         onClick = { actions.openTitle(item.kind, item.id) },
         // wrapContentSize: în grile (Caută, Lista mea, actori) celula e mai lată decât posterul; fără el
         // posterul s-ar lăți și s-ar tăia sus-jos. Așa are peste tot același format 2:3.
-        modifier = modifier.wrapContentSize().size(spec.posterWidth, spec.posterHeight),
+        modifier = if (fillCell) modifier.fillMaxWidth().aspectRatio(2f / 3) else
+            modifier.wrapContentSize().size(spec.posterWidth, spec.posterHeight),
         restoreKey = "$rowKey|${item.mediaKey}",
         onFocused = { backdrop?.focus(FocusedTitle.of(item)) },
         onLongClick = longPress ?: { actions.titleMenu(item) },

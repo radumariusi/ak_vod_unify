@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Ce ai schimbat tu în lista de aplicații și servicii (Setări → Aplicații și servicii):
- * - aplicația instalată aleasă pentru o intrare din listă (ex. Shova TV, când pachetul nu e cunoscut);
+ * - aplicația instalată aleasă pentru o intrare din listă (când pachetul nu e cunoscut);
  * - intrările eliminate (aplicații dezinstalate sau pe care nu le folosești);
  * - aplicațiile și serviciile adăugate de tine (în locurile libere [TargetApp.isCustom] / [StreamingService.isCustom]):
  *   numele și, la servicii, furnizorul TMDb (pentru disponibilitate și siglă).

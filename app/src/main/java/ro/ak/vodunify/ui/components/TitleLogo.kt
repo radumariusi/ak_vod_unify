@@ -14,6 +14,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -38,7 +39,7 @@ fun TitleLogo(
     pending: Boolean = false,
 ) {
     var failed by remember(logoUrl) { mutableStateOf(false) }
-    Box(modifier.widthIn(max = maxWidth).fillMaxWidth().height(height), contentAlignment = Alignment.CenterStart) {
+    Box(modifier.widthIn(max = maxWidth).fillMaxWidth().height(height).clipToBounds(), contentAlignment = Alignment.CenterStart) {
         if (!pending && (logoUrl == null || failed)) {
             Text(
                 title,

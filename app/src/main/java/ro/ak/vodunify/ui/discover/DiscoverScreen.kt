@@ -47,7 +47,7 @@ fun DiscoverScreen(viewModel: DiscoverViewModel = hiltViewModel()) {
     val periods = remember { DiscoverPeriod.options() }
 
     LazyVerticalGrid(
-        columns = GridCells.FixedSize(spec.posterWidth),
+        columns = if (spec.isTv) GridCells.Adaptive(spec.posterWidth - 8.dp) else GridCells.FixedSize(spec.posterWidth),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 12.dp),
         // Aceeași distanță între postere ca în rândurile din Acasă.
@@ -64,7 +64,7 @@ fun DiscoverScreen(viewModel: DiscoverViewModel = hiltViewModel()) {
                 Text("Nimic cu filtrele astea. Încearcă altă combinație.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        items(state.items, key = { it.mediaKey }) { PosterCard(it, rowKey = "discover") }
+        items(state.items, key = { it.mediaKey }) { PosterCard(it, rowKey = "discover", fillCell = spec.isTv) }
         if (state.loading) {
             item(key = "loading", span = { GridItemSpan(maxLineSpan) }) { LoadingPanel() }
         } else if (state.canLoadMore) {
