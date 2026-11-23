@@ -149,6 +149,7 @@ data class TitleDetails(
     val nextEpisode: String?,
     /** Sigla titlului (TMDb logo); null = titlul se scrie cu text. */
     val logoUrl: String? = null,
+    val lastAiredEpisode: EpisodeAir? = null,
 )
 
 /** Un rând „Pe Netflix (RO)” din Acasă: serviciul tău, în biblioteca lui. */

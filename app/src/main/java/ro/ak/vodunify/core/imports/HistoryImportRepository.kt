@@ -1,7 +1,7 @@
 package ro.ak.vodunify.core.imports
 
 import android.content.Context
-import android.content.pm.PackageManager
+import android.util.AtomicFile
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
@@ -18,7 +18,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
-import ro.ak.vodunify.BuildConfig
 import ro.ak.vodunify.core.connector.ExternalIds
 import ro.ak.vodunify.core.connector.MediaRef
 import ro.ak.vodunify.core.connector.MediaType
@@ -30,13 +29,14 @@ import ro.ak.vodunify.core.scrobble.ScrobbleMatcher
 import ro.ak.vodunify.core.tmdb.TmdbHttpException
 import ro.ak.vodunify.core.tracking.TrackingEntities
 import java.io.File
+import java.io.IOException
 import java.time.Instant
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Istoricul importat din servicii (AK Import RO/US sau CSV-ul Netflix):
+ * Istoricul importat din servicii (contul serviciului sau CSV-ul Netflix):
  *  1. fiecare lot ajunge într-o coadă pe disc (rapid, fără rețea);
  *  2. un lucru în fundal (WorkManager, cu rețea) găsește titlurile în TMDb și le scrie ca sursă
  *     proprie („netflix”, „primevideo”, „trakt_import”): vizionările terminate în istoric, cele începute ca
@@ -52,6 +52,7 @@ class HistoryImportRepository @Inject constructor(
     private val json: Json,
 ) {
     private val queueDir = File(context.filesDir, "import_queue").apply { mkdirs() }
+    private val unmatchedDir = File(context.filesDir, "import_unmatched").apply { mkdirs() }
     private val prefs = context.getSharedPreferences("history_import", Context.MODE_PRIVATE)
     private val statsSerializer = ListSerializer(ImportServiceStats.serializer())
     private val mutex = Mutex()
@@ -63,28 +64,15 @@ class HistoryImportRepository @Inject constructor(
     private val _pending = MutableStateFlow(countPending())
     val pending: StateFlow<Int> = _pending.asStateFlow()
 
-    /** Pachetele AK Import (RO / US) pentru acest build. */
-    val importerPackages: Map<String, String> = linkedMapOf(
-        "RO" to "ro.ak.vodimport.ro" + if (BuildConfig.DEBUG) ".debug" else "",
-        "US" to "ro.ak.vodimport.us" + if (BuildConfig.DEBUG) ".debug" else "",
-    )
-
-    fun installedImporters(): Set<String> = importerPackages.filterValues { pkg ->
-        try {
-            context.packageManager.getPackageInfo(pkg, 0)
-            true
-        } catch (_: PackageManager.NameNotFoundException) {
-            false
-        }
-    }.keys
-
     /** Pune un lot în coadă și pornește procesarea. Sigur de apelat de pe orice fir. */
-    fun enqueue(batch: ImportBatch) {
-        if (batch.items.isNotEmpty()) {
+    fun enqueue(batch: ImportBatch) = enqueueAll(listOf(batch))
+
+    fun enqueueAll(batches: List<ImportBatch>) {
+        for (batch in batches.filter { it.items.isNotEmpty() }) {
             val name = "${System.currentTimeMillis()}-${System.nanoTime()}.json"
             val tmp = File(queueDir, "$name.tmp")
             tmp.writeText(json.encodeToString(ImportBatch.serializer(), batch))
-            tmp.renameTo(File(queueDir, name))
+            if (!tmp.renameTo(File(queueDir, name))) throw IOException("Nu am putut salva lotul de import.")
         }
         _pending.value = countPending()
         start(context)
@@ -110,10 +98,7 @@ class HistoryImportRepository @Inject constructor(
             } else {
                 val tmp = File(queueDir, next.name + ".tmp")
                 tmp.writeText(json.encodeToString(ImportBatch.serializer(), batch.copy(items = rest)))
-                if (!tmp.renameTo(next)) {
-                    next.delete()
-                    tmp.renameTo(next)
-                }
+                if (!tmp.renameTo(next)) throw IOException("Nu am putut actualiza coada de import.")
             }
             _pending.value = (_pending.value - chunk.size).coerceAtLeast(0)
         }
@@ -122,15 +107,26 @@ class HistoryImportRepository @Inject constructor(
 
 
     suspend fun clear(service: String) = withContext(Dispatchers.IO) {
-        dao.clearSource(service)
-        writeStats(_stats.value.filterNot { it.service == service })
+        mutex.withLock {
+            dao.clearSource(service)
+            unresolvedFile(service)?.delete()
+            writeStats(_stats.value.filterNot { it.service == service })
+        }
+    }
+
+    suspend fun retryUnmatched(service: String): Int = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val batch = readUnresolved(service) ?: return@withLock 0
+            if (batch.items.isEmpty()) return@withLock 0
+            enqueue(batch)
+            batch.items.size
+        }
     }
 
     private suspend fun process(batch: ImportBatch) {
         val service = batch.service
         var matched = 0
-        var unmatched = 0
-        val samples = mutableListOf<String>()
+        val unresolved = readUnresolved(service)?.items.orEmpty().associateByTo(linkedMapOf(), ::itemKey)
         val history = mutableListOf<WatchEvent>()
         val resume = mutableMapOf<String, Pair<Long, ResumePointEntity>>()
         val finishedAt = mutableMapOf<String, Long>()
@@ -148,10 +144,10 @@ class HistoryImportRepository @Inject constructor(
                 null
             }
             if (match == null) {
-                unmatched++
-                if (samples.size < 15) samples += label(item)
+                unresolved[itemKey(item)] = item
                 continue
             }
+            unresolved.remove(itemKey(item))
             matched++
             val media = match.media
             val at = item.date.takeIf { it > 0 } ?: System.currentTimeMillis()
@@ -183,14 +179,42 @@ class HistoryImportRepository @Inject constructor(
         val resumes = resume.filter { (key, pair) -> (finishedAt[key] ?: 0L) < pair.first }.values.map { it.second }
         writeHistory(history.filter { it.watchedAt.toEpochMilli() > 0 }, service)
         writeWatchedMovies(history, service)
-        if (resumes.isNotEmpty()) dao.upsertResume(resumes)
+        resumes.forEach { dao.upsertResumeIfNewer(it) }
         // Din Trakt aducem tot, în afară de ce vine din istoricul Netflix (acela e mai exact).
         // Merge în orice ordine: la importul Trakt și la cel Netflix.
         if (batch.last && (service == ImportSources.TRAKT || service == ImportSources.NETFLIX)) {
             dao.deleteHistoryCoveredBy(drop = ImportSources.TRAKT, keep = ImportSources.NETFLIX)
         }
 
-        updateStats(batch, matched, unmatched, resumes.size, samples)
+        val remaining = unresolved.values.toList().takeLast(MAX_UNMATCHED)
+        writeUnresolved(batch.copy(items = remaining, last = true))
+        updateStats(batch, matched, remaining.size, resumes.size, remaining.takeLast(15).map(::label))
+    }
+
+    private fun itemKey(item: ImportItem): String =
+        "${item.id.orEmpty()}|${item.title}|${item.series}|${item.season}|${item.episode}|${item.date}"
+
+    private fun unresolvedFile(service: String): AtomicFile? =
+        service.takeIf { it in ImportSources.labels }?.let { AtomicFile(File(unmatchedDir, "$it.json")) }
+
+    private fun readUnresolved(service: String): ImportBatch? = runCatching {
+        unresolvedFile(service)?.readFully()?.let { json.decodeFromString(ImportBatch.serializer(), it.decodeToString()) }
+    }.getOrNull()
+
+    private fun writeUnresolved(batch: ImportBatch) {
+        val file = unresolvedFile(batch.service) ?: return
+        if (batch.items.isEmpty()) {
+            file.delete()
+            return
+        }
+        val stream = file.startWrite()
+        try {
+            stream.write(json.encodeToString(ImportBatch.serializer(), batch).encodeToByteArray())
+            file.finishWrite(stream)
+        } catch (e: IOException) {
+            file.failWrite(stream)
+            throw e
+        }
     }
 
     /** Sursa dă codul TMDb (Trakt): titlul e sigur, fără căutare după nume. */
@@ -250,16 +274,16 @@ class HistoryImportRepository @Inject constructor(
         val old = _stats.value.firstOrNull { it.service == batch.service }
         // Un import nou (primul lot după o pauză lungă) pornește numărătoarea de la zero.
         val fresh = old == null || System.currentTimeMillis() - old.lastImportAt > FRESH_AFTER_MS
-        val base = if (fresh || old == null) ImportServiceStats(batch.service) else old
+        val base = if (fresh) ImportServiceStats(batch.service) else checkNotNull(old)
         val updated = base.copy(
             received = base.received + batch.items.size,
             matched = base.matched + matched,
-            unmatched = base.unmatched + unmatched,
+            unmatched = unmatched,
             resumePoints = base.resumePoints + resumes,
             lastImportAt = System.currentTimeMillis(),
             profile = batch.profile.ifBlank { base.profile },
             route = batch.route.ifBlank { base.route },
-            unmatchedSamples = (base.unmatchedSamples + samples).takeLast(15),
+            unmatchedSamples = samples,
         )
         writeStats(_stats.value.filterNot { it.service == batch.service } + updated)
     }
@@ -287,6 +311,7 @@ class HistoryImportRepository @Inject constructor(
 
         /** Câte elemente procesăm între două salvări ale progresului. */
         private const val CHUNK = 25
+        private const val MAX_UNMATCHED = 5_000
 
         /** La pornirea aplicației: dacă a rămas ceva în coadă (aplicația a fost oprită), îl reluăm. */
         fun resumeIfPending(context: Context) {

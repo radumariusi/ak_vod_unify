@@ -4,10 +4,10 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
-import android.graphics.Color
-import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
+import ro.ak.vodimport.AkWidgets
+import ro.ak.vodimport.keepClearOfSystemBars
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -58,14 +58,13 @@ class StatusActivity : Activity() {
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
-            setBackgroundColor(Color.rgb(14, 17, 22))
+            setBackgroundColor(AkWidgets.background)
         }
-        column.addView(text("AK Scrobbler", 26f, bold = true))
+        column.addView(AkWidgets.heading(this, "AK Scrobbler"))
         column.addView(
             text(
                 "Vede ce redă orice aplicație (Netflix, Prime Video, SkyShowtime, HBO Max, Disney+, Stremio…) " +
-                    "și trimite titlul și minutul în AK VOD Unify. Nu folosește internetul, " +
-                    "deci nu trebuie pus în VPN.",
+                    "și trimite titlul și minutul în AK VOD Unify. Activitatea Netflix ajută la identificarea titlurilor lipsă.",
                 15f,
             ),
         )
@@ -105,6 +104,9 @@ class StatusActivity : Activity() {
             render()
         }.also(dotSettings::addView)
         column.addView(dotSettings)
+        column.addView(button("Conectează Netflix pentru identificare") {
+            startActivity(Intent(this, NetflixLoginActivity::class.java))
+        })
         column.addView(button("Deschide AK VOD Unify") { openMainApp() })
 
         adb = text("", 14f).also { it.setTextIsSelectable(true) }.also(column::addView)
@@ -352,25 +354,15 @@ class StatusActivity : Activity() {
         if (intent != null) startActivity(intent)
     }
 
-    private fun text(value: String, size: Float, bold: Boolean = false) = TextView(this).apply {
-        text = value
-        textSize = size
-        setTextColor(Color.WHITE)
-        if (bold) setTypeface(typeface, Typeface.BOLD)
-        setPadding(0, dp(6), 0, dp(6))
-    }
+    private fun text(value: String, size: Float, bold: Boolean = false) = AkWidgets.text(this, value, size, bold)
 
-    /** Text care poate primi focus, ca ecranul să se poată derula cu telecomanda. */
+    /** Permite derularea jurnalului cu telecomanda. */
     private fun focusableText() = text("", 14f).apply {
         isFocusable = true
-        setOnFocusChangeListener { v, has -> v.setBackgroundColor(if (has) Color.rgb(40, 44, 52) else Color.TRANSPARENT) }
+        setOnFocusChangeListener(AkWidgets::panelFocus)
     }
 
-    private fun button(label: String, onClick: () -> Unit) = Button(this).apply {
-        text = label
-        isAllCaps = false
-        setOnClickListener { onClick() }
-    }
+    private fun button(label: String, onClick: () -> Unit) = AkWidgets.button(this, label, action = onClick)
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 

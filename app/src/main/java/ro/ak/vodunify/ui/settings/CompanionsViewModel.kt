@@ -23,7 +23,7 @@ data class CompanionsUi(
     val needsPermission: Boolean = false,
 )
 
-/** Instalează / actualizează AK Scrobbler și AK Import RO/US din ultimul release. */
+/** Instalează / actualizează AK Scrobbler din ultimul release. */
 @HiltViewModel
 class CompanionsViewModel @Inject constructor(
     private val updates: UpdateRepository,

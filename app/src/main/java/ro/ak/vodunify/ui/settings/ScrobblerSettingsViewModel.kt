@@ -3,11 +3,15 @@ package ro.ak.vodunify.ui.settings
 import android.content.Context
 import android.content.Intent
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import ro.ak.vodunify.core.scrobble.NetflixRecentWorker
 import ro.ak.vodunify.core.scrobble.ScrobbleLogEntry
 import ro.ak.vodunify.core.scrobble.ScrobbleRepository
 import javax.inject.Inject
@@ -21,11 +25,11 @@ class ScrobblerSettingsViewModel @Inject constructor(
     val enabled: StateFlow<Boolean> = repository.enabled
     val watchedPercent: StateFlow<Int> = repository.watchedPercent
 
-    private val _unresolved = MutableStateFlow(repository.unresolvedCount())
-    val unresolved: StateFlow<Int> = _unresolved.asStateFlow()
-
-    private val _netflix = MutableStateFlow(repository.netflixStatus())
-    val netflix: StateFlow<List<String>> = _netflix.asStateFlow()
+    val unresolved = repository.unresolved
+    val netflix = repository.netflix
+    private val _retryStatus = MutableStateFlow<String?>(null)
+    val retryStatus = _retryStatus.asStateFlow()
+    private var retrying = false
 
     fun setWatchedPercent(value: Int) = repository.setWatchedPercent(value)
 
@@ -34,8 +38,25 @@ class ScrobblerSettingsViewModel @Inject constructor(
 
     fun refresh() {
         _installed.value = repository.isScrobblerInstalled()
-        _unresolved.value = repository.unresolvedCount()
-        _netflix.value = repository.netflixStatus()
+    }
+
+    fun retryIdentification() {
+        if (retrying) return
+        retrying = true
+        _retryStatus.value = "Reîncerc potrivirea cu TMDb și verific activitatea Netflix."
+        NetflixRecentWorker.retryNow(context)
+        viewModelScope.launch {
+            try {
+                repository.retryUnresolved()
+                _retryStatus.value = "Verificarea TMDb s-a încheiat. Activitatea Netflix se procesează în fundal."
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _retryStatus.value = "Nu am putut termina verificarea TMDb: ${e.message}"
+            } finally {
+                retrying = false
+            }
+        }
     }
 
     fun setEnabled(value: Boolean) = repository.setEnabled(value)

@@ -28,12 +28,12 @@ object LocalProgress {
         if (ref.type != MediaType.EPISODE.name) return null
         val s = ref.season ?: return null
         val e = ref.episode ?: return null
-        return if (s > 0 && e > 0) EpisodeNumber(s, e) else null
+        return if (s >= 0 && e > 0) EpisodeNumber(s, e) else null
     }
 
     /** Pe fiecare serial (cheia titlului): episoade distincte văzute și ultimul văzut. */
     fun summaries(events: List<WatchEventEntity>): Map<String, SeriesSummary> =
-        events.filter { it.number() != null }.groupBy { it.ref.mediaKey }.mapValues { (_, list) ->
+        events.filter { (it.number()?.season ?: 0) > 0 }.groupBy { it.ref.mediaKey }.mapValues { (_, list) ->
             val last = list.maxBy { it.watchedAt }
             SeriesSummary(
                 title = last.ref.title,
@@ -55,9 +55,9 @@ object LocalProgress {
         val watched = mine.mapNotNull { it.number() }.toSet()
         val counts = seasonCounts.filterKeys { it > 0 }.toSortedMap()
         val inRange = watched.count { (counts[it.season] ?: 0) >= it.episode }
-        val last = mine.filter { it.number() != null }.maxByOrNull { it.watchedAt }
+        val last = mine.filter { (it.number()?.season ?: 0) > 0 }.maxByOrNull { it.watchedAt }
         val next = last?.number()?.let { nextAfter(it, counts, watched) }
-            ?: if (watched.isEmpty()) counts.keys.firstOrNull()?.let { EpisodeNumber(it, 1) } else null
+            ?: if (watched.none { it.season > 0 }) counts.keys.firstOrNull()?.let { EpisodeNumber(it, 1) } else null
         return ShowProgress(
             show = show,
             aired = counts.values.sum(),

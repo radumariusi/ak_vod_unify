@@ -11,6 +11,10 @@ on:
         description: "Marchează ca pre-release"
         type: boolean
         default: false
+      apk_only:
+        description: "Salvează APK-urile semnate ca artefact pentru testare"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -90,17 +94,9 @@ jobs:
           SOUT="ak-scrobbler-${VERSION_NAME}-vc${VERSION_CODE}.apk"
           cp "$SCR" "$SOUT"
           echo "scrobbler=$SOUT" >> "$GITHUB_OUTPUT"
-          for R in ro us; do
-            SRC_I=importer/build/outputs/apk/$R/release/importer-$R-release.apk
-            if [ ! -f "$SRC_I" ]; then
-              echo "::error::APK-ul AK Import $R nu a fost generat."; ls -laR importer/build/outputs/apk; exit 1
-            fi
-            OUT_I="ak-import-$R-${VERSION_NAME}-vc${VERSION_CODE}.apk"
-            cp "$SRC_I" "$OUT_I"
-            echo "import_$R=$OUT_I" >> "$GITHUB_OUTPUT"
-          done
 
       - name: Publish GitHub Release
+        if: ${{ !inputs.apk_only }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ inputs.version_name }}
@@ -112,5 +108,14 @@ jobs:
           files: |
             ${{ steps.apk.outputs.file }}
             ${{ steps.apk.outputs.scrobbler }}
-            ${{ steps.apk.outputs.import_ro }}
-            ${{ steps.apk.outputs.import_us }}
+
+      - name: Upload signed test APKs
+        if: ${{ inputs.apk_only }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ak-vod-test-${{ inputs.version_name }}
+          path: |
+            ${{ steps.apk.outputs.file }}
+            ${{ steps.apk.outputs.scrobbler }}
+          if-no-files-found: error
+          retention-days: 14

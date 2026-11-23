@@ -23,26 +23,26 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ro.ak.vodunify.core.imports.ImportSources
+import ro.ak.vodunify.ui.components.QrCode
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import ro.ak.vodunify.ui.components.readable
 
-/** „Istoric din servicii”: AK Import RO / US și CSV-ul Netflix. */
+/** Istoricul se importă direct în AK VOD Unify. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ImportSection(viewModel: ImportSettingsViewModel = hiltViewModel()) {
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val pending by viewModel.pending.collectAsStateWithLifecycle()
-    val installed by viewModel.installed.collectAsStateWithLifecycle()
+    val traktAccount by viewModel.traktAccount.collectAsStateWithLifecycle()
+    val traktCode by viewModel.traktCode.collectAsStateWithLifecycle()
+    val traktBusy by viewModel.traktBusy.collectAsStateWithLifecycle()
     val preview by viewModel.preview.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) viewModel.readCsv(uri)
     }
@@ -52,36 +52,41 @@ fun ImportSection(viewModel: ImportSettingsViewModel = hiltViewModel()) {
         modifier = Modifier.fillMaxWidth().widthIn(max = 900.dp),
     ) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Istoric din servicii (AK Import)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("Istoric din servicii", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "AK Import RO și AK Import US te conectează în contul serviciului și aduc istoricul aici " +
-                    "(Netflix: tot istoricul, cu minutul unde ai rămas). Pune doar AK Import US în tunelul VPN US; " +
-                    "AK Import RO și AK VOD Unify merg direct.",
+                "Importă istoricul Netflix, Prime Video sau Trakt. Pentru Netflix, alege profilul pe care îl folosești la vizionare.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.readable(),
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                viewModel.routes.forEach { route ->
-                    if (route in installed) {
-                        OutlinedButton(onClick = { viewModel.launchIntent(route)?.let(context::startActivity) }) {
-                            Text("Deschide AK Import $route")
-                        }
-                    } else {
-                        Text(
-                            "AK Import $route: neinstalat",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(vertical = 10.dp),
-                        )
+                listOf(ImportSources.NETFLIX to "Netflix", ImportSources.PRIME_VIDEO to "Prime Video").forEach { (id, label) ->
+                    OutlinedButton(onClick = { context.startActivity(viewModel.launchIntent(id)) }) {
+                        Text("Importă $label")
                     }
                 }
                 OutlinedButton(onClick = {
                     try {
                         picker.launch(arrayOf("text/csv", "text/comma-separated-values", "text/plain", "application/vnd.ms-excel", "*/*"))
                     } catch (_: ActivityNotFoundException) {
-                        viewModel.setMessage("Acest dispozitiv nu are selector de fișiere. Pe TV folosește AK Import (Netflix).")
+                        viewModel.setMessage("Selectorul de fișiere nu este disponibil. Poți folosi butonul Importă Netflix.")
                     }
                 }) { Text("Importă CSV Netflix") }
+            }
+            if (viewModel.traktConfigured) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (traktAccount == null) {
+                        OutlinedButton(onClick = viewModel::connectTrakt, enabled = !traktBusy) { Text("Conectează Trakt") }
+                    } else {
+                        OutlinedButton(onClick = viewModel::importTrakt, enabled = !traktBusy) { Text("Importă istoricul Trakt") }
+                        OutlinedButton(onClick = viewModel::disconnectTrakt, enabled = !traktBusy) { Text("Deconectează Trakt") }
+                    }
+                    if (traktBusy) OutlinedButton(onClick = viewModel::cancelTrakt) { Text("Anulează") }
+                }
+                traktCode?.let { code ->
+                    Text("Deschide ${code.verificationUrl} și introdu codul ${code.userCode}.", modifier = Modifier.readable())
+                    QrCode(code.verificationUrl, size = 96.dp)
+                }
             }
             message?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.readable()) }
 
@@ -123,6 +128,9 @@ fun ImportSection(viewModel: ImportSettingsViewModel = hiltViewModel()) {
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                if (s.unmatched > 0) {
+                    OutlinedButton(onClick = { viewModel.retryUnmatched(s.service) }) { Text("Reîncearcă titlurile din $name") }
                 }
                 OutlinedButton(onClick = { viewModel.clear(s.service) }) { Text("Șterge istoricul importat din $name") }
             }

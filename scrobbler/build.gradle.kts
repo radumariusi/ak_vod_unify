@@ -5,7 +5,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
 }
 
-// AK Scrobbler: aplicație mică, fără internet, care citește ce redă orice player
+// AK Scrobbler: aplicație companion, care citește ce redă orice player
 // (prin sesiunile media ale Android) și trimite titlul + minutul către AK VOD Unify.
 val localProps = Properties().apply {
     val f = rootProject.file("local.properties")
@@ -77,5 +77,8 @@ android {
 }
 
 dependencies {
+    implementation(project(":importer"))
+    implementation(libs.androidx.work.runtime)
+    implementation(libs.kotlinx.coroutines.android)
     testImplementation(libs.junit)
 }

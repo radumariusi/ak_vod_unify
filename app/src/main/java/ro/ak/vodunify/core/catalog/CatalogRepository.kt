@@ -310,6 +310,7 @@ class CatalogRepository @Inject constructor(
                 "Următorul episod: " + "S%02dE%02d".format(e.seasonNumber, e.episodeNumber) + (e.airDate?.let { " · $it" } ?: "")
             },
             logoUrl = TmdbImages.titleLogo(TmdbMappers.logoPath(dto.images?.logos.orEmpty(), settings.logoLanguage)),
+            lastAiredEpisode = dto.lastEpisodeToAir?.let { EpisodeAir(it.seasonNumber, it.episodeNumber, it.name, it.airDate) },
         )
     }
 

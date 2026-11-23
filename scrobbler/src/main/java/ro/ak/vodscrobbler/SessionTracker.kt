@@ -227,7 +227,7 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
      */
     fun onScreenTimes(positionMs: Long?, durationMs: Long?, now: Long, fromScreen: Boolean = false) {
         // Durata de pe ecran o actualizăm la fiecare citire (prima poate fi greșită); cea din sesiune rămâne.
-        if (durationMs != null && durationMs > 0 && (media?.durationMs == null || (fromScreen && screenOnly))) {
+        if (durationMs != null && durationMs > 0 && (media?.durationMs == null || fromScreen)) {
             media = (media ?: MediaInfo(emptyMap(), null)).copy(durationMs = durationMs)
         }
         if (positionMs != null && positionMs >= 0 && !positionFromSession) {

@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
@@ -21,10 +22,12 @@ import ro.ak.vodunify.core.catalog.Episode
 import ro.ak.vodunify.core.catalog.mediaKey
 import ro.ak.vodunify.core.connector.EpisodeNumber
 import ro.ak.vodunify.core.connector.ExternalIds
+import ro.ak.vodunify.core.connector.ExternalTrackers
 import ro.ak.vodunify.core.connector.MediaRef
 import ro.ak.vodunify.core.connector.MediaType
 import ro.ak.vodunify.core.connector.ShowProgress
 import ro.ak.vodunify.core.tracking.TitleTrackState
+import ro.ak.vodunify.core.tracking.SeriesMarker
 import ro.ak.vodunify.core.tracking.TrackingRepository
 import ro.ak.vodunify.core.catalog.Season
 import ro.ak.vodunify.core.catalog.TitleDetails
@@ -52,7 +55,7 @@ class DetailsViewModel @Inject constructor(
     playbackPrefs: PlaybackPreferences,
     private val resolver: TargetResolver,
     private val calendar: CalendarRepository,
-    private val seriesMarker: ro.ak.vodunify.core.tracking.SeriesMarker,
+    private val seriesMarker: SeriesMarker,
 ) : ViewModel() {
 
     val kind: TitleKind = TitleKind.fromPath(savedState.get<String>("kind")) ?: TitleKind.MOVIE
@@ -133,8 +136,24 @@ class DetailsViewModel @Inject constructor(
     val trackState: StateFlow<TitleTrackState?> = tracking.titleState(mediaKey(kind, id))
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    private val _showProgress = MutableStateFlow<ShowProgress?>(null)
-    val showProgress: StateFlow<ShowProgress?> = _showProgress.asStateFlow()
+    private val progressRefresh = MutableStateFlow(0)
+    val showProgress: StateFlow<ShowProgress?> = combine(state, trackerConnected, progressRefresh) { title, connected, _ ->
+        (title as? LoadState.Data)?.value?.takeIf { kind == TitleKind.TV && connected }
+    }.flatMapLatest { details ->
+        when {
+            details == null -> flowOf(null)
+            !ExternalTrackers.ENABLED -> tracking.localShowProgress(ref(details), SeriesMarker.airedCounts(details))
+            else -> flow {
+                try {
+                    emit(tracking.showProgress(ref(details)))
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    _message.value = "Nu am putut citi progresul: ${e.message}"
+                }
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
@@ -142,37 +161,12 @@ class DetailsViewModel @Inject constructor(
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
-    private var progressLoadedFor: String? = null
-
     private fun ref(details: TitleDetails) = MediaRef(
         type = if (kind == TitleKind.MOVIE) MediaType.MOVIE else MediaType.SHOW,
         ids = ExternalIds(tmdb = details.item.id, imdb = details.imdbId),
         title = details.item.title,
         year = details.item.year,
     )
-
-    /** Încarcă episoadele văzute (o singură dată pe titlu, sau forțat după o modificare). */
-    fun loadShowProgress(details: TitleDetails, force: Boolean = false) {
-        if (kind != TitleKind.TV) return
-        if (!force && progressLoadedFor == details.item.mediaKey) return
-        progressLoadedFor = details.item.mediaKey
-        viewModelScope.launch {
-            runCatching { progressFor(details) }
-                .onSuccess { _showProgress.value = it }
-                .onFailure { _message.value = "Nu am putut citi progresul: ${it.message}" }
-        }
-    }
-
-    /** Progresul pe serial: din istoricul local (implicit) sau din trackerii externi, când sunt activi. */
-    private suspend fun progressFor(details: TitleDetails): ShowProgress? {
-        val show = ref(details)
-        if (!ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED) {
-            val counts = details.seasons.filter { it.number > 0 }.associate { it.number to it.episodeCount }
-            return tracking.localShowProgress(show, counts)
-        }
-        if (!tracking.hasConnectedTracker()) return null
-        return tracking.showProgress(show)
-    }
 
     fun toggleWatchlist(details: TitleDetails) {
         val inList = trackState.value?.inMyList == true
@@ -190,34 +184,34 @@ class DetailsViewModel @Inject constructor(
 
     fun toggleEpisode(details: TitleDetails, episode: Episode) {
         val number = EpisodeNumber(episode.season, episode.number)
-        val current = _showProgress.value
-        val watched = current?.watched?.contains(number) == true
         val show = ref(details)
         val media = show.copy(type = MediaType.EPISODE, season = episode.season, episode = episode.number, episodeTitle = episode.name)
-        act(if (watched) "S${episode.season}E${episode.number} marcat ca nevăzut" else "S${episode.season}E${episode.number} marcat ca văzut") {
+        act {
+            val latest = if (ExternalTrackers.ENABLED) showProgress.value else
+                tracking.localShowProgress(show, SeriesMarker.airedCounts(details)).first()
+            val watched = latest?.watched?.contains(number) == true
             tracking.setWatched(media, !watched)
-            // Actualizare imediată în UI, apoi starea reală din sursă.
-            current?.let { p ->
-                _showProgress.value = p.copy(watched = if (watched) p.watched - number else p.watched + number)
+            if (ExternalTrackers.ENABLED) {
+                tracking.refreshUpNext(show)
+                progressRefresh.value++
             }
-            tracking.refreshUpNext(show)
-            _showProgress.value = runCatching { progressFor(details) }.getOrNull() ?: _showProgress.value
+            "S${episode.season}E${episode.number} marcat ca ${if (watched) "nevăzut" else "văzut"}"
         }
     }
 
     /** Tot sezonul (episoadele apărute) văzut / nevăzut. */
     fun toggleSeason(details: TitleDetails, season: Int, watched: Boolean) {
-        act(if (watched) "Sezonul $season marcat ca nevăzut" else "Sezonul $season marcat ca văzut") {
-            seriesMarker.mark(details.item.id, details.item.title, details.item.year, details.imdbId, !watched, listOf(season))
-            _showProgress.value = runCatching { progressFor(details) }.getOrNull() ?: _showProgress.value
+        act {
+            val n = seriesMarker.mark(details.item.id, details.item.title, details.item.year, details.imdbId, !watched, listOf(season), details)
+            if (watched) "Sezonul $season marcat ca nevăzut" else "Sezonul $season: $n episoade marcate ca văzute"
         }
     }
 
     /** Tot serialul (episoadele apărute) văzut / nevăzut. */
     fun toggleSeries(details: TitleDetails, watched: Boolean) {
-        act(if (watched) "Serialul marcat ca nevăzut" else "Serialul marcat ca văzut") {
-            seriesMarker.mark(details.item.id, details.item.title, details.item.year, details.imdbId, !watched)
-            _showProgress.value = runCatching { progressFor(details) }.getOrNull() ?: _showProgress.value
+        act {
+            val n = seriesMarker.mark(details.item.id, details.item.title, details.item.year, details.imdbId, !watched, details = details)
+            if (watched) "Serialul marcat ca nevăzut" else "$n episoade din serial marcate ca văzute"
         }
     }
 
@@ -225,13 +219,18 @@ class DetailsViewModel @Inject constructor(
         _message.value = null
     }
 
-    private fun act(success: String, block: suspend () -> Unit) {
+    private fun act(success: String, block: suspend () -> Unit) = act {
+        block()
+        success
+    }
+
+    private fun act(block: suspend () -> String) {
         if (_busy.value) return
         _busy.value = true
+        _message.value = null
         viewModelScope.launch {
             _message.value = try {
                 block()
-                success
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

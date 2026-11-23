@@ -1,5 +1,7 @@
 package ro.ak.vodunify.core.tracking
 
+import androidx.room.withTransaction
+
 import ro.ak.vodunify.core.publish.LOCAL_SOURCE
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -36,6 +38,7 @@ import ro.ak.vodunify.core.db.OwnWriteEntity
 import ro.ak.vodunify.core.db.ResumePointEntity
 import ro.ak.vodunify.core.db.SyncStateEntity
 import ro.ak.vodunify.core.db.TrackingDao
+import ro.ak.vodunify.core.db.VodDatabase
 import ro.ak.vodunify.core.db.UpNextEntity
 import ro.ak.vodunify.core.db.WatchlistEntity
 import ro.ak.vodunify.core.reconcile.LibraryEntry
@@ -75,6 +78,7 @@ class TrackingRepository @Inject constructor(
     private val registry: ConnectorRegistry,
     private val dao: TrackingDao,
     private val hidden: HiddenTitles,
+    private val db: VodDatabase,
 ) {
     /** Titlurile scoase de mână din Lista mea (vezi [HiddenTitles]). */
     val hiddenTitles: StateFlow<Map<String, Long>> get() = hidden.all
@@ -297,8 +301,8 @@ class TrackingRepository @Inject constructor(
         dao.latestWatches().map { LocalProgress.summaries(it.visible { e -> e.source }) }.flowOn(Dispatchers.Default)
 
     /** Progresul pe serial din istoricul local. [seasonCounts]: sezon → episoade (din TMDb). */
-    suspend fun localShowProgress(show: MediaRef, seasonCounts: Map<Int, Int>): ShowProgress =
-        LocalProgress.show(show, dao.historyFor(show.titleKey).first().visible { it.source }, seasonCounts, LOCAL_SOURCE)
+    fun localShowProgress(show: MediaRef, seasonCounts: Map<Int, Int>): Flow<ShowProgress> =
+        dao.historyFor(show.titleKey).map { rows -> LocalProgress.show(show, rows.visible { it.source }, seasonCounts, LOCAL_SOURCE) }
 
     /** Progresul pe serial din prima sursă conectată care îl știe. */
     suspend fun showProgress(show: MediaRef): ShowProgress? {
@@ -347,10 +351,10 @@ class TrackingRepository @Inject constructor(
      * Marchează mai multe episoade ale unui serial (un sezon întreg sau tot serialul) văzute / nevăzute,
      * doar în baza locală.
      */
-    suspend fun setEpisodesWatched(show: MediaRef, episodes: List<EpisodeNumber>, watched: Boolean) {
+    suspend fun markEpisodesWatched(show: MediaRef, episodes: List<EpisodeNumber>) {
         if (episodes.isEmpty()) return
         val base = show.copy(type = MediaType.EPISODE, episodeTitle = null)
-        if (watched) {
+        db.withTransaction {
             val now = System.currentTimeMillis()
             val existing = dao.historyFor(show.titleKey).first().visible { it.source }
                 .mapNotNull { e -> e.ref.season?.let { s -> e.ref.episode?.let { EpisodeNumber(s, it) } } }
@@ -365,9 +369,17 @@ class TrackingRepository @Inject constructor(
                 },
             )
             episodes.forEach { n -> dao.deleteResumeById("$LOCAL_SOURCE|${base.copy(season = n.season, episode = n.episode).itemKey}") }
-            hidden.show(show.titleKey)
+        }
+        hidden.show(show.titleKey)
+    }
+
+    suspend fun clearSeriesHistory(show: MediaRef, seasons: List<Int>?): Int = db.withTransaction {
+        if (seasons == null) {
+            val removed = dao.deleteTitleHistory(show.titleKey, protectedSources)
+            dao.removeWatchedFromVisibleSources(show.titleKey, protectedSources)
+            removed
         } else {
-            episodes.forEach { n -> dao.deleteItemHistory(show.titleKey, n.season, n.episode, protectedSources) }
+            dao.deleteSeasonHistory(show.titleKey, seasons, protectedSources)
         }
     }
 

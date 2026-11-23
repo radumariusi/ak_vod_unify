@@ -49,6 +49,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -70,7 +72,6 @@ import ro.ak.vodunify.ui.components.AttributionNote
 import ro.ak.vodunify.ui.components.Button
 import ro.ak.vodunify.ui.components.Dropdown
 import ro.ak.vodunify.ui.components.ErrorPanel
-import ro.ak.vodunify.ui.components.FilledTonalButton
 import ro.ak.vodunify.ui.components.FocusCard
 import ro.ak.vodunify.ui.components.LoadState
 import ro.ak.vodunify.ui.components.LoadingPanel
@@ -130,9 +131,6 @@ private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel, c
             (details.seasons.firstOrNull { it.number == next } ?: details.seasons.firstOrNull())?.let { viewModel.selectSeason(it.number) }
         }
     }
-    LaunchedEffect(details.item.mediaKey, connected) {
-        if (connected) viewModel.loadShowProgress(details)
-    }
     BackHandler(enabled = showingEpisodes) {
         showingEpisodes = false
         backFromEpisodes = true
@@ -152,6 +150,7 @@ private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel, c
                 onToggle = { ep -> viewModel.toggleEpisode(details, ep) },
                 onToggleSeason = { n, seen -> viewModel.toggleSeason(details, n, seen) },
                 onPlay = { ep -> chooser.play(details.playbackRequest(ep), details.availability) },
+                message = viewModel.message.collectAsStateWithLifecycle().value,
                 onBack = {
                     showingEpisodes = false
                     backFromEpisodes = true
@@ -226,17 +225,15 @@ private fun Overview(
                     }
                     if (connected) {
                         val inList = track?.inMyList == true
-                        if (inList) {
-                            FilledTonalButton(onClick = { viewModel.toggleWatchlist(details) }, enabled = !busy) { Text("✓ În Lista mea") }
-                        } else {
-                            OutlinedButton(onClick = { viewModel.toggleWatchlist(details) }, enabled = !busy) { Text("+ Lista mea") }
+                        OutlinedButton(onClick = { viewModel.toggleWatchlist(details) }, active = inList) {
+                            Text(if (inList) "✓ În Lista mea" else "+ Lista mea")
                         }
                         // Starea, ca la Lista mea: „✓ Văzut” când e văzut, „Nevăzut” când nu; apăsarea o schimbă.
                         if (details.item.kind == TitleKind.MOVIE) {
-                            WatchedToggle(track?.watched == true, enabled = !busy) { viewModel.toggleWatched(details) }
+                            WatchedToggle(track?.watched == true) { viewModel.toggleWatched(details) }
                         } else if (isTvShow) {
                             val seriesWatched = progress?.let { it.aired > 0 && it.completed >= it.aired } == true
-                            WatchedToggle(seriesWatched, enabled = !busy, watchedLabel = "✓ Serial văzut", unwatchedLabel = "Serial nevăzut") {
+                            WatchedToggle(seriesWatched, watchedLabel = "✓ Serial văzut", unwatchedLabel = "Marchează serialul văzut") {
                                 viewModel.toggleSeries(details, seriesWatched)
                             }
                         }
@@ -268,16 +265,15 @@ private fun Overview(
 @Composable
 private fun WatchedToggle(
     watched: Boolean,
-    enabled: Boolean,
     watchedLabel: String = "✓ Văzut",
-    unwatchedLabel: String = "Nevăzut",
+    unwatchedLabel: String = "Marchează văzut",
     onClick: () -> Unit,
 ) {
-    if (watched) {
-        FilledTonalButton(onClick = onClick, enabled = enabled) { Text(watchedLabel) }
-    } else {
-        OutlinedButton(onClick = onClick, enabled = enabled) { Text(unwatchedLabel) }
-    }
+    OutlinedButton(
+        onClick = onClick,
+        active = watched,
+        modifier = Modifier.semantics { stateDescription = if (watched) "Văzut" else "Nevăzut" },
+    ) { Text(if (watched) watchedLabel else unwatchedLabel) }
 }
 
 @Composable
@@ -295,19 +291,13 @@ private fun TrailerButton(details: TitleDetails) {
 @Composable
 private fun PrimaryActions(watch: WatchOptions?, focus: FocusRequester, onPlay: () -> Unit, onChoose: () -> Unit) {
     val target = watch?.recommendedService?.label ?: watch?.recommendedPlayer?.displayName
+    Button(onClick = if (target == null) onChoose else onPlay, modifier = Modifier.focusRequester(focus)) {
+        Icon(Icons.Filled.PlayArrow, contentDescription = null)
+        Spacer(Modifier.width(6.dp))
+        Text(target ?: "Alege unde vezi")
+    }
     if (target != null) {
-        Button(onClick = onPlay, modifier = Modifier.focusRequester(focus)) {
-            Icon(Icons.Filled.PlayArrow, contentDescription = null)
-            Spacer(Modifier.width(6.dp))
-            Text(target)
-        }
         OutlinedButton(onClick = onChoose) { Text("Alege unde vezi") }
-    } else {
-        Button(onClick = onChoose, modifier = Modifier.focusRequester(focus)) {
-            Icon(Icons.Filled.PlayArrow, contentDescription = null)
-            Spacer(Modifier.width(6.dp))
-            Text("Alege unde vezi")
-        }
     }
 }
 
@@ -464,20 +454,22 @@ private fun EpisodesPane(
     onToggle: (Episode) -> Unit,
     onToggleSeason: (Int, Boolean) -> Unit,
     onPlay: (Episode) -> Unit,
+    message: String?,
     onBack: () -> Unit,
 ) {
     val spec = layoutSpec()
     val seasons = details.seasons
     val current = seasons.firstOrNull { it.number == selected } ?: seasons.firstOrNull() ?: return
+    val airedCounts = remember(details) { ro.ak.vodunify.core.tracking.SeriesMarker.airedCounts(details) }
     fun seasonLabel(s: SeasonSummary): String {
         val seen = watched.count { it.season == s.number && it.episode <= s.episodeCount }
-        return if (seen > 0) "${s.name} · $seen/${s.episodeCount}" else "${s.name} · ${s.episodeCount} ep."
+        return if (seen > 0) "${s.name} · $seen/${airedCounts[s.number] ?: s.episodeCount}" else "${s.name} · ${s.episodeCount} ep."
     }
     if (spec.isCompact) {
         Column(Modifier.fillMaxSize().padding(horizontal = spec.screenPadding, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onBack) { Text("Înapoi la fișă") }
             Dropdown("Sezonul", current, seasons, ::seasonLabel, { onSelectSeason(it.number) })
-            SeasonEpisodes(current, episodes, watched, next, canMark, onToggle, onToggleSeason, onPlay, Modifier.weight(1f))
+            SeasonEpisodes(current, episodes, watched, next, canMark, onToggle, onToggleSeason, onPlay, message, Modifier.weight(1f))
         }
         return
     }
@@ -510,7 +502,7 @@ private fun EpisodesPane(
                 }
             }
         }
-        SeasonEpisodes(current, episodes, watched, next, canMark, onToggle, onToggleSeason, onPlay, Modifier.weight(0.72f))
+        SeasonEpisodes(current, episodes, watched, next, canMark, onToggle, onToggleSeason, onPlay, message, Modifier.weight(0.72f))
     }
 }
 
@@ -550,6 +542,7 @@ private fun SeasonEpisodes(
     onToggle: (Episode) -> Unit,
     onToggleSeason: (Int, Boolean) -> Unit,
     onPlay: (Episode) -> Unit,
+    message: String?,
     modifier: Modifier,
 ) {
     Column(modifier.fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -560,16 +553,21 @@ private fun SeasonEpisodes(
                 val aired = ro.ak.vodunify.core.tracking.SeriesMarker.aired(loaded.episodes)
                 if (aired.isNotEmpty()) {
                     val seasonWatched = aired.all { EpisodeNumber(it.season, it.number) in watched }
-                    WatchedToggle(seasonWatched, enabled = true, watchedLabel = "✓ Sezon văzut", unwatchedLabel = "Sezon nevăzut") {
+                    WatchedToggle(seasonWatched, watchedLabel = "✓ Sezon văzut", unwatchedLabel = "Marchează sezonul văzut") {
                         onToggleSeason(season.number, seasonWatched)
                     }
                 }
             }
         }
+        Box(Modifier.heightIn(min = 22.dp)) {
+            message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        }
         when (episodes) {
             null, LoadState.Loading -> LoadingPanel()
             is LoadState.Failed -> ErrorPanel(episodes.error, onRetry = null)
-            is LoadState.Data -> if (episodes.value.episodes.isEmpty()) {
+            is LoadState.Data -> if (episodes.value.number != season.number) {
+                LoadingPanel()
+            } else if (episodes.value.episodes.isEmpty()) {
                 Text("Nu există episoade listate pentru acest sezon.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 key(episodes.value.number) {
@@ -591,7 +589,7 @@ private fun EpisodeList(
 ) {
     val spec = layoutSpec()
     // Focusul intră pe următorul episod de văzut (sau pe primul).
-    val initial = list.indexOfFirst { EpisodeNumber(it.season, it.number) == next }.coerceAtLeast(0)
+    val initial = remember { list.indexOfFirst { EpisodeNumber(it.season, it.number) == next }.coerceAtLeast(0) }
     val focus = remember { FocusRequester() }
     val state = rememberLazyListState(initial)
     if (spec.isTv) {
@@ -616,7 +614,7 @@ private fun EpisodeList(
                     onClick = { onPlay(ep) },
                 )
                 if (canMark) {
-                    WatchedToggle(number in watched, enabled = true) { onToggle(ep) }
+                    WatchedToggle(number in watched) { onToggle(ep) }
                 }
             }
         }

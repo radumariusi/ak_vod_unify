@@ -70,11 +70,6 @@
         <!-- AK Scrobbler (aplicația însoțitoare). -->
         <package android:name="ro.ak.vodscrobbler" />
         <package android:name="ro.ak.vodscrobbler.debug" />
-        <!-- AK Import RO / US (conectare în conturi, import istoric). -->
-        <package android:name="ro.ak.vodimport.ro" />
-        <package android:name="ro.ak.vodimport.us" />
-        <package android:name="ro.ak.vodimport.ro.debug" />
-        <package android:name="ro.ak.vodimport.us.debug" />
     </queries>
 
     <application
@@ -96,6 +91,12 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".core.imports.ServiceHistoryActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
 
         <receiver
             android:name=".core.update.InstallResultReceiver"

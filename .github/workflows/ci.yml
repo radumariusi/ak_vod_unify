@@ -31,13 +31,12 @@ jobs:
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
       - name: Build, lint, unit tests
-        run: ./gradlew --no-daemon assembleDebug :app:assembleRelease lintDebug testDebugUnitTest :importer:lintRoDebug :importer:lintUsDebug
+        run: ./gradlew --no-daemon assembleDebug :app:assembleRelease lintDebug testDebugUnitTest
       - name: Show lint errors
         if: failure()
         run: |
           cat app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt || true
           cat scrobbler/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt || true
-          find importer/build -name 'lint-results-*.txt' -exec cat {} \; || true
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
@@ -49,12 +48,6 @@ jobs:
         with:
           name: ak-scrobbler-debug
           path: scrobbler/build/outputs/apk/debug/*.apk
-          retention-days: 7
-      - name: Upload AK Import debug APKs
-        uses: actions/upload-artifact@v4
-        with:
-          name: ak-import-debug
-          path: importer/build/outputs/apk/*/debug/*.apk
           retention-days: 7
       - name: Upload lint report
         if: always()

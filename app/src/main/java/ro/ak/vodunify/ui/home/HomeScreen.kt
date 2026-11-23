@@ -31,7 +31,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -69,11 +68,12 @@ import ro.ak.vodunify.ui.components.LoadingPanel
 import ro.ak.vodunify.ui.components.FocusedTitle
 import ro.ak.vodunify.ui.components.LocalBackdrop
 import ro.ak.vodunify.ui.components.LocalFocusRestore
-import ro.ak.vodunify.ui.components.PivotScroll
 import ro.ak.vodunify.ui.components.HomeRows
 import ro.ak.vodunify.ui.components.LocalHomeRows
 import ro.ak.vodunify.ui.components.FixedRowsScroll
-import ro.ak.vodunify.ui.components.homeRowsList
+import ro.ak.vodunify.ui.components.HomeRowFocus
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import ro.ak.vodunify.core.prefs.UiPrefs
 import ro.ak.vodunify.ui.components.RatingChip
 import ro.ak.vodunify.ui.components.TitleBackdrop
@@ -86,7 +86,7 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val personal by viewModel.personal.collectAsStateWithLifecycle()
     val sync by viewModel.syncStatus.collectAsStateWithLifecycle()
-    val personalRows: LazyListScope.() -> Unit = { personalItems(personal, sync, viewModel::syncNow) }
+    val personalRows = remember(personal, sync, viewModel) { personalHomeRows(personal, sync, viewModel::syncNow) }
     // Siglele titlurilor din rândurile personale (Continuă, Noutăți, În curând) se pregătesc din timp, ca hero-ul
     // să le arate pe loc la focus.
     LaunchedEffect(personal) {
@@ -98,12 +98,12 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
     }
     when (val s = state) {
         LoadState.Loading -> LazyColumn(Modifier.fillMaxSize()) {
-            personalRows()
+            items(personalRows, key = { it.key }) { it.content() }
             item { LoadingPanel() }
         }
         is LoadState.Failed -> LazyColumn(Modifier.fillMaxSize()) {
             item { ErrorPanel(s.error, onRetry = viewModel::retry) }
-            personalRows()
+            items(personalRows, key = { it.key }) { it.content() }
         }
         is LoadState.Data -> HomeContent(s.value, personalRows, viewModel, personalReady = personal.state != PersonalState.LOADING)
     }
@@ -112,7 +112,7 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
 @Composable
 private fun HomeContent(
     catalog: HomeCatalog,
-    personalRows: LazyListScope.() -> Unit,
+    personalRows: List<HomeRow>,
     viewModel: HomeViewModel,
     personalReady: Boolean,
 ) {
@@ -165,7 +165,9 @@ private fun HomeContent(
             val listHeight = slot + ROW_TITLE_HEIGHT
             val heroHeight = (maxHeight - listHeight).coerceAtLeast(140.dp)
             val animate by UiPrefs.rowAnimation.collectAsStateWithLifecycle()
-            val rows = remember(slot, animate) { HomeRows(slot, listState, scope, animate) }
+            val rows = remember(slot, listState, scope) { HomeRows(slot, listState, scope) }
+            val allRows = personalRows + catalog.rows.map { row -> HomeRow(row.id, row.items.isNotEmpty()) { TitleRow(row.title, row.items) } }
+            val keys = allRows.map { row -> row.key.takeIf { row.focusable } }
             Column(Modifier.fillMaxSize()) {
                 Hero(
                     catalog.hero,
@@ -181,13 +183,14 @@ private fun HomeContent(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(listHeight)
-                                .homeRowsList(rows)
+                                .onPreviewKeyEvent { rows.move(it, keys, animate) }
                                 .focusRequester(listFocus),
                             // Și ultimul rând poate urca sus.
                             contentPadding = PaddingValues(bottom = slot),
                         ) {
-                            personalRows()
-                            items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
+                            itemsIndexed(allRows, key = { _, row -> row.key }) { index, row ->
+                                if (row.focusable) HomeRowFocus(row.key, index, row.content) else row.content()
+                            }
                             item(key = "attribution") { AttributionNote() }
                         }
                     }
@@ -204,7 +207,7 @@ private fun HomeContent(
             if (catalog.hero.isNotEmpty()) {
                 item(key = "hero") { Hero(catalog.hero, viewModel, Modifier.fillMaxWidth().height(spec.heroHeight)) }
             }
-            personalRows()
+            items(personalRows, key = { it.key }) { it.content() }
             items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
             item(key = "attribution") { AttributionNote() }
         }

@@ -1,5 +1,6 @@
 package ro.ak.vodunify.core.scrobble
 
+import kotlinx.serialization.Serializable
 import ro.ak.vodunify.core.connector.ExternalIds
 import ro.ak.vodunify.core.connector.MediaRef
 import ro.ak.vodunify.core.connector.MediaType
@@ -57,15 +58,13 @@ object MatchRules {
 @Singleton
 class ScrobbleMatcher @Inject constructor(private val tmdb: TmdbClient) {
 
-    private val memo = ConcurrentHashMap<String, Optional>()
-
-    private data class Optional(val value: ScrobbleMatch?)
+    private val memo = ConcurrentHashMap<String, ScrobbleMatch>()
 
     val isConfigured: Boolean get() = tmdb.isConfigured
 
     suspend fun match(guesses: List<TitleGuess>, durationMs: Long?): ScrobbleMatch? {
-        val key = guesses.joinToString("|")
-        memo[key]?.let { return it.value }
+        val key = "${durationMs?.div(60_000)}|${guesses.joinToString("|")}"
+        memo[key]?.let { return it }
         var result: ScrobbleMatch? = null
         // Episoade numerotate: întâi ipotezele în care și numele episodului se potrivește cu TMDb
         // (așa alegem corect care câmp e serialul), apoi oricare cu sezon/episod valid.
@@ -86,7 +85,7 @@ class ScrobbleMatcher @Inject constructor(private val tmdb: TmdbClient) {
             }
         }
         if (memo.size > 5000) memo.clear()
-        memo[key] = Optional(result)
+        if (result != null) memo[key] = result
         return result
     }
 
@@ -98,8 +97,10 @@ class ScrobbleMatcher @Inject constructor(private val tmdb: TmdbClient) {
     }
 
     private suspend fun searchShowExact(name: String, country: String?): TvShow? {
+        val suggestions = linkedMapOf<Long, TmdbListItem>()
         for (lang in LANGUAGES) {
             val page = tmdb.get("search/tv", mapOf("query" to name, "language" to lang), TmdbPage.serializer(TmdbListItem.serializer()))
+            page.results.take(5).forEach { suggestions.putIfAbsent(it.id, it) }
             val pick = MatchRules.pickExact(
                 name,
                 page.results.map { MatchRules.Candidate(it.id, listOf(it.name, it.originalName), MatchRules.yearOf(it.firstAirDate), it.originCountry) },
@@ -108,7 +109,10 @@ class ScrobbleMatcher @Inject constructor(private val tmdb: TmdbClient) {
             val details = tmdb.get("tv/${pick.id}", mapOf("language" to "en-US"), TmdbTitleDetails.serializer(), TmdbClient.LONG_TTL)
             return TvShow(details, page.results.first { it.id == pick.id })
         }
-        return null
+        val aliases = suggestions.values.filter { country == null || country in it.originCountry }
+        val item = matchingAlias("tv", name, aliases) ?: return null
+        val details = tmdb.get("tv/${item.id}", mapOf("language" to "en-US"), TmdbTitleDetails.serializer(), TmdbClient.LONG_TTL)
+        return TvShow(details, item)
     }
 
     private data class TvShow(val details: TmdbTitleDetails, val item: TmdbListItem) {
@@ -192,8 +196,10 @@ class ScrobbleMatcher @Inject constructor(private val tmdb: TmdbClient) {
     )
 
     private suspend fun movie(g: TitleGuess.Movie, durationMs: Long?): ScrobbleMatch? {
+        val suggestions = linkedMapOf<Long, TmdbListItem>()
         for (lang in LANGUAGES) {
-            val page = tmdb.get("search/movie", mapOf("query" to g.title, "language" to lang), TmdbPage.serializer(TmdbListItem.serializer()))
+            val page = tmdb.get("search/movie", mapOf("query" to g.title, "language" to lang, "year" to g.year?.toString()), TmdbPage.serializer(TmdbListItem.serializer()))
+            page.results.filterNot { it.adult }.take(5).forEach { suggestions.putIfAbsent(it.id, it) }
             val candidates = page.results.filter { !it.adult }
                 .map { MatchRules.Candidate(it.id, listOf(it.title, it.originalTitle), MatchRules.yearOf(it.releaseDate)) }
             val exact = candidates.filter { c -> c.names.any { MatchRules.sameName(it, g.title) } }
@@ -217,7 +223,35 @@ class ScrobbleMatcher @Inject constructor(private val tmdb: TmdbClient) {
                 runtimeMs = movieRuntime(pick.id),
             )
         }
-        return null
+        val item = matchingAlias("movie", g.title, suggestions.values) ?: return null
+        return ScrobbleMatch(
+            MediaRef(MediaType.MOVIE, ExternalIds(tmdb = item.id), item.title ?: item.originalTitle ?: g.title,
+                MatchRules.yearOf(item.releaseDate)),
+            movieRuntime(item.id),
+        )
+    }
+
+    @Serializable
+    private data class AlternativeName(val title: String = "")
+
+    @Serializable
+    private data class AlternativeNames(
+        val titles: List<AlternativeName> = emptyList(),
+        val results: List<AlternativeName> = emptyList(),
+    )
+
+    /** Un alias este acceptat când TMDb îl declară și există un singur candidat pentru el. */
+    private suspend fun matchingAlias(kind: String, name: String, candidates: Collection<TmdbListItem>): TmdbListItem? {
+        val matches = mutableListOf<TmdbListItem>()
+        for (item in candidates.take(5)) {
+            val aliases = try {
+                tmdb.get("$kind/${item.id}/alternative_titles", emptyMap(), AlternativeNames.serializer(), TmdbClient.LONG_TTL)
+            } catch (e: TmdbHttpException) {
+                if (e.code == 404) continue else throw e
+            }
+            if ((aliases.titles + aliases.results).any { MatchRules.sameName(it.title, name) }) matches += item
+        }
+        return matches.singleOrNull()
     }
 
     private suspend fun movieRuntime(id: Long): Long? = try {

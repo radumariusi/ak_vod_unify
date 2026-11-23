@@ -125,29 +125,27 @@ class PublishRepository @Inject constructor(
         publish: Boolean = true,
         /** Aplicația în care rulează (de la AK Scrobbler); null = păstrăm ce știam. */
         appPackage: String? = null,
+        recordedAt: Long = System.currentTimeMillis(),
     ): List<PublishOutcome> {
         require(media.type != MediaType.SHOW) { "Setează minutul pentru un film sau un episod" }
         val id = "$LOCAL_SOURCE|${media.itemKey}"
         if (positionMs <= 0L) {
-            trackingDao.deleteResumeById(id)
+            trackingDao.deleteResumeByIdBefore(id, recordedAt)
             return emptyList()
         }
         val progress = durationMs?.takeIf { it > 0 }?.let { (positionMs.toFloat() / it).coerceIn(0f, 1f) }
-        val app = appPackage ?: trackingDao.allResume().first().firstOrNull { it.id == id }?.appPackage
-        trackingDao.upsertResume(
-            listOf(
-                ResumePointEntity(
+        if (!trackingDao.upsertResumeIfNewer(
+            ResumePointEntity(
                     id = id,
                     source = LOCAL_SOURCE,
                     ref = TrackingEntities.ref(media),
                     progress = progress,
-                    updatedAt = System.currentTimeMillis(),
+                    updatedAt = recordedAt,
                     remoteId = null,
                     positionMs = positionMs,
-                    appPackage = app,
-                ),
+                    appPackage = appPackage,
             ),
-        )
+        )) return emptyList()
         val profile = prefs.current().active
         return if (publish && profile.mode == PublishMode.AUTOMATIC) publishItem(media, manual = true) else emptyList()
     }

@@ -87,6 +87,31 @@ class NetflixActivityTest {
     }
 
     @Test
+    fun netflixIdResolvesAnOlderEventWithSeveralNearbyTitles() {
+        val event = event(208_000).copy(fields = mapOf("netflix_id" to "70105212"))
+        val items = listOf(
+            NetflixViewedItem(title = "Alt film", watchedAt = now, id = "70105211"),
+            NetflixViewedItem(title = "Filmul corect", watchedAt = now - 7L * 24 * 60 * min, id = "70105212"),
+        )
+        assertEquals("Filmul corect", NetflixActivity.match(event, items)?.title)
+    }
+
+    @Test
+    fun mixedActivityFallsBackToBookmarkForAnOlderDay() {
+        val items = listOf(
+            NetflixViewedItem(title = "Recent", watchedAt = now + 50 * min, id = "1"),
+            NetflixViewedItem(title = "Potrivire", date = now - 12 * 60 * min, bookmark = 210, id = "2"),
+        )
+        assertEquals("2", NetflixActivity.match(event(208_000), items)?.id)
+    }
+
+    @Test
+    fun neverInterpretAnIncompleteSeriesRecordAsAMovie() {
+        val fields = NetflixActivity.fields(NetflixViewedItem(series = "Dark", title = "Dark"))
+        assertEquals(emptyList<ro.ak.vodunify.core.scrobble.TitleGuess>(), ro.ak.vodunify.core.scrobble.TitleParser.guesses(fields, "Netflix"))
+    }
+
+    @Test
     fun structuredGuessesNeverTreatEpisodeAsMovie() {
         val f = NetflixActivity.fields(NetflixViewedItem(series = "The Office (U.S.)", episode = "Pilot", title = "x", watchedAt = now))
         assertEquals(

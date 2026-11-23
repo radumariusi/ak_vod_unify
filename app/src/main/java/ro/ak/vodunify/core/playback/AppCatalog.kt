@@ -125,7 +125,7 @@ enum class TargetApp(
 ) {
     NETFLIX(
         "netflix", "Netflix", AppRole.OFFICIAL, listOf("com.netflix.ninja", "com.netflix.mediaclient"), listOf("netflix"),
-        "Minutul din AK Scrobbler, titlul din istoricul Netflix (AK Import, după oră)",
+        "Minutul din AK Scrobbler, titlul din activitatea profilului Netflix",
     ),
     PRIME_VIDEO(
         "primevideo", "Prime Video", AppRole.OFFICIAL,

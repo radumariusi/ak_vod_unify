@@ -48,6 +48,7 @@ class MediaListenerService : NotificationListenerService() {
 
         /** Ce dă aplicația în sesiunea media (fără completări). */
         var nativeInfo: MediaInfo? = null
+        val screenTimeResolver = ScreenTimeResolver()
 
         /** Titlul citit de pe ecran pentru această redare (dacă aplicația nu-l dă). */
         var screenGuess: ScreenGuess? = null
@@ -194,7 +195,9 @@ class MediaListenerService : NotificationListenerService() {
             val callback = object : MediaController.Callback() {
                 override fun onMetadataChanged(metadata: MediaMetadata?) {
                     DiagLog.add("$tag: metadate noi\n${describe(metadata)}")
-                    entry.nativeInfo = metadata?.toInfo()
+                    val info = metadata?.toInfo()
+                    if (entry.nativeInfo?.identity != info?.identity) entry.screenTimeResolver.reset()
+                    entry.nativeInfo = info
                     dispatch(tracker.onMetadata(merged(entry), SystemClock.elapsedRealtime()))
                     publishLive()
                 }
@@ -326,14 +329,22 @@ class MediaListenerService : NotificationListenerService() {
         val isPlayer = playing || !snap.times.isEmpty || snap.guess?.subtitle != null
         if (!isPlayer) return
         for (t in active) {
-            val duration = t.tracker.media?.durationMs ?: sessions.firstNotNullOfOrNull { it.tracker.media?.durationMs }
-            if (!snap.times.isEmpty) t.tracker.onScreenTimes(snap.times.position(duration), snap.times.durationMs, now)
-            val g = snap.guess ?: continue
-            if (hasTextTitle(t) || g == t.screenGuess) continue
-            val hadScreenTitle = t.screenGuess != null
-            t.screenGuess = g
-            DiagLog.add("${t.tag}: titlu de pe ecran: ${g.title} · ${g.subtitle ?: "-"}")
-            dispatch(t.tracker.onMetadata(merged(t), now, correction = hadScreenTitle))
+            val guess = snap.guess
+            if (guess != null && !hasTextTitle(t) && guess != t.screenGuess) {
+                val previous = t.screenGuess
+                val oldCode = ScreenPlayback.episodeCode(previous?.subtitle)
+                val newCode = ScreenPlayback.episodeCode(guess.subtitle)
+                if (oldCode == null || oldCode != newCode) t.screenTimeResolver.reset()
+                t.screenGuess = guess
+                DiagLog.add("${t.tag}: titlu de pe ecran: ${guess.title} · ${guess.subtitle ?: "-"}")
+                dispatch(t.tracker.onMetadata(merged(t), now, correction = previous != null && (oldCode == null || oldCode == newCode)))
+            }
+            if (!snap.times.isEmpty) {
+                val nativeDuration = t.nativeInfo?.durationMs
+                val times = t.screenTimeResolver.resolve(snap.times, nativeDuration)
+                t.tracker.onScreenTimes(times.position(nativeDuration ?: t.tracker.media?.durationMs),
+                    times.durationMs.takeIf { nativeDuration == null }, now, fromScreen = true)
+            }
         }
         publishLive()
     }

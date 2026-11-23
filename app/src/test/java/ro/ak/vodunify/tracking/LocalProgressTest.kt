@@ -3,6 +3,8 @@ package ro.ak.vodunify.tracking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import ro.ak.vodunify.core.catalog.EpisodeAir
+import ro.ak.vodunify.core.catalog.SeasonSummary
 import ro.ak.vodunify.core.connector.EpisodeNumber
 import ro.ak.vodunify.core.connector.ExternalIds
 import ro.ak.vodunify.core.connector.MediaRef
@@ -11,6 +13,7 @@ import ro.ak.vodunify.core.db.TrackedRef
 import ro.ak.vodunify.core.db.WatchEventEntity
 import ro.ak.vodunify.core.reconcile.LibraryStatus
 import ro.ak.vodunify.core.tracking.LocalProgress
+import ro.ak.vodunify.core.tracking.SeriesMarker
 import ro.ak.vodunify.ui.library.LibraryLogic
 
 class LocalProgressTest {
@@ -46,5 +49,20 @@ class LocalProgressTest {
         val done = LibraryLogic.mergeSeries(emptyList(), summaries, mapOf("tv:tmdb:1" to 2))
         assertEquals(setOf(LibraryStatus.WATCHED), done.single().statuses)
         assertEquals("S1E2 · 2/10 episoade", LibraryLogic.seriesLabel(s, 10))
+    }
+
+    @Test
+    fun markingAllAiredEpisodesCompletesASeriesWithFutureEpisodes() {
+        val counts = SeriesMarker.airedCounts(
+            listOf(SeasonSummary(0, "Speciale", 3, null), SeasonSummary(1, "Sezon 1", 3, null),
+                SeasonSummary(2, "Sezon 2", 10, null), SeasonSummary(3, "Sezon 3", 6, null)),
+            EpisodeAir(2, 2, null, null),
+        )
+        val previous = listOf(ep(1, 1, 1), ep(1, 2, 2), ep(1, 3, 3), ep(2, 1, 4))
+        assertEquals(mapOf(1 to 3, 2 to 2), counts)
+        assertEquals(4, LocalProgress.show(show, previous, counts, "local").completed)
+        val marked = LocalProgress.show(show, previous + ep(2, 2, 5), counts, "local")
+        assertEquals(marked.aired, marked.completed)
+        assertEquals(0, LocalProgress.show(show, emptyList(), counts, "local").completed)
     }
 }

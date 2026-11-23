@@ -1,142 +1,118 @@
 package ro.ak.vodimport
 
 import android.annotation.SuppressLint
-import android.content.BroadcastReceiver
-import android.content.ContentValues
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
-import kotlin.concurrent.thread
+import kotlin.coroutines.resume
 
-/**
- * „Ce ai văzut recent pe Netflix”, cerut de AK VOD Unify când AK Scrobbler a prins o vizionare
- * Netflix fără titlu (aplicația Netflix de pe TV nu arată titlul nimănui).
- *
- * Folosește sesiunea în care te-ai conectat o dată în browserul din AK Import (cookie-urile):
- * deschide invizibil pagina „Watched” și ia din ce primește ea titlul și ora exactă a fiecărei
- * vizionări. Unify potrivește apoi vizionarea după oră. Nu trimite nimic altundeva.
- */
-class NetflixRecentReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
-        val app = context.applicationContext
-        val pending = goAsync()
-        val cookies = runCatching { CookieManager.getInstance().getCookie(NetflixRecent.BASE) }.getOrNull()
-        if (cookies.isNullOrBlank() || !cookies.contains("NetflixId")) {
-            val out = JSONObject().put("route", BuildConfig.ROUTE).put("status", "not_logged_in")
-                .put("message", "Nu ești conectat la Netflix în ${NetflixRecent.appName()}")
-            thread { sendAndFinish(app, out, pending) }
-            return
+object NetflixRecent {
+    const val ACTION = "ro.ak.vodscrobbler.action.NETFLIX_RECENT"
+    const val BASE = "https://www.netflix.com"
+    const val HISTORY_URL = "$BASE/viewingactivity"
+    internal const val UA =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+    fun hasSession(): Boolean = runCatching {
+        CookieManager.getInstance().getCookie(BASE).orEmpty().split(';').any { it.trimStart().startsWith("NetflixId=") }
+    }.getOrDefault(false)
+
+    fun result(status: String, message: String? = null, items: JSONArray? = null): JSONObject =
+        JSONObject().put("route", "RO").put("status", status).apply {
+            message?.let { put("message", it) }
+            items?.let { put("items", it) }
         }
-        NetflixHistoryScan.run(app) { result -> thread { sendAndFinish(app, result, pending) } }
+
+    internal fun parse(raw: String?): JSONObject? =
+        runCatching { JSONObject(JSONTokener(raw).nextValue() as String) }.getOrNull()
+
+    internal fun installCapture(web: WebView): Boolean {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return false
+        WebViewCompat.addDocumentStartJavaScript(web, Scripts.NETFLIX_CAPTURE_HOOK, setOf("https://netflix.com", "https://*.netflix.com"))
+        return true
     }
 
-    private fun sendAndFinish(app: Context, result: JSONObject, pending: PendingResult) {
-        try {
-            NetflixRecent.send(app, result)
-        } catch (e: Exception) {
-            Log.w("NetflixRecent", "eșuat", e)
-        } finally {
-            pending.finish()
-        }
-    }
-}
-
-/**
- * Încarcă pagina „Watched” într-un WebView invizibil, cu [Scripts.NETFLIX_CAPTURE_HOOK] pornit, și
- * citește cu [Scripts.NETFLIX_HISTORY_COLLECT] ce a primit pagina. Rezultatul e gata de trimis în
- * Unify (status ok / not_logged_in / error).
- */
-object NetflixHistoryScan {
-    private const val POLL_MS = 2_000L
-    private const val TIMEOUT_MS = 40_000L
-
+    /** Citește doar vizionările recente, folosind sesiunea din aplicația apelantă. */
     @SuppressLint("SetJavaScriptEnabled")
-    fun run(context: Context, done: (JSONObject) -> Unit) {
-        val main = Handler(Looper.getMainLooper())
-        val base = JSONObject().put("route", BuildConfig.ROUTE)
+    suspend fun scan(context: Context): JSONObject = withContext(Dispatchers.Main) {
+        if (!hasSession()) return@withContext result("not_logged_in", "Conectează-te la Netflix și alege profilul folosit la vizionare.")
         val web = try {
             WebView(context)
         } catch (e: Exception) {
-            done(base.put("status", "error").put("message", "WebView indisponibil: ${e.message}"))
-            return
+            return@withContext result("error", "WebView indisponibil: ${e.message}")
         }
-        var finished = false
-        var lastDiag = "pagina nu s-a încărcat"
-        fun finish(result: JSONObject) {
-            if (finished) return
-            finished = true
-            main.removeCallbacksAndMessages(null)
-            runCatching { web.stopLoading(); web.destroy() }
-            done(result)
-        }
-        fun poll() {
-            if (finished) return
-            web.evaluateJavascript(Scripts.NETFLIX_HISTORY_COLLECT) { raw ->
-                val parsed = NetflixRecent.parseCollect(raw)
-                val items = parsed?.optJSONArray("items")
-                lastDiag = parsed?.optString("diag") ?: "răspuns gol din pagină"
-                if (items != null && items.length() > 0) {
-                    finish(JSONObject().put("route", BuildConfig.ROUTE).put("status", "ok").put("items", items))
-                } else {
-                    main.postDelayed({ poll() }, POLL_MS)
-                }
-            }
-        }
-        web.settings.javaScriptEnabled = true
-        web.settings.domStorageEnabled = true
-        web.settings.userAgentString = NetflixRecent.UA
-        CookieManager.getInstance().setAcceptCookie(true)
-        web.webViewClient = object : WebViewClient() {
-            override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
-                if (NetflixRecent.isNetflix(url)) view.evaluateJavascript(Scripts.NETFLIX_CAPTURE_HOOK, null)
-            }
-
-            override fun onPageFinished(view: WebView, url: String) {
+        suspendCancellableCoroutine { continuation ->
+            val main = Handler(Looper.getMainLooper())
+            var finished = false
+            var lastDiag = "pagina nu s-a încărcat"
+            fun close() {
                 if (finished) return
-                if (url.contains("login", ignoreCase = true)) {
-                    finish(JSONObject().put("route", BuildConfig.ROUTE).put("status", "not_logged_in")
-                        .put("message", "Sesiunea Netflix a expirat în ${NetflixRecent.appName()}"))
-                    return
-                }
-                if (!NetflixRecent.isNetflix(url)) return
-                view.evaluateJavascript(Scripts.NETFLIX_CAPTURE_HOOK, null)
-                main.postDelayed({ poll() }, POLL_MS)
+                finished = true
+                main.removeCallbacksAndMessages(null)
+                web.stopLoading()
+                web.destroy()
             }
+            fun finish(value: JSONObject) {
+                if (finished) return
+                close()
+                if (continuation.isActive) continuation.resume(value)
+            }
+            fun poll() {
+                if (finished || !Service.NETFLIX.trusted(web.url.orEmpty())) return
+                web.evaluateJavascript(Scripts.NETFLIX_HISTORY_COLLECT) { raw ->
+                    if (finished) return@evaluateJavascript
+                    val parsed = parse(raw)
+                    val items = parsed?.optJSONArray("items")
+                    lastDiag = parsed?.optString("diag") ?: "răspuns gol din pagină"
+                    if (items != null && items.length() > 0) {
+                        val bounded = JSONArray()
+                        for (i in 0 until minOf(items.length(), 200)) bounded.put(items.get(i))
+                        finish(result("ok", items = bounded))
+                    } else {
+                        main.postDelayed({ poll() }, 2_000L)
+                    }
+                }
+            }
+            continuation.invokeOnCancellation { main.post { close() } }
+            web.settings.apply {
+                javaScriptEnabled = true
+                domStorageEnabled = true
+                userAgentString = UA
+                allowFileAccess = false
+                allowContentAccess = false
+            }
+            val atDocumentStart = installCapture(web)
+            var generation = 0
+            web.webViewClient = object : WebViewClient() {
+                override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                    generation++
+                    if (!atDocumentStart && Service.NETFLIX.trusted(url)) view.evaluateJavascript(Scripts.NETFLIX_CAPTURE_HOOK, null)
+                }
+
+                override fun onPageFinished(view: WebView, url: String) {
+                    if (!Service.NETFLIX.trusted(url) || finished) return
+                    if (Service.NETFLIX.isLogin(url)) {
+                        finish(result("not_logged_in", "Sesiunea Netflix a expirat."))
+                        return
+                    }
+                    if (!atDocumentStart) view.evaluateJavascript(Scripts.NETFLIX_CAPTURE_HOOK, null)
+                    val page = ++generation
+                    main.postDelayed({ if (page == generation) poll() }, 2_000L)
+                }
+            }
+            main.postDelayed({ finish(result("error", "Activitate de vizionare: ${lastDiag.take(180)}")) }, 40_000L)
+            web.loadUrl(HISTORY_URL)
         }
-        main.postDelayed({
-            finish(JSONObject().put("route", BuildConfig.ROUTE).put("status", "error")
-                .put("message", "pagina Watched: $lastDiag".take(300)))
-        }, TIMEOUT_MS)
-        web.loadUrl(NetflixRecent.HISTORY_URL)
     }
-}
-
-object NetflixRecent {
-    const val ACTION = "ro.ak.vodimport.action.NETFLIX_RECENT"
-    const val BASE = "https://www.netflix.com"
-    const val HISTORY_URL = "$BASE/viewingactivity"
-    const val UA =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-
-    fun isNetflix(url: String): Boolean =
-        runCatching { Uri.parse(url).host?.let { it == "netflix.com" || it.endsWith(".netflix.com") } }.getOrNull() == true
-
-    /** evaluateJavascript întoarce rezultatul ca șir JSON (cu ghilimele). */
-    fun parseCollect(raw: String?): JSONObject? =
-        runCatching { JSONObject(JSONTokener(raw).nextValue() as String) }.getOrNull()
-
-    fun send(context: Context, result: JSONObject) {
-        val uri = Uri.parse("content://${BuildConfig.MAIN_APP_ID}.scrobble/netflix_recent")
-        context.contentResolver.insert(uri, ContentValues().apply { put("payload", result.toString()) })
-    }
-
-    fun appName() = if (BuildConfig.ROUTE == "US") "AK Import US" else "AK Import RO"
 }

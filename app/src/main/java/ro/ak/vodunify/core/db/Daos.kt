@@ -29,6 +29,20 @@ interface TrackingDao {
     @Upsert
     suspend fun upsertResume(items: List<ResumePointEntity>)
 
+    @Query("SELECT * FROM resume_points WHERE id = :id")
+    suspend fun resumeById(id: String): ResumePointEntity?
+
+    @Transaction
+    suspend fun upsertResumeIfNewer(item: ResumePointEntity): Boolean {
+        val current = resumeById(item.id)
+        if (current != null && current.updatedAt > item.updatedAt) return false
+        upsertResume(listOf(item.copy(appPackage = item.appPackage ?: current?.appPackage)))
+        return true
+    }
+
+    @Query("DELETE FROM resume_points WHERE id = :id AND updatedAt <= :at")
+    suspend fun deleteResumeByIdBefore(id: String, at: Long)
+
     @Transaction
     suspend fun replaceResume(source: String, items: List<ResumePointEntity>) {
         deleteResume(source)
@@ -111,6 +125,9 @@ interface TrackingDao {
     @Query("DELETE FROM watched_titles WHERE mediaKey = :mediaKey")
     suspend fun removeWatched(mediaKey: String)
 
+    @Query("DELETE FROM watched_titles WHERE mediaKey = :mediaKey AND source NOT IN (:keep)")
+    suspend fun removeWatchedFromVisibleSources(mediaKey: String, keep: List<String>)
+
     @Query("SELECT * FROM watched_titles ORDER BY lastWatchedAt DESC")
     fun watchedTitles(): Flow<List<WatchedTitleEntity>>
 
@@ -155,9 +172,12 @@ interface TrackingDao {
     )
     suspend fun deleteItemHistory(mediaKey: String, season: Int?, episode: Int?, keep: List<String>)
 
+    @Query("DELETE FROM watch_events WHERE mediaKey = :mediaKey AND season IN (:seasons) AND source NOT IN (:keep)")
+    suspend fun deleteSeasonHistory(mediaKey: String, seasons: List<Int>, keep: List<String>): Int
+
     /** Șterge tot istoricul unui titlu (film sau toate episoadele serialului), în afară de sursele [keep]. */
     @Query("DELETE FROM watch_events WHERE mediaKey = :mediaKey AND source NOT IN (:keep)")
-    suspend fun deleteTitleHistory(mediaKey: String, keep: List<String>)
+    suspend fun deleteTitleHistory(mediaKey: String, keep: List<String>): Int
 
     /** Există istoric (din orice sursă afișată) pentru titlu. */
     @Query("SELECT MAX(watchedAt) FROM watch_events WHERE mediaKey = :mediaKey AND source NOT IN (:hidden)")

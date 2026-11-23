@@ -1,65 +1,19 @@
 package ro.ak.vodimport
 
-/** Un serviciu din care putem (sau nu) aduce istoricul. */
-data class Service(
-    val id: String,
-    val name: String,
-    /** Pagina de conectare / pornire în browserul din aplicație. */
-    val startUrl: String?,
-    /** Pagina pe care rulăm extragerea istoricului. */
-    val historyUrl: String?,
-    /** Domeniile pe care le acceptăm în browser pentru acest serviciu (siguranța punții JS). */
-    val hosts: List<String>,
-    val script: String?,
-    val experimental: Boolean,
-    val note: String,
-    /** Scriptul poate rula de pe orice pagină a serviciului (nu doar de pe pagina de istoric). */
-    val runAnywhere: Boolean = false,
-) {
-    val supported: Boolean get() = script != null
-}
+import android.net.Uri
 
-object Services {
-    fun all(route: String): List<Service> = listOf(
-        Service(
-            id = "netflix",
-            name = "Netflix",
-            startUrl = "https://www.netflix.com/login",
-            historyUrl = "https://www.netflix.com/viewingactivity",
-            hosts = listOf("netflix.com"),
-            script = Scripts.NETFLIX,
-            experimental = false,
-            note = "Tot istoricul profilului ales (titlu + ora exactă), o singură dată, ca bază. Alege profilul după conectare.",
-            runAnywhere = true,
-        ),
-        Service(
-            id = "primevideo",
-            name = "Prime Video",
-            startUrl = if (route == "US") "https://www.amazon.com/gp/video/storefront" else "https://www.primevideo.com/",
-            historyUrl = if (route == "US") {
-                "https://www.amazon.com/gp/video/settings/watch-history"
-            } else {
-                "https://www.primevideo.com/settings/watch-history/"
-            },
-            hosts = listOf("primevideo.com", "amazon.com", "amazon.co.uk", "amazon.de"),
-            script = Scripts.PRIME,
-            experimental = true,
-            note = "Pagina „Istoric vizionări”: filme și episoade, cu data. Fără minut. Nou, încă neverificat pe TV.",
-        ),
-        unsupported("disney", "Disney+"),
-        unsupported("hbomax", "HBO Max"),
-        unsupported("skyshowtime", "SkyShowtime"),
-        unsupported("peacock", "Peacock"),
-    )
+internal enum class Service(val id: String, val label: String, val start: String, val history: String, val domains: List<String>) {
+    NETFLIX("netflix", "Netflix", NetflixRecent.BASE + "/login", NetflixRecent.HISTORY_URL, listOf("netflix.com")),
+    PRIME("primevideo", "Prime Video", "https://www.primevideo.com/", "https://www.primevideo.com/settings/watch-history/",
+        listOf("primevideo.com", "amazon.com", "amazon.co.uk", "amazon.de"));
 
-    private fun unsupported(id: String, name: String) = Service(
-        id = id,
-        name = name,
-        startUrl = null,
-        historyUrl = null,
-        hosts = emptyList(),
-        script = null,
-        experimental = false,
-        note = "Site-ul nu are o pagină de istoric pe care s-o putem citi. Ce vezi de acum încolo prinde AK Scrobbler.",
-    )
+    val script: String get() = if (this == NETFLIX) Scripts.NETFLIX else Scripts.PRIME
+
+    fun trusted(url: String): Boolean {
+        val uri = Uri.parse(url)
+        val host = uri.host ?: return false
+        return uri.scheme == "https" && domains.any { host == it || host.endsWith(".$it") }
+    }
+
+    fun isLogin(url: String): Boolean = Uri.parse(url).path?.let { it.contains("login", true) || it.contains("signin", true) } == true
 }
