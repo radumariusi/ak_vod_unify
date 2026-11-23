@@ -141,7 +141,7 @@ enum class TargetApp(
         "Sesiune media (titlu + minut)",
     ),
     APPLE_TV("appletv", "Apple TV", AppRole.OFFICIAL, listOf("com.apple.atve.androidtv.appletv"), listOf("appletv"), "Cititor de ecran (titlul și minutul din player)"),
-    VOYO("voyo", "VOYO", AppRole.OFFICIAL, emptyList(), listOf("voyo", "voyo.ro", "voyoro", "voyoromania")),
+    VOYO("voyo", "VOYO", AppRole.OFFICIAL, listOf("net.cme.voyo.ro.tvapp", "net.cme.voyo.ro"), listOf("voyo", "voyo.ro", "voyoro", "voyoromania")),
     PEACOCK("peacock", "Peacock", AppRole.OFFICIAL, listOf("com.peacocktv.peacockandroid"), listOf("peacock"), "Sesiune media (titlu + minut)"),
     TUBI("tubi", "Tubi", AppRole.OFFICIAL, listOf("com.tubitv"), listOf("tubi", "tubitv")),
     PLUTO("pluto", "Pluto TV", AppRole.OFFICIAL, listOf("tv.pluto.android"), listOf("plutotv")),

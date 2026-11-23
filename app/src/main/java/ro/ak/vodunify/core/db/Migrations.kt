@@ -15,4 +15,12 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
     }
 }
 
-val ALL_MIGRATIONS = arrayOf(MIGRATION_5_6)
+/** v7: istoricul păstrează aplicația și momentul redării, inclusiv după terminarea unui titlu. */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE watch_events ADD COLUMN appPackage TEXT")
+        db.execSQL("ALTER TABLE watch_events ADD COLUMN playbackAt INTEGER")
+    }
+}
+
+val ALL_MIGRATIONS = arrayOf(MIGRATION_5_6, MIGRATION_6_7)

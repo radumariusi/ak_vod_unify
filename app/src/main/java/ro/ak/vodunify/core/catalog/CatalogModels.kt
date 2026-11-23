@@ -2,6 +2,7 @@ package ro.ak.vodunify.core.catalog
 
 import kotlinx.serialization.Serializable
 import ro.ak.vodunify.core.prefs.Market
+import ro.ak.vodunify.core.playback.StreamingService
 
 enum class TitleKind(val path: String, val label: String) {
     MOVIE("movie", "Film"),
@@ -153,7 +154,13 @@ data class TitleDetails(
 )
 
 /** Un rând „Pe Netflix (RO)” din Acasă: serviciul tău, în biblioteca lui. */
-data class ServiceShelf(val name: String, val providerIds: Set<Int>, val market: Market)
+data class ServiceShelf(val service: StreamingService, val packageName: String, val market: Market)
+
+/** Lista furnizorilor pentru tipul de titlu și piața cerută are prioritate peste ID-urile de rezervă. */
+internal fun homeProviderIds(service: StreamingService, directory: List<ProviderInfo>?): Set<Int> =
+    directory?.filter { StreamingService.fromProvider(it.id, it.name) == service }
+        ?.mapTo(linkedSetOf()) { it.id }
+        ?: service.tmdbProviderIds
 
 data class PersonDetails(
     val id: Long,
@@ -180,7 +187,17 @@ data class StudioDetails(
 )
 
 @Serializable
-data class CatalogRow(val id: String, val title: String, val items: List<CatalogItem>)
+data class CatalogRow(
+    val id: String,
+    val title: String,
+    val items: List<CatalogItem>,
+    val serviceFallback: ServiceFallback? = null,
+)
+
+@Serializable
+data class ServiceFallback(val packageName: String, val reason: ServiceCatalogStatus)
+
+enum class ServiceCatalogStatus { NO_PROVIDER, NO_TITLES, UNAVAILABLE }
 
 @Serializable
 data class HomeCatalog(val hero: List<CatalogItem>, val rows: List<CatalogRow>)

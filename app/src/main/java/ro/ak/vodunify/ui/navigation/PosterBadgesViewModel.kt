@@ -4,12 +4,23 @@ import androidx.lifecycle.ViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.core.imdb.TitleImdbRatings
+import ro.ak.vodunify.core.playback.PlaybackPreferences
+import ro.ak.vodunify.core.playback.PlaybackSettings
+import ro.ak.vodunify.core.playback.PosterActivity
 import ro.ak.vodunify.core.playback.PosterBadge
+import ro.ak.vodunify.core.playback.PosterStage
+import ro.ak.vodunify.core.playback.PosterBadgeRequest
+import ro.ak.vodunify.core.playback.PosterBadgeSettings
 import ro.ak.vodunify.core.playback.PosterBadges
 import ro.ak.vodunify.core.playback.ServiceLogos
 import ro.ak.vodunify.core.playback.StreamingService
+import ro.ak.vodunify.core.reconcile.LibraryStatus
+import ro.ak.vodunify.core.tracking.TrackingRepository
 import javax.inject.Inject
 
 /**
@@ -20,12 +31,40 @@ import javax.inject.Inject
 @HiltViewModel
 class PosterBadgesViewModel @Inject constructor(
     private val badges: PosterBadges,
+    playback: PlaybackPreferences,
+    tracking: TrackingRepository,
     private val imdb: TitleImdbRatings,
     private val logos: ServiceLogos,
 ) : ViewModel() {
-    fun peekBadge(kind: TitleKind, id: Long): PosterBadge? = badges.peek(kind, id)
+    val playbackSettings = playback.settings
+    val activity = combine(tracking.library, tracking.seriesSummaries, tracking.completedPlaybackApps) { library, series, history ->
+        val byTitle = library.associateBy { it.titleKey }
+        buildMap {
+            (byTitle.keys + series.keys + history.keys).forEach { key ->
+                val entry = byTitle[key]
+                val summary = series[key]
+                val finished = history[key]
+                val resume = entry?.resume?.winner
+                val lastPlayback = resume?.takeIf { it.appPackage != null && it.updatedAt >= (finished?.at ?: 0L) }
+                    ?.appPackage ?: finished?.appPackage
+                val statuses = entry?.statuses.orEmpty()
+                val stage = when {
+                    LibraryStatus.IN_PROGRESS in statuses || LibraryStatus.UP_NEXT in statuses || summary != null -> PosterStage.IN_PROGRESS
+                    LibraryStatus.WATCHED in statuses || finished != null -> PosterStage.WATCHED
+                    else -> PosterStage.UNWATCHED
+                }
+                if (stage != PosterStage.UNWATCHED) {
+                    put(key, PosterActivity(stage, lastPlayback, finished?.appPackage, summary?.watched?.takeIf { resume == null }))
+                }
+            }
+        }
+    }.distinctUntilChanged().flowOn(Dispatchers.Default)
 
-    suspend fun badge(kind: TitleKind, id: Long): PosterBadge? = withContext(Dispatchers.Default) { badges.badge(kind, id) }
+    fun peekBadges(request: PosterBadgeRequest, playback: PlaybackSettings, prefs: PosterBadgeSettings): List<PosterBadge>? =
+        badges.peek(request, playback, prefs)
+
+    suspend fun badges(request: PosterBadgeRequest, playback: PlaybackSettings, prefs: PosterBadgeSettings): List<PosterBadge> =
+        withContext(Dispatchers.Default) { badges.badges(request, playback, prefs) }
 
     fun peekImdbRating(kind: TitleKind, id: Long): Double? = imdb.peek(kind, id)
 

@@ -50,7 +50,11 @@ data class WatchEventEntity(
     val source: String,
     @Embedded val ref: TrackedRef,
     val watchedAt: Long,
+    val appPackage: String? = null,
+    val playbackAt: Long? = null,
 )
+
+data class TitlePlaybackApp(val mediaKey: String, val source: String, val appPackage: String?, val at: Long)
 
 /**
  * Puncte de reluare (playback): vizionări începute. Separate de istoric.

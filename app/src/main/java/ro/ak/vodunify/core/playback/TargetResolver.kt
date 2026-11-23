@@ -107,6 +107,8 @@ class TargetResolver @Inject constructor(@ApplicationContext private val context
         false
     }
 
+    fun launchApp(packageName: String): Boolean = launchIntent(packageName)?.let(::tryStart) ?: false
+
     private fun launchIntent(pkg: String): Intent? {
         val leanback = runCatching { pm.getLeanbackLaunchIntentForPackage(pkg) }.getOrNull()
         val normal = runCatching { pm.getLaunchIntentForPackage(pkg) }.getOrNull()

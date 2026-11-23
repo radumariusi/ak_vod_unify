@@ -62,7 +62,7 @@ import ro.ak.vodunify.ui.components.readable
 private enum class SettingsCategory(val title: String, val subtitle: String) {
     APP("Aplicație", "Versiune, actualizări, aplicațiile AK"),
     CATALOG("Catalog", "Limba titlurilor, note IMDb (cheie OMDb)"),
-    INTERFACE("Interfață", "Derularea în Acasă, aspectul Listei mele"),
+    INTERFACE("Interfață", "Derulare, Lista mea și iconițe pe postere"),
     APPS("Aplicații și servicii", "Ce citim din fiecare, biblioteci RO/US, playere"),
     PLAYBACK("Redare", "Player standard, unde se deschid serviciile"),
     SCROBBLER("AK Scrobbler", "Continuă vizionarea, automat"),
@@ -171,7 +171,10 @@ private fun CategoryContent(cat: SettingsCategory, viewModel: SettingsViewModel,
                 OmdbKeySection()
                 CatalogCategory(viewModel)
             }
-            SettingsCategory.INTERFACE -> InterfaceCategory()
+            SettingsCategory.INTERFACE -> {
+                InterfaceCategory()
+                PosterBadgesSection()
+            }
             SettingsCategory.APPS -> AppsSection()
             SettingsCategory.PLAYBACK -> PlaybackSection()
             SettingsCategory.SCROBBLER -> ScrobblerSection()

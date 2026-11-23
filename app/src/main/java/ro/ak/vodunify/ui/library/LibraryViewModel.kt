@@ -52,7 +52,9 @@ data class LibraryUiState(
 
 /** Un rând din Lista mea (aspectul pe rânduri). */
 @kotlinx.serialization.Serializable
-data class LibraryRow(val title: String, val items: List<LibraryItem>)
+data class LibraryRow(val title: String, val items: List<LibraryItem>) {
+    val key: String get() = title.substringBefore(" (")
+}
 
 /** Lista mea: tot ce știe baza locală (AK Scrobbler, importuri; plus trackerii externi când sunt activi), reconciliat. */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -100,17 +102,19 @@ class LibraryViewModel @Inject constructor(
                         val art = art(kind, e.ref.tmdbId, input.settings)
                         val series = input.series[e.titleKey]?.takeIf { kind == TitleKind.TV }
                         val total = totals[e.titleKey]
+                        val stage = LibraryLogic.posterStage(e, tab)
                         val seriesProgress = if (series != null && total != null && total > 0) minOf(1f, series.watched.toFloat() / total) else null
                         LibraryItem(
                             key = e.titleKey,
                             kind = kind,
                             tmdbId = e.ref.tmdbId,
                             title = art?.title ?: e.ref.title.ifBlank { "Titlu necunoscut" },
-                            subtitle = series?.let { LibraryLogic.seriesLabel(it, total) } ?: LibraryLogic.subtitle(e, tab),
+                            subtitle = series?.let { LibraryLogic.seriesLabel(it, total, stage) } ?: LibraryLogic.subtitle(e, tab),
                             posterUrl = art?.posterUrl,
                             progress = seriesProgress ?: LibraryLogic.progress(e, tab),
                             showsProgress = seriesProgress != null || LibraryLogic.showsProgress(e, tab),
                             sources = e.sources.sorted().map { names[it] ?: it },
+                            posterStage = stage,
                         )
                     }
                 }.awaitAll()

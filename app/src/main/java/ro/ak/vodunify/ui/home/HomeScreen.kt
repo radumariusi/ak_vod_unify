@@ -58,9 +58,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.delay
+import ro.ak.vodunify.core.catalog.CatalogRow
 import ro.ak.vodunify.core.catalog.CatalogItem
+import ro.ak.vodunify.core.catalog.ServiceCatalogStatus
+import ro.ak.vodunify.ui.components.AppIconBadge
+import ro.ak.vodunify.ui.components.SectionTitle
+import ro.ak.vodunify.ui.components.peekRow
 import ro.ak.vodunify.core.catalog.HomeCatalog
 import ro.ak.vodunify.ui.components.AttributionNote
 import ro.ak.vodunify.ui.components.ErrorPanel
@@ -85,6 +93,7 @@ import ro.ak.vodunify.ui.navigation.LocalCatalogActions
 @Composable
 fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshApps() }
     val personal by viewModel.personal.collectAsStateWithLifecycle()
     val sync by viewModel.syncStatus.collectAsStateWithLifecycle()
     val personalRows = remember(personal, sync, viewModel) { personalHomeRows(personal, sync, viewModel::syncNow) }
@@ -167,7 +176,11 @@ private fun HomeContent(
             val listHeight = maxHeight - heroHeight
             val animate by UiPrefs.rowAnimation.collectAsStateWithLifecycle()
             val rows = remember(slot, listState, scope) { HomeRows(slot, listState, scope) }
-            val allRows = personalRows + catalog.rows.map { row -> HomeRow(row.id, row.items.isNotEmpty()) { TitleRow(row.title, row.items) } }
+            val allRows = personalRows + catalog.rows.map { row ->
+                HomeRow(row.id, row.items.isNotEmpty() || row.serviceFallback != null) {
+                    CatalogHomeRow(row, viewModel::openService)
+                }
+            }
             val keys = allRows.map { row -> row.key.takeIf { row.focusable } }
             Column(Modifier.fillMaxSize()) {
                 Hero(
@@ -209,8 +222,42 @@ private fun HomeContent(
                 item(key = "hero") { Hero(catalog.hero, viewModel, spec.heroHeight, Modifier.fillMaxWidth().height(spec.heroHeight)) }
             }
             items(personalRows, key = { it.key }) { it.content() }
-            items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
+            items(catalog.rows, key = { it.id }) { row -> CatalogHomeRow(row, viewModel::openService) }
             item(key = "attribution") { AttributionNote() }
+        }
+    }
+}
+
+@Composable
+private fun CatalogHomeRow(row: CatalogRow, openService: (String) -> Boolean) {
+    val fallback = row.serviceFallback
+    if (fallback == null) {
+        TitleRow(row.title, row.items)
+        return
+    }
+    val context = LocalContext.current
+    val padding = layoutSpec().screenPadding
+    Column(Modifier.peekRow()) {
+        SectionTitle(row.title)
+        Column(
+            Modifier.padding(horizontal = padding, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Button(onClick = {
+                if (!openService(fallback.packageName)) {
+                    android.widget.Toast.makeText(context, "Aplicația nu a putut fi deschisă.", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }) {
+                AppIconBadge(fallback.packageName, fallbackLabel = row.title)
+                Spacer(Modifier.width(8.dp))
+                Text("Deschide aplicația")
+            }
+            val status = when (fallback.reason) {
+                ServiceCatalogStatus.NO_PROVIDER -> "TMDb nu listează serviciul în această bibliotecă."
+                ServiceCatalogStatus.NO_TITLES -> "TMDb nu listează momentan titluri pentru această bibliotecă."
+                ServiceCatalogStatus.UNAVAILABLE -> "Catalogul nu s-a putut încărca acum."
+            }
+            Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

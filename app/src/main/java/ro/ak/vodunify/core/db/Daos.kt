@@ -36,9 +36,16 @@ interface TrackingDao {
     suspend fun upsertResumeIfNewer(item: ResumePointEntity): Boolean {
         val current = resumeById(item.id)
         if (current != null && current.updatedAt > item.updatedAt) return false
+        if (hasWatchAtOrAfter(item.source, item.ref.mediaKey, item.ref.season, item.ref.episode, item.updatedAt)) return false
         upsertResume(listOf(item.copy(appPackage = item.appPackage ?: current?.appPackage)))
         return true
     }
+
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM watch_events WHERE source = :source AND mediaKey = :key " +
+            "AND season IS :season AND episode IS :episode AND watchedAt >= :at)",
+    )
+    suspend fun hasWatchAtOrAfter(source: String, key: String, season: Int?, episode: Int?, at: Long): Boolean
 
     @Query("DELETE FROM resume_points WHERE id = :id AND updatedAt <= :at")
     suspend fun deleteResumeByIdBefore(id: String, at: Long)
@@ -147,6 +154,20 @@ interface TrackingDao {
             "WHERE x.source = w.source AND x.mediaKey = w.mediaKey AND x.season IS w.season AND x.episode IS w.episode)",
     )
     fun latestWatches(): Flow<List<WatchEventEntity>>
+
+    @Query(
+        "SELECT mediaKey, source, appPackage, MAX(COALESCE(playbackAt, watchedAt)) AS at FROM watch_events " +
+            "WHERE (source = :local AND appPackage IS NOT NULL AND playbackAt IS NOT NULL) OR source IN (:imports) " +
+            "GROUP BY mediaKey",
+    )
+    fun latestPlaybackApps(local: String, imports: List<String>): Flow<List<TitlePlaybackApp>>
+
+    @Transaction
+    suspend fun completePlayback(resumeId: String, event: WatchEventEntity, watched: WatchedTitleEntity?) {
+        insertHistory(listOf(event))
+        if (watched != null) upsertWatched(listOf(watched))
+        deleteResumeByIdBefore(resumeId, event.watchedAt)
+    }
 
     /** Șterge vizionările unei surse pentru un film/serial (season/episode null) sau un episod anume. */
     @Query("DELETE FROM watch_events WHERE source = :source AND mediaKey = :mediaKey AND season IS :season AND episode IS :episode")

@@ -3,6 +3,7 @@ package ro.ak.vodunify.ui.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -20,12 +21,15 @@ import ro.ak.vodunify.core.catalog.CatalogItem
 import ro.ak.vodunify.core.catalog.CatalogRepository
 import ro.ak.vodunify.core.catalog.HomeCatalog
 import ro.ak.vodunify.core.catalog.ServiceShelf
+import ro.ak.vodunify.core.playback.AppRegistry
+import ro.ak.vodunify.core.playback.InstalledApp
 import ro.ak.vodunify.core.playback.PlaybackPreferences
 import ro.ak.vodunify.core.playback.StreamingService
 import ro.ak.vodunify.core.playback.TargetResolver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.filterNotNull
 import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.core.catalog.MovieReleaseEvent
 import ro.ak.vodunify.core.catalog.ReleaseChannel
@@ -66,6 +70,18 @@ class HomeViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val reload = MutableStateFlow(0)
+    private val installed = MutableStateFlow<Map<TargetApp, InstalledApp>?>(null)
+    private var refreshInstalled: Job? = null
+
+    fun refreshApps() {
+        refreshInstalled?.cancel()
+        refreshInstalled = viewModelScope.launch {
+            val apps = withContext(Dispatchers.IO) { runCatching { resolver.installedApps() }.getOrNull() }
+            installed.value = apps ?: installed.value.orEmpty()
+        }
+    }
+
+    fun openService(packageName: String): Boolean = resolver.launchApp(packageName)
 
     // Acasă apare pe loc cu ultimul ecran știut (din memorie sau de pe disc), apoi se reîmprospătează în fundal.
     // Fără „Se încarcă…” la fiecare revenire pe filă: rândurile rămân pe ecran cât se cer datele noi.
@@ -268,6 +284,7 @@ class HomeViewModel @Inject constructor(
     }
 
     init {
+        viewModelScope.launch { AppRegistry.version.collectLatest { refreshApps() } }
         val initialSnapshot = viewModelScope.launch {
             snapshots.load()?.let { snap ->
                 if (_state.value is LoadState.Loading) snap.catalog?.let { _state.value = LoadState.Data(it) }
@@ -276,17 +293,19 @@ class HomeViewModel @Inject constructor(
         }
         viewModelScope.launch {
             initialSnapshot.join()
-            combine(prefs.settings, playbackPrefs.settings, reload) { s, p, _ -> s to p }.collectLatest { (settings, playback) ->
-                val result = loadCatching {
-                    val installed = withContext(Dispatchers.IO) { runCatching { resolver.installedApps().keys }.getOrDefault(emptySet()) }
-                    val shelves = StreamingService.owned(installed).map {
-                        ServiceShelf(it.displayName, it.tmdbProviderIds, playback.marketOf(it))
-                    }
-                    catalog.home(settings, shelves)
+            combine(prefs.settings, playbackPrefs.settings, installed.filterNotNull(), reload) { s, p, apps, _ ->
+                val shelves = StreamingService.owned(apps.keys).mapNotNull { service ->
+                    val app = TargetApp.byId(service.appId)?.let(apps::get) ?: return@mapNotNull null
+                    ServiceShelf(service, app.packageName, p.marketOf(service))
                 }
+                s to shelves
+            }.collectLatest { (settings, shelves) ->
+                val result = loadCatching { catalog.home(settings, shelves) }
                 if (result is LoadState.Data) {
-                    _state.value = result
-                    snapshots.saveCatalog(result.value)
+                    val previous = (_state.value as? LoadState.Data)?.value
+                    val catalog = mergeSavedCatalog(result.value, previous)
+                    _state.value = LoadState.Data(catalog)
+                    snapshots.saveCatalog(catalog)
                 } else if (_state.value !is LoadState.Data) {
                     // O eroare nu șterge rândurile deja afișate.
                     _state.value = result

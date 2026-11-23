@@ -8,9 +8,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import ro.ak.vodunify.ui.components.PlatformBadge
-import ro.ak.vodunify.ui.components.PosterBottomRow
 import ro.ak.vodunify.ui.components.Dropdown
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -24,9 +24,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import ro.ak.vodunify.core.prefs.LibraryLayout
 import ro.ak.vodunify.ui.components.DefaultScroll
-import ro.ak.vodunify.ui.components.PivotScroll
+import ro.ak.vodunify.core.prefs.UiPrefs
+import ro.ak.vodunify.ui.components.FixedRowsScroll
+import ro.ak.vodunify.ui.components.HomeRowFocus
+import ro.ak.vodunify.ui.components.HomeRows
+import ro.ak.vodunify.ui.components.LocalHomeRows
+import ro.ak.vodunify.ui.components.KeepFocusedContentVisible
 import ro.ak.vodunify.ui.components.SectionTitle
 import ro.ak.vodunify.ui.components.rowSpacing
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -41,6 +48,10 @@ import androidx.compose.material3.MaterialTheme
 import ro.ak.vodunify.ui.components.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,82 +83,84 @@ fun LibraryScreen(viewModel: LibraryViewModel = hiltViewModel()) {
         LibraryRows(state, status, viewModel)
         return
     }
-    LazyVerticalGrid(
-        columns = GridCells.FixedSize(spec.posterWidth),
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 12.dp),
-        // Aceeași distanță între postere ca în rândurile din Acasă.
-        horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
-        verticalArrangement = Arrangement.spacedBy(rowSpacing()),
-    ) {
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Fără titlul „Lista mea” (e deja fila curentă din meniu).
-                if (ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        if (status is SyncStatus.Running) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        if (state.connected) {
-                            OutlinedButton(onClick = viewModel::syncNow, enabled = status !is SyncStatus.Running) { Text("Sincronizează") }
+    KeepFocusedContentVisible(spec.isTv) {
+        LazyVerticalGrid(
+            columns = GridCells.FixedSize(spec.posterWidth),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 12.dp),
+            // Aceeași distanță între postere ca în rândurile din Acasă.
+            horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
+            verticalArrangement = Arrangement.spacedBy(rowSpacing()),
+        ) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Fără titlul „Lista mea” (e deja fila curentă din meniu).
+                    if (ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            if (status is SyncStatus.Running) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                            if (state.connected) {
+                                OutlinedButton(onClick = viewModel::syncNow, enabled = status !is SyncStatus.Running) { Text("Sincronizează") }
+                            }
                         }
                     }
-                }
-                (status as? SyncStatus.Failed)?.let {
-                    Text(it.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Dropdown(
-                        label = null,
-                        value = state.filter.tab,
-                        options = LibraryTab.visible,
-                        optionLabel = { "Arată: ${it.label}" },
-                        onSelect = viewModel::selectTab,
-                        dialogTitle = "Ce arăți",
-                    )
-                    if (state.sources.size > 1 || state.filter.source != null) {
-                        val options = listOf<String?>(null) + state.sources.map { it.id }
-                        val labels = state.sources.associate { it.id to it.label }
+                    (status as? SyncStatus.Failed)?.let {
+                        Text(it.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Dropdown(
                             label = null,
-                            value = state.filter.source,
-                            options = options,
-                            optionLabel = { id -> "Sursa: " + (if (id == null) "Toate" else labels[id] ?: id) + " (${state.counts[id] ?: 0})" },
-                            onSelect = viewModel::selectSource,
-                            dialogTitle = "Sursa",
+                            value = state.filter.tab,
+                            options = LibraryTab.visible,
+                            optionLabel = { "Arată: ${it.label}" },
+                            onSelect = viewModel::selectTab,
+                            dialogTitle = "Ce arăți",
                         )
+                        if (state.sources.size > 1 || state.filter.source != null) {
+                            val options = listOf<String?>(null) + state.sources.map { it.id }
+                            val labels = state.sources.associate { it.id to it.label }
+                            Dropdown(
+                                label = null,
+                                value = state.filter.source,
+                                options = options,
+                                optionLabel = { id -> "Sursa: " + (if (id == null) "Toate" else labels[id] ?: id) + " (${state.counts[id] ?: 0})" },
+                                onSelect = viewModel::selectSource,
+                                dialogTitle = "Sursa",
+                            )
+                        }
                     }
-                }
-                Text(
-                    when {
-                        state.total == 0 -> ""
-                        state.total > state.items.size -> "${state.items.size} din ${state.total} titluri"
-                        else -> "${state.total} titluri"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        when {
-            state.loading -> item(span = { GridItemSpan(maxLineSpan) }) {
-                Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-            }
-            !state.connected -> item(span = { GridItemSpan(maxLineSpan) }) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        "Conectează Trakt sau SIMKL ca să-ți vezi aici istoricul, progresul și lista „De văzut”, din toate sursele la un loc.",
+                        when {
+                            state.total == 0 -> ""
+                            state.total > state.items.size -> "${state.items.size} din ${state.total} titluri"
+                            else -> "${state.total} titluri"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Button(onClick = actions.openSettings) { Text("Deschide Setări") }
                 }
             }
-            state.items.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
-                Text(
-                    if (status is SyncStatus.Running) "Se sincronizează…" else "Nimic aici pentru filtrul ales.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+
+            when {
+                state.loading -> item(span = { GridItemSpan(maxLineSpan) }) {
+                    Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                }
+                !state.connected -> item(span = { GridItemSpan(maxLineSpan) }) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            "Conectează Trakt sau SIMKL ca să-ți vezi aici istoricul, progresul și lista „De văzut”, din toate sursele la un loc.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Button(onClick = actions.openSettings) { Text("Deschide Setări") }
+                    }
+                }
+                state.items.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
+                    Text(
+                        if (status is SyncStatus.Running) "Se sincronizează…" else "Nimic aici pentru filtrul ales.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                else -> items(state.items, key = { it.key }) { item -> LibraryCard(item) }
             }
-            else -> items(state.items, key = { it.key }) { item -> LibraryCard(item) }
         }
     }
 }
@@ -157,49 +170,69 @@ fun LibraryScreen(viewModel: LibraryViewModel = hiltViewModel()) {
 private fun LibraryRows(state: LibraryUiState, status: SyncStatus, viewModel: LibraryViewModel) {
     val spec = layoutSpec()
     val actions = LocalCatalogActions.current
-    PivotScroll(pivot = 54.dp, enabled = spec.isTv) {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 8.dp, bottom = 120.dp)) {
-            // Fără titlul „Lista mea” deasupra primului rând (e deja fila curentă din meniu).
-            if (ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED) {
-                item(key = "header") {
-                    Row(
-                        Modifier.padding(horizontal = spec.screenPadding),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        if (status is SyncStatus.Running) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        if (state.connected) {
-                            OutlinedButton(onClick = viewModel::syncNow, enabled = status !is SyncStatus.Running) { Text("Sincronizează") }
+    val list = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val header = ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED
+    val rowHeight = spec.posterHeight + 60.dp
+    val rows = remember(rowHeight, list, scope) { HomeRows(rowHeight, list, scope) }
+    val animate by UiPrefs.rowAnimation.collectAsStateWithLifecycle()
+    val keys = remember(state.rows, header) {
+        (if (header) listOf<String?>(null) else emptyList()) + state.rows.map { it.key }
+    }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val bottom = if (spec.isTv) (maxHeight - rowHeight).coerceAtLeast(24.dp) else 24.dp
+        FixedRowsScroll(spec.isTv) {
+            CompositionLocalProvider(LocalHomeRows provides rows.takeIf { spec.isTv }) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize().onPreviewKeyEvent { spec.isTv && rows.move(it, keys, animate) },
+                    state = list,
+                    contentPadding = PaddingValues(bottom = bottom),
+                ) {
+                    // Fără titlul „Lista mea” deasupra primului rând (e deja fila curentă din meniu).
+                    if (header) {
+                        item(key = "header") {
+                            Row(
+                                Modifier.padding(horizontal = spec.screenPadding),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                if (status is SyncStatus.Running) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                                if (state.connected) {
+                                    OutlinedButton(onClick = viewModel::syncNow, enabled = status !is SyncStatus.Running) { Text("Sincronizează") }
+                                }
+                            }
                         }
                     }
-                }
-            }
-            when {
-                state.loading -> item(key = "loading") {
-                    Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                }
-                !state.connected -> item(key = "connect") {
-                    Column(Modifier.padding(horizontal = spec.screenPadding), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("Conectează Trakt sau SIMKL ca să-ți vezi aici istoricul.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Button(onClick = actions.openSettings) { Text("Deschide Setări") }
-                    }
-                }
-                state.rows.isEmpty() -> item(key = "empty") {
-                    Text(
-                        if (status is SyncStatus.Running) "Se sincronizează…" else "Nimic aici încă. Ce vezi, prin AK Scrobbler, apare aici.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = spec.screenPadding),
-                    )
-                }
-                else -> items(state.rows, key = { it.title.substringBefore(" (") }) { row ->
-                    Column {
-                        SectionTitle(row.title)
-                        DefaultScroll {
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 10.dp),
-                                horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
-                            ) {
-                                items(row.items, key = { it.key }) { LibraryCard(it, rowKey = row.title.substringBefore(" (")) }
+                    when {
+                        state.loading -> item(key = "loading") {
+                            Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                        }
+                        !state.connected -> item(key = "connect") {
+                            Column(Modifier.padding(horizontal = spec.screenPadding), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text("Conectează Trakt sau SIMKL ca să-ți vezi aici istoricul.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Button(onClick = actions.openSettings) { Text("Deschide Setări") }
+                            }
+                        }
+                        state.rows.isEmpty() -> item(key = "empty") {
+                            Text(
+                                if (status is SyncStatus.Running) "Se sincronizează…" else "Nimic aici încă. Ce vezi, prin AK Scrobbler, apare aici.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = spec.screenPadding),
+                            )
+                        }
+                        else -> itemsIndexed(state.rows, key = { _, row -> row.key }) { index, row ->
+                            HomeRowFocus(row.key, index + if (header) 1 else 0) {
+                                Column {
+                                    SectionTitle(row.title)
+                                    DefaultScroll {
+                                        LazyRow(
+                                            contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 10.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
+                                        ) {
+                                            items(row.items, key = { it.key }) { LibraryCard(it, rowKey = row.key) }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -208,6 +241,7 @@ private fun LibraryRows(state: LibraryUiState, status: SyncStatus, viewModel: Li
         }
     }
 }
+
 
 @Composable
 private fun LibraryCard(item: LibraryItem, rowKey: String = "library") {
@@ -218,6 +252,7 @@ private fun LibraryCard(item: LibraryItem, rowKey: String = "library") {
         onClick = { item.tmdbId?.let { actions.openTitle(item.kind, it) } },
         modifier = Modifier.wrapContentSize().size(spec.posterWidth, spec.posterHeight),
         restoreKey = "$rowKey|${item.key}",
+        focusScale = 1f,
         // OK ținut apăsat: meniul titlului (scoate din Lista mea, văzut / nevăzut, Continuă vizionarea).
         onLongClick = {
             item.tmdbId?.let { id ->
@@ -239,10 +274,13 @@ private fun LibraryCard(item: LibraryItem, rowKey: String = "library") {
         Box(Modifier.fillMaxSize().semantics { contentDescription = listOf(item.title, item.subtitle).filter { it.isNotBlank() }.joinToString(", ") }) {
             NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
             // Jos, ca pe toate posterele: sigla aplicației și eticheta (episodul / progresul).
-            PosterBottomRow(
+            PlatformBadge(
+                item.kind,
+                item.tmdbId,
                 Modifier.align(Alignment.BottomStart).padding(start = 4.dp, end = 4.dp, bottom = 8.dp),
+                stage = item.posterStage,
                 label = item.subtitle,
-            ) { PlatformBadge(item.kind, item.tmdbId) }
+            )
             if (item.showsProgress && item.progress != null) {
                 LinearProgressIndicator(
                     progress = { item.progress ?: 0f },

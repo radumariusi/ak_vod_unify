@@ -14,6 +14,7 @@ import kotlinx.serialization.json.Json
 import ro.ak.vodunify.core.catalog.HomeCatalog
 import ro.ak.vodunify.core.catalog.MovieReleaseEvent
 import ro.ak.vodunify.core.catalog.TitleReleases
+import ro.ak.vodunify.core.catalog.ServiceCatalogStatus
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -136,4 +137,18 @@ class HomeSnapshotStore @Inject constructor(@ApplicationContext context: Context
         val PACKAGES_TTL = TimeUnit.MINUTES.toMillis(5)
         val json = Json { ignoreUnknownKeys = true }
     }
+}
+
+/** O eroare temporară lasă disponibile titlurile deja încărcate pentru aceeași bibliotecă. */
+internal fun mergeSavedCatalog(current: HomeCatalog, saved: HomeCatalog?): HomeCatalog {
+    if (saved == null) return current
+    val oldRows = saved.rows.associateBy { it.id }
+    val rows = current.rows.map { row ->
+        val cached = oldRows[row.id]?.takeIf { it.items.isNotEmpty() }
+        if (row.serviceFallback?.reason == ServiceCatalogStatus.UNAVAILABLE && cached != null) cached else row
+    }
+    val general = if (rows.none { !it.id.startsWith("service_") } && current.hero.isEmpty()) {
+        saved.rows.filterNot { it.id.startsWith("service_") }
+    } else emptyList()
+    return current.copy(hero = current.hero.ifEmpty { if (general.isNotEmpty()) saved.hero else emptyList() }, rows = general + rows)
 }

@@ -88,6 +88,7 @@ import ro.ak.vodunify.ui.components.SectionTitle
 import ro.ak.vodunify.ui.components.TextButton
 import ro.ak.vodunify.ui.components.TitleBackdrop
 import ro.ak.vodunify.ui.components.TitleLogo
+import ro.ak.vodunify.ui.components.KeepFocusedContentVisible
 import ro.ak.vodunify.ui.components.TitleHero
 import ro.ak.vodunify.ui.components.tvTitleHeroHeight
 import ro.ak.vodunify.ui.components.TitleRow
@@ -208,54 +209,56 @@ private fun Overview(
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val heroHeight = if (spec.isTv) tvTitleHeroHeight(maxHeight, spec) else 0.dp
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().clipToBounds(),
-            contentPadding = PaddingValues(bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item(key = "hero") {
-                DetailsHero(details, heroHeight)
-            }
-            item(key = "header") {
-                Header(details, watch, Modifier.padding(horizontal = spec.screenPadding)) {
-                    PrimaryActions(watch, primaryFocus, onPlay, onChoose)
-                    if (isTvShow) {
-                        OutlinedButton(onClick = onEpisodes, modifier = Modifier.focusRequester(episodesFocus)) { Text("Episoade") }
-                    }
-                    if (connected) {
-                        val inList = track?.inMyList == true
-                        OutlinedButton(onClick = { viewModel.toggleWatchlist(details) }, active = inList) {
-                            Text(if (inList) "✓ În Lista mea" else "+ Lista mea")
+        KeepFocusedContentVisible(spec.isTv) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().clipToBounds(),
+                contentPadding = PaddingValues(bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item(key = "hero") {
+                    DetailsHero(details, heroHeight)
+                }
+                item(key = "header") {
+                    Header(details, watch, Modifier.padding(horizontal = spec.screenPadding)) {
+                        PrimaryActions(watch, primaryFocus, onPlay, onChoose)
+                        if (isTvShow) {
+                            OutlinedButton(onClick = onEpisodes, modifier = Modifier.focusRequester(episodesFocus)) { Text("Episoade") }
                         }
-                        // Starea, ca la Lista mea: „✓ Văzut” când e văzut, „Nevăzut” când nu; apăsarea o schimbă.
-                        if (details.item.kind == TitleKind.MOVIE) {
-                            WatchedToggle(track?.watched == true) { viewModel.toggleWatched(details) }
-                        } else if (isTvShow) {
-                            val seriesWatched = progress?.let { it.aired > 0 && it.completed >= it.aired } == true
-                            WatchedToggle(seriesWatched, watchedLabel = "✓ Serial văzut", unwatchedLabel = "Marchează serialul văzut") {
-                                viewModel.toggleSeries(details, seriesWatched)
+                        if (connected) {
+                            val inList = track?.inMyList == true
+                            OutlinedButton(onClick = { viewModel.toggleWatchlist(details) }, active = inList) {
+                                Text(if (inList) "✓ În Lista mea" else "+ Lista mea")
+                            }
+                            // Starea, ca la Lista mea: „✓ Văzut” când e văzut, „Nevăzut” când nu; apăsarea o schimbă.
+                            if (details.item.kind == TitleKind.MOVIE) {
+                                WatchedToggle(track?.watched == true) { viewModel.toggleWatched(details) }
+                            } else if (isTvShow) {
+                                val seriesWatched = progress?.let { it.aired > 0 && it.completed >= it.aired } == true
+                                WatchedToggle(seriesWatched, watchedLabel = "✓ Serial văzut", unwatchedLabel = "Marchează serialul văzut") {
+                                    viewModel.toggleSeries(details, seriesWatched)
+                                }
                             }
                         }
+                        TrailerButton(details)
                     }
-                    TrailerButton(details)
                 }
-            }
-            item(key = "status") {
-                Column(Modifier.padding(horizontal = spec.screenPadding), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    trackSummary(details.item.kind == TitleKind.MOVIE, track, progress)?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                item(key = "status") {
+                    Column(Modifier.padding(horizontal = spec.screenPadding), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        trackSummary(details.item.kind == TitleKind.MOVIE, track, progress)?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                        }
+                        message?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     }
-                    message?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 }
+                item(key = "info") { InfoLines(details, Modifier.padding(horizontal = spec.screenPadding)) }
+                item(key = "cast") { PersonRow("Distribuție", details.cast) }
+                item(key = "recs") { TitleRow("Recomandări", details.recommendations) }
+                item(key = "studios") { StudioRow(details.studios) }
+                item(key = "attribution") { AttributionNote() }
             }
-            item(key = "info") { InfoLines(details, Modifier.padding(horizontal = spec.screenPadding)) }
-            item(key = "cast") { PersonRow("Distribuție", details.cast) }
-            item(key = "recs") { TitleRow("Recomandări", details.recommendations) }
-            item(key = "studios") { StudioRow(details.studios) }
-            item(key = "attribution") { AttributionNote() }
         }
     }
 }

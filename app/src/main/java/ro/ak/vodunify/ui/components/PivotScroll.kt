@@ -157,7 +157,11 @@ val LocalHomeRows = staticCompositionLocalOf<HomeRows?> { null }
 
 /** Lista din Acasă (TV): nu se derulează singură după focus; rândurile se aduc sus prin [HomeRows]. */
 @Composable
-fun FixedRowsScroll(content: @Composable () -> Unit) {
+fun FixedRowsScroll(enabled: Boolean = true, content: @Composable () -> Unit) {
+    if (!enabled) {
+        content()
+        return
+    }
     val default = LocalBringIntoViewSpec.current
     val none = remember {
         object : BringIntoViewSpec {
@@ -165,6 +169,26 @@ fun FixedRowsScroll(content: @Composable () -> Unit) {
         }
     }
     CompositionLocalProvider(LocalBringIntoViewSpec provides none, LocalDefaultScroll provides default) { content() }
+}
+
+/** Focusul din Detalii derulează doar cât e necesar pentru a vedea elementul. */
+@Composable
+fun KeepFocusedContentVisible(enabled: Boolean, content: @Composable () -> Unit) {
+    if (!enabled) {
+        content()
+        return
+    }
+    val spec = remember {
+        object : BringIntoViewSpec {
+            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+                val end = offset + size
+                if (offset <= 0f && end >= containerSize) return 0f
+                if (offset < 0f) return offset
+                return (end - containerSize).coerceAtLeast(0f)
+            }
+        }
+    }
+    CompositionLocalProvider(LocalBringIntoViewSpec provides spec, content = content)
 }
 
 /** În Acasă pe TV, toate rândurile de carduri ocupă același spațiu. */

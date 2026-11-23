@@ -23,6 +23,8 @@
 
     <!-- Alege unde vezi: aplicațiile-țintă trebuie să fie vizibile (Android 11+). -->
     <queries>
+        <package android:name="net.cme.voyo.ro.tvapp" />
+        <package android:name="net.cme.voyo.ro" />
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />

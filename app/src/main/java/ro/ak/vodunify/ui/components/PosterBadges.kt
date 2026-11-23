@@ -2,6 +2,8 @@ package ro.ak.vodunify.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -22,6 +24,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,7 +51,11 @@ import coil.compose.AsyncImage
 import ro.ak.vodunify.core.playback.AppRole
 import ro.ak.vodunify.core.playback.TargetApp
 import ro.ak.vodunify.core.catalog.TitleKind
+import ro.ak.vodunify.core.catalog.mediaKey
+import ro.ak.vodunify.core.playback.PosterActivity
 import ro.ak.vodunify.core.playback.PosterBadge
+import ro.ak.vodunify.core.playback.PosterBadgeRequest
+import ro.ak.vodunify.core.playback.PosterStage
 
 /*
  * Etichetele de pe postere (nota TMDb, sigla platformei, cinema, „S02E05 · 25 nov”) au aceeași formă:
@@ -218,8 +225,13 @@ fun ServiceLogoBadge(serviceId: String?, name: String, modifier: Modifier = Modi
     }
 }
 
-/** Cum află un poster sigla lui (platforma ta pe care e titlul sau playerul standard); dat de AppNavigation. */
-val LocalPosterBadge = staticCompositionLocalOf<TitleLookup<PosterBadge>?> { null }
+class PosterBadgeLookup(
+    val peek: (PosterBadgeRequest) -> List<PosterBadge>?,
+    val load: suspend (PosterBadgeRequest) -> List<PosterBadge>,
+)
+
+val LocalPosterBadge = staticCompositionLocalOf<PosterBadgeLookup?> { null }
+val LocalPosterActivity = compositionLocalOf<Map<String, PosterActivity>> { emptyMap() }
 
 /** O informație despre titlu: ce se știe deja din primul cadru, restul în fundal. */
 @Composable
@@ -232,11 +244,35 @@ private fun <T : Any> rememberTitleLookup(lookup: TitleLookup<T>?, kind: TitleKi
     return value
 }
 
-/** Sigla platformei / playerului pe un poster din catalog; nimic până se află (sau dacă nu e de unde). */
+/** Iconițele și eticheta intră pe rânduri suplimentare când posterul este îngust. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun PlatformBadge(kind: TitleKind, id: Long?, modifier: Modifier = Modifier) {
-    val badge = rememberTitleLookup(LocalPosterBadge.current, kind, id)
-    badge?.let { AppIconBadge(it.packageName, modifier, fallbackLabel = it.label) }
+fun PlatformBadge(
+    kind: TitleKind,
+    id: Long?,
+    modifier: Modifier = Modifier,
+    stage: PosterStage? = null,
+    label: String? = null,
+) {
+    val lookup = LocalPosterBadge.current
+    val activity = id?.let { LocalPosterActivity.current[mediaKey(kind, it)] }
+    val request = PosterBadgeRequest(kind, id, stage, activity)
+    var badges by remember(lookup, request) { mutableStateOf(lookup?.peek?.invoke(request).orEmpty()) }
+    if (lookup != null) LaunchedEffect(lookup, request) { badges = lookup.load(request) }
+    if (badges.isEmpty() && label.isNullOrBlank()) return
+    FlowRow(
+        modifier,
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        badges.forEach { badge ->
+            val iconModifier = Modifier.semantics { contentDescription = badge.label }
+            val pkg = badge.packageName
+            if (pkg == null) ServiceLogoBadge(badge.serviceId, badge.label, iconModifier)
+            else AppIconBadge(pkg, iconModifier, fallbackLabel = badge.label)
+        }
+        label?.takeIf { it.isNotBlank() }?.let { PosterLabel(it) }
+    }
 }
 
 /**
@@ -245,19 +281,30 @@ fun PlatformBadge(kind: TitleKind, id: Long?, modifier: Modifier = Modifier) {
  */
 sealed interface BadgeSpec {
     data class App(val packageName: String, val label: String? = null) : BadgeSpec
+    data class PlaybackSource(val packageName: String?) : BadgeSpec
+    data object InProgress : BadgeSpec
     data class Cinema(val region: String) : BadgeSpec
     data class Service(val serviceId: String?, val name: String) : BadgeSpec
     data class Label(val text: String) : BadgeSpec
 }
 
 @Composable
-fun TitleBadge(spec: BadgeSpec?, kind: TitleKind, id: Long?, modifier: Modifier = Modifier) {
+fun TitleBadge(spec: BadgeSpec?, kind: TitleKind, id: Long?, modifier: Modifier = Modifier, label: String? = null) {
     when (spec) {
-        null -> PlatformBadge(kind, id, modifier)
-        is BadgeSpec.App -> AppIconBadge(spec.packageName, modifier, fallbackLabel = spec.label)
-        is BadgeSpec.Cinema -> CinemaBadge(spec.region, modifier)
-        is BadgeSpec.Service -> ServiceLogoBadge(spec.serviceId, spec.name, modifier)
-        is BadgeSpec.Label -> PosterLabel(spec.text, modifier)
+        null -> PlatformBadge(kind, id, modifier, label = label)
+        BadgeSpec.InProgress -> PlatformBadge(kind, id, modifier, stage = PosterStage.IN_PROGRESS, label = label)
+        else -> PosterBottomRow(modifier, label) {
+            when (spec) {
+                is BadgeSpec.PlaybackSource -> spec.packageName?.let { pkg ->
+                    AppIconBadge(pkg, fallbackLabel = TargetApp.byPackage(pkg)?.displayName ?: pkg)
+                }
+                is BadgeSpec.App -> AppIconBadge(spec.packageName, fallbackLabel = spec.label)
+                is BadgeSpec.Cinema -> CinemaBadge(spec.region)
+                is BadgeSpec.Service -> ServiceLogoBadge(spec.serviceId, spec.name)
+                is BadgeSpec.Label -> PosterLabel(spec.text)
+                BadgeSpec.InProgress -> Unit
+            }
+        }
     }
 }
 

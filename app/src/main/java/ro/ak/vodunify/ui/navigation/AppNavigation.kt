@@ -7,7 +7,11 @@ import ro.ak.vodunify.R
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.Image
 import ro.ak.vodunify.core.catalog.TitleKind
-import ro.ak.vodunify.core.playback.PosterBadge
+import ro.ak.vodunify.core.playback.AppRegistry
+import ro.ak.vodunify.core.playback.PlaybackSettings
+import ro.ak.vodunify.core.prefs.UiPrefs
+import ro.ak.vodunify.ui.components.PosterBadgeLookup
+import ro.ak.vodunify.ui.components.LocalPosterActivity
 import ro.ak.vodunify.ui.components.LocalPosterBadge
 import ro.ak.vodunify.ui.components.LocalImdbRating
 import ro.ak.vodunify.ui.components.LocalServiceLogos
@@ -98,6 +102,7 @@ import ro.ak.vodunify.ui.theme.GlassIdle
 import ro.ak.vodunify.ui.theme.OnFocusFill
 import ro.ak.vodunify.ui.theme.PillShape
 import androidx.compose.ui.graphics.Brush
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import ro.ak.vodunify.ui.components.TitleMenuHost
 import ro.ak.vodunify.ui.components.TitleMenuViewModel
@@ -152,8 +157,15 @@ fun AppNavigation() {
     TitleMenuHost(titleMenu, onOpen = { kind, id -> nav.navigate(Routes.title(kind, id)) })
 
     val badgesModel: PosterBadgesViewModel = hiltViewModel()
-    val posterBadge = remember(badgesModel) {
-        TitleLookup(peek = badgesModel::peekBadge, load = { kind, id -> badgesModel.badge(kind, id) })
+    val playback by badgesModel.playbackSettings.collectAsStateWithLifecycle(initialValue = PlaybackSettings())
+    val badgeSettings by UiPrefs.posterBadges.collectAsStateWithLifecycle()
+    val posterActivity by badgesModel.activity.collectAsStateWithLifecycle(initialValue = emptyMap())
+    val registryVersion by AppRegistry.version.collectAsStateWithLifecycle()
+    val posterBadge = remember(badgesModel, playback, badgeSettings, registryVersion) {
+        PosterBadgeLookup(
+            peek = { badgesModel.peekBadges(it, playback, badgeSettings) },
+            load = { badgesModel.badges(it, playback, badgeSettings) },
+        )
     }
     val imdbRating = remember(badgesModel) {
         TitleLookup(peek = badgesModel::peekImdbRating, load = { kind, id -> badgesModel.imdbRating(kind, id) })
@@ -167,6 +179,7 @@ fun AppNavigation() {
 
     CompositionLocalProvider(
         LocalPosterBadge provides posterBadge,
+        LocalPosterActivity provides posterActivity,
         LocalImdbRating provides imdbRating,
         LocalServiceLogos provides serviceLogos,
         LocalCatalogActions provides actions,

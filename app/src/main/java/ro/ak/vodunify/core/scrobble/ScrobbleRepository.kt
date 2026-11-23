@@ -170,7 +170,7 @@ class ScrobbleRepository @Inject constructor(
         val progress = ScrobbleRules.progress(position, duration)
 
         if (ScrobbleRules.isFinished(progress, _watchedPercent.value / 100f)) {
-            markWatchedLocally(media, event.at)
+            markWatchedLocally(media, event.at, event.pkg)
             return done(ScrobbleResult.WATCHED, media, duration, position)
         }
         // Pauza / oprirea se publică (în modul automat); punctele intermediare doar se salvează.
@@ -281,17 +281,23 @@ class ScrobbleRepository @Inject constructor(
         }
     }
 
-    private suspend fun markWatchedLocally(media: MediaRef, at: Long) {
+    private suspend fun markWatchedLocally(media: MediaRef, at: Long, appPackage: String) {
         val key = "watched_${media.itemKey}"
+        val packageKey = "${key}_package"
         val last = prefs.getLong(key, 0L)
-        trackingDao.deleteResumeByIdBefore("$LOCAL_SOURCE|${media.itemKey}", at)
-        if (kotlin.math.abs(at - last) < TimeUnit.HOURS.toMillis(6)) return
-        val event = WatchEvent(media, Instant.ofEpochMilli(at), LOCAL_SOURCE)
-        trackingDao.insertHistory(listOf(TrackingEntities.history(event)))
-        if (at >= last) {
-            if (media.type != MediaType.EPISODE) trackingDao.upsertWatched(listOf(TrackingEntities.watched(event)))
-            prefs.edit().putLong(key, at).apply()
+        val lastPackage = prefs.getString(packageKey, null)
+        val resumeId = "$LOCAL_SOURCE|${media.itemKey}"
+        val duplicate = kotlin.math.abs(at - last) < TimeUnit.HOURS.toMillis(6) &&
+            (at <= last || lastPackage == appPackage)
+        if (duplicate) {
+            trackingDao.deleteResumeByIdBefore(resumeId, at)
+            return
         }
+        val event = WatchEvent(media, Instant.ofEpochMilli(at), LOCAL_SOURCE)
+        val history = TrackingEntities.history(event).copy(appPackage = appPackage, playbackAt = at)
+        val watched = if (at >= last && media.type != MediaType.EPISODE) TrackingEntities.watched(event) else null
+        trackingDao.completePlayback(resumeId, history, watched)
+        if (at >= last) prefs.edit().putLong(key, at).putString(packageKey, appPackage).apply()
     }
 
     private fun recordProof(event: ScrobbleEvent, fromServiceCode: Boolean, media: MediaRef) {

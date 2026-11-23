@@ -5,6 +5,7 @@ import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.core.connector.ExternalTrackers
 import ro.ak.vodunify.core.db.TrackedRef
 import ro.ak.vodunify.core.publish.LOCAL_SOURCE
+import ro.ak.vodunify.core.playback.PosterStage
 import ro.ak.vodunify.core.tracking.SeriesSummary
 import ro.ak.vodunify.core.reconcile.LibraryEntry
 import ro.ak.vodunify.core.reconcile.LibraryStatus
@@ -46,6 +47,7 @@ data class LibraryItem(
     val progress: Float?,
     val showsProgress: Boolean,
     val sources: List<String>,
+    val posterStage: PosterStage? = null,
 )
 
 /** Logica pură a bibliotecii (testabilă fără Android). */
@@ -89,9 +91,22 @@ object LibraryLogic {
     )
 
     /** Textul de progres al unui serial: „S2E3 · 12/24 episoade”. */
-    fun seriesLabel(s: SeriesSummary, total: Int?): String {
+    fun seriesLabel(s: SeriesSummary, total: Int?, stage: PosterStage = PosterStage.IN_PROGRESS): String {
+        if (stage == PosterStage.WATCHED && total != null && total > 0) return "${minOf(s.watched, total)}/$total"
+        if (stage == PosterStage.WATCHED) return "${s.watched} episoade văzute"
         val last = "S${s.lastSeason}E${s.lastEpisode}"
         return if (total != null && total > 0) "$last · ${minOf(s.watched, total)}/$total episoade" else "$last · ${s.watched} episoade văzute"
+    }
+
+    fun posterStage(entry: LibraryEntry, tab: LibraryTab): PosterStage = when (tab) {
+        LibraryTab.IN_PROGRESS, LibraryTab.UP_NEXT -> PosterStage.IN_PROGRESS
+        LibraryTab.WATCHED -> PosterStage.WATCHED
+        LibraryTab.WATCHLIST -> PosterStage.UNWATCHED
+        LibraryTab.ALL -> when {
+            LibraryStatus.IN_PROGRESS in entry.statuses || LibraryStatus.UP_NEXT in entry.statuses -> PosterStage.IN_PROGRESS
+            LibraryStatus.WATCHED in entry.statuses -> PosterStage.WATCHED
+            else -> PosterStage.UNWATCHED
+        }
     }
 
     fun filter(entries: List<LibraryEntry>, f: LibraryFilter): List<LibraryEntry> = entries.filter { e ->

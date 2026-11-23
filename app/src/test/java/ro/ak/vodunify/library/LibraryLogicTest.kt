@@ -9,6 +9,8 @@ import ro.ak.vodunify.core.connector.ResumePoint
 import ro.ak.vodunify.core.connector.WatchEvent
 import ro.ak.vodunify.core.connector.WatchlistEntry
 import ro.ak.vodunify.core.tracking.TrackingEntities
+import ro.ak.vodunify.core.tracking.SeriesSummary
+import ro.ak.vodunify.core.playback.PosterStage
 import ro.ak.vodunify.core.reconcile.reconcile
 import ro.ak.vodunify.ui.library.LibraryFilter
 import ro.ak.vodunify.ui.library.LibraryLogic
@@ -47,4 +49,17 @@ class LibraryLogicTest {
         val gotEntry = entries.first { it.titleKey == "tv:tmdb:1399" }
         assertEquals("S01E02", LibraryLogic.subtitle(gotEntry, LibraryTab.IN_PROGRESS))
     }
+    @Test fun watchedSeriesOnlyShowsEpisodeCount() {
+        val summary = SeriesSummary("Serial", 1399, null, 36, 3, 12, 0L)
+        assertEquals("36/36", LibraryLogic.seriesLabel(summary, 36, PosterStage.WATCHED))
+        assertEquals("S3E12 · 36/40 episoade", LibraryLogic.seriesLabel(summary, 40, PosterStage.IN_PROGRESS))
+    }
+
+    @Test fun posterUsesTheExplicitRowStatusAndFallsBackToTheMostActiveStatusInAll() {
+        val entry = entries.first { it.titleKey == "tv:tmdb:1399" }
+        assertEquals(PosterStage.IN_PROGRESS, LibraryLogic.posterStage(entry, LibraryTab.ALL))
+        assertEquals(PosterStage.WATCHED, LibraryLogic.posterStage(entry, LibraryTab.WATCHED))
+        assertEquals(PosterStage.UNWATCHED, LibraryLogic.posterStage(entry, LibraryTab.WATCHLIST))
+    }
+
 }

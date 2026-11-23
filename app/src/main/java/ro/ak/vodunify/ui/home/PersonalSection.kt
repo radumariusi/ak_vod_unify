@@ -42,12 +42,11 @@ import ro.ak.vodunify.ui.components.RatingChip
 import ro.ak.vodunify.ui.components.BadgeSpec
 import ro.ak.vodunify.ui.components.TitleBadge
 import ro.ak.vodunify.core.calendar.android.CALENDAR_TO_SERVICE
-import ro.ak.vodunify.ui.components.PlatformBadge
 import ro.ak.vodunify.ui.components.PosterRatings
-import ro.ak.vodunify.ui.components.PosterBottomRow
 import ro.ak.vodunify.ui.components.AppIconBadge
 import ro.ak.vodunify.ui.components.CinemaBadge
 import ro.ak.vodunify.core.catalog.ReleaseChannel
+import ro.ak.vodunify.core.catalog.TitleKind
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import ro.ak.vodunify.ui.components.LocalBackdrop
@@ -214,15 +213,13 @@ private fun WideCard(item: PersonalItem, rowKey: String) {
                     .fillMaxSize()
                     .background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to Color(0xCC000000))),
             )
-            // Fără text sub card. Jos: sigla aplicației în care ai văzut ultima dată (acolo continui standard,
-            // dacă nu alegi altceva), apoi episodul (S01E02) și procentul.
+            // Aplicația redării, episodul și procentul stau pe card.
             PosterRatings(item.kind, item.tmdbId, item.rating, Modifier.align(Alignment.TopStart).padding(6.dp))
-            PosterBottomRow(
+            TitleBadge(
+                wideBadge(item), item.kind, item.tmdbId,
                 Modifier.align(Alignment.BottomStart).padding(start = 6.dp, end = 6.dp, bottom = 10.dp),
                 label = item.subtitle,
-            ) {
-                TitleBadge(wideBadge(item), item.kind, item.tmdbId)
-            }
+            )
             if (item.showsProgress || item.progress != null) {
                 val p = item.progress
                 if (p != null) {
@@ -280,22 +277,27 @@ private fun PersonalPoster(item: PersonalItem, rowKey: String) {
             NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
             PosterRatings(item.kind, item.tmdbId, item.rating, Modifier.align(Alignment.TopStart).padding(4.dp))
             // Jos: unde apare (aplicația, cinema RO / SUA) lângă dată.
-            PosterBottomRow(Modifier.align(Alignment.BottomStart).padding(4.dp), label = item.subtitle) {
-                TitleBadge(releaseBadge(item), item.kind, item.tmdbId)
-            }
+            TitleBadge(
+                releaseBadge(item), item.kind, item.tmdbId,
+                Modifier.align(Alignment.BottomStart).padding(4.dp),
+                label = item.subtitle,
+            )
         }
     }
 }
 
-/** Cardurile „Continuă”: sigla aplicației în care ai văzut ultima dată, altfel sigla obișnuită a titlului. */
-private fun wideBadge(item: PersonalItem): BadgeSpec? = item.appPackage?.let { BadgeSpec.App(it) }
+private fun wideBadge(item: PersonalItem): BadgeSpec = BadgeSpec.PlaybackSource(item.appPackage)
 
 /**
  * Sigla posterelor din „În curând” / „Noutăți”: la filme, unde apare la data de jos (cinema România sau SUA,
  * aplicația serviciului de streaming ori „Digital”); altfel (null) sigla obișnuită a titlului.
  */
 private fun releaseBadge(item: PersonalItem): BadgeSpec? {
+    if (item.kind == TitleKind.TV && item.episodeCode != null) return BadgeSpec.InProgress
     val release = item.release ?: return null
+    if (release.channel == ReleaseChannel.STREAMING &&
+        item.eventDate?.let { it <= java.time.LocalDate.now().toString() } == true
+    ) return null
     val pkg = item.appPackage
     val service = release.serviceName
     return when (release.channel) {

@@ -13,7 +13,7 @@ import androidx.compose.ui.unit.dp
 
 private val TV_ROW_TITLE = 40.dp
 private val TV_CARD_PADDING = 20.dp
-private val TV_ROW_GAP = 12.dp
+private val TV_ROW_GAP = 18.dp
 
 /** Același loc pentru carduri landscape și portrait. Spațiul liber de sub ele revine zonei hero. */
 fun tvHomeRowHeight(spec: LayoutSpec): Dp =
@@ -39,7 +39,7 @@ fun TitleHero(
             .padding(horizontal = spec.screenPadding)
             .widthIn(max = 740.dp)
             .fillMaxWidth(if (spec.isCompact) 1f else 0.74f)
-            .padding(top = if (spec.isTv) 12.dp else 8.dp, bottom = 8.dp),
+            .padding(top = 8.dp, bottom = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         TitleLogo(

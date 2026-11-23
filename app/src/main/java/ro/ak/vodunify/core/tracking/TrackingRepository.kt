@@ -2,6 +2,8 @@ package ro.ak.vodunify.core.tracking
 
 import androidx.room.withTransaction
 
+import ro.ak.vodunify.core.imports.ImportSources
+import ro.ak.vodunify.core.playback.TargetApp
 import ro.ak.vodunify.core.publish.LOCAL_SOURCE
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -141,6 +143,18 @@ class TrackingRepository @Inject constructor(
     val upNext: Flow<List<UpNextEntity>> = reconciled.map { it.upNext }
 
     val watchlist: Flow<List<WatchlistEntity>> = reconciled.map { it.watchlist }
+
+    val completedPlaybackApps = dao.latestPlaybackApps(LOCAL_SOURCE, listOf(ImportSources.NETFLIX, ImportSources.PRIME_VIDEO))
+        .map { list ->
+            list.associateBy({ it.mediaKey }) { app ->
+                val importedPackage = when (app.source) {
+                    ImportSources.NETFLIX -> TargetApp.NETFLIX.packages.first()
+                    ImportSources.PRIME_VIDEO -> TargetApp.PRIME_VIDEO.packages.first()
+                    else -> null
+                }
+                app.copy(appPackage = app.appPackage ?: importedPackage)
+            }
+        }
 
     val library: Flow<List<LibraryEntry>> = reconciled.map { it.library }
 
@@ -331,11 +345,19 @@ class TrackingRepository @Inject constructor(
     private suspend fun setWatchedLocally(media: MediaRef, watched: Boolean): Int {
         val now = Instant.now()
         if (watched) {
-            val event = WatchEvent(media, now, LOCAL_SOURCE)
-            dao.insertHistory(listOf(TrackingEntities.history(event)))
-            if (media.type != MediaType.EPISODE) dao.upsertWatched(listOf(TrackingEntities.watched(event)))
-            dao.deleteResumeById("$LOCAL_SOURCE|${media.itemKey}")
-            if (media.type == MediaType.MOVIE) dao.removeFromWatchlist(media.titleKey)
+            db.withTransaction {
+                val event = WatchEvent(media, now, LOCAL_SOURCE)
+                val id = "$LOCAL_SOURCE|${media.itemKey}"
+                val resume = dao.resumeById(id)
+                val entry = TrackingEntities.history(event).copy(
+                    appPackage = resume?.appPackage,
+                    playbackAt = resume?.updatedAt,
+                )
+                dao.insertHistory(listOf(entry))
+                if (media.type != MediaType.EPISODE) dao.upsertWatched(listOf(TrackingEntities.watched(event)))
+                dao.deleteResumeById(id)
+                if (media.type == MediaType.MOVIE) dao.removeFromWatchlist(media.titleKey)
+            }
         } else {
             // Din toate sursele (AK Scrobbler, Netflix, Trakt importat), altfel titlurile importate rămân „văzute”.
             when (media.type) {
@@ -361,11 +383,13 @@ class TrackingRepository @Inject constructor(
                 .toSet()
             // Câte o milisecundă între ele, ca ordinea episoadelor să rămână în istoric; cele deja văzute rămân cum sunt.
             val fresh = episodes.filter { it !in existing }
+            val resumes = dao.resumeFor(show.titleKey).first().associateBy { it.id }
             dao.insertHistory(
                 fresh.mapIndexed { i, n ->
-                    TrackingEntities.history(
-                        WatchEvent(base.copy(season = n.season, episode = n.episode), Instant.ofEpochMilli(now - fresh.size + i), LOCAL_SOURCE),
-                    )
+                    val episode = base.copy(season = n.season, episode = n.episode)
+                    val resume = resumes["$LOCAL_SOURCE|${episode.itemKey}"]
+                    val event = WatchEvent(episode, Instant.ofEpochMilli(now - fresh.size + i), LOCAL_SOURCE)
+                    TrackingEntities.history(event).copy(appPackage = resume?.appPackage, playbackAt = resume?.updatedAt)
                 },
             )
             episodes.forEach { n -> dao.deleteResumeById("$LOCAL_SOURCE|${base.copy(season = n.season, episode = n.episode).itemKey}") }
