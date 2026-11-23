@@ -52,6 +52,7 @@ class DetailsViewModel @Inject constructor(
     playbackPrefs: PlaybackPreferences,
     private val resolver: TargetResolver,
     private val calendar: CalendarRepository,
+    private val seriesMarker: ro.ak.vodunify.core.tracking.SeriesMarker,
 ) : ViewModel() {
 
     val kind: TitleKind = TitleKind.fromPath(savedState.get<String>("kind")) ?: TitleKind.MOVIE
@@ -174,7 +175,7 @@ class DetailsViewModel @Inject constructor(
     }
 
     fun toggleWatchlist(details: TitleDetails) {
-        val inList = trackState.value?.inWatchlist == true
+        val inList = trackState.value?.inMyList == true
         act(if (inList) "Scos din Lista mea" else "Adăugat în Lista mea (De văzut)") {
             tracking.setInWatchlist(ref(details), !inList)
         }
@@ -200,6 +201,22 @@ class DetailsViewModel @Inject constructor(
                 _showProgress.value = p.copy(watched = if (watched) p.watched - number else p.watched + number)
             }
             tracking.refreshUpNext(show)
+            _showProgress.value = runCatching { progressFor(details) }.getOrNull() ?: _showProgress.value
+        }
+    }
+
+    /** Tot sezonul (episoadele apărute) văzut / nevăzut. */
+    fun toggleSeason(details: TitleDetails, season: Int, watched: Boolean) {
+        act(if (watched) "Sezonul $season marcat ca nevăzut" else "Sezonul $season marcat ca văzut") {
+            seriesMarker.mark(details.item.id, details.item.title, details.item.year, details.imdbId, !watched, listOf(season))
+            _showProgress.value = runCatching { progressFor(details) }.getOrNull() ?: _showProgress.value
+        }
+    }
+
+    /** Tot serialul (episoadele apărute) văzut / nevăzut. */
+    fun toggleSeries(details: TitleDetails, watched: Boolean) {
+        act(if (watched) "Serialul marcat ca nevăzut" else "Serialul marcat ca văzut") {
+            seriesMarker.mark(details.item.id, details.item.title, details.item.year, details.imdbId, !watched)
             _showProgress.value = runCatching { progressFor(details) }.getOrNull() ?: _showProgress.value
         }
     }

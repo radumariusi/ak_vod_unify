@@ -13,7 +13,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.onEach
+import ro.ak.vodunify.core.tracking.HiddenTitles
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
@@ -31,12 +35,13 @@ import ro.ak.vodunify.core.tracking.TrackingRepository
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 
+@kotlinx.serialization.Serializable
 data class LibraryUiState(
     val loading: Boolean = true,
     val connected: Boolean = false,
     val filter: LibraryFilter = LibraryFilter(),
     val sources: List<SourceOption> = emptyList(),
-    val counts: Map<String?, Int> = emptyMap(),
+    @kotlinx.serialization.Transient val counts: Map<String?, Int> = emptyMap(),
     val items: List<LibraryItem> = emptyList(),
     val total: Int = 0,
     /** Aspectul ales în Setări → Interfață. */
@@ -46,6 +51,7 @@ data class LibraryUiState(
 )
 
 /** Un rând din Lista mea (aspectul pe rânduri). */
+@kotlinx.serialization.Serializable
 data class LibraryRow(val title: String, val items: List<LibraryItem>)
 
 /** Lista mea: tot ce știe baza locală (AK Scrobbler, importuri; plus trackerii externi când sunt activi), reconciliat. */
@@ -55,6 +61,7 @@ class LibraryViewModel @Inject constructor(
     private val tracking: TrackingRepository,
     private val catalog: CatalogRepository,
     prefs: CatalogPreferences,
+    private val snapshots: LibrarySnapshotStore,
 ) : ViewModel() {
 
     private val filter = MutableStateFlow(LibraryFilter())
@@ -62,13 +69,16 @@ class LibraryViewModel @Inject constructor(
         ro.ak.vodunify.core.imports.ImportSources.labels +
         (ro.ak.vodunify.core.publish.LOCAL_SOURCE to LOCAL_LABEL)
 
-    val state: StateFlow<LibraryUiState> = combine(
+    /** S-a calculat deja starea reală (atunci instantaneul de pe disc nu mai contează). */
+    @Volatile private var computed = false
+
+    private val fresh = combine(
         tracking.library,
         tracking.seriesSummaries,
-        combine(filter, UiPrefs.libraryLayout) { f, l -> f to l },
+        combine(filter, UiPrefs.libraryLayout, tracking.hiddenTitles) { f, l, h -> Triple(f, l, h) },
         if (ExternalTrackers.ENABLED) tracking.anyConnected else flowOf(true),
         prefs.settings,
-    ) { entries, series, fl, connected, settings -> Input(entries, series, fl.first, connected, settings, fl.second) }
+    ) { entries, series, flh, connected, settings -> Input(entries, series, flh.first, connected, settings, flh.second, flh.third) }
         .mapLatest { raw ->
             // Serialele din istoricul local: numărul de episoade din TMDb decide „În curs” / „Văzute”.
             val totals = coroutineScope {
@@ -78,7 +88,11 @@ class LibraryViewModel @Inject constructor(
                     .mapNotNull { (key, total) -> total?.let { key to it } }
                     .toMap()
             }
-            val input = raw.copy(entries = LibraryLogic.mergeSeries(raw.entries, raw.series, totals))
+            // Titlurile scoase de mână din Lista mea nu se arată (până le vezi din nou).
+            val input = raw.copy(
+                entries = LibraryLogic.mergeSeries(raw.entries, raw.series, totals)
+                    .filterNot { HiddenTitles.isHidden(raw.hidden, it.titleKey, it.lastActivityAt) },
+            )
             suspend fun toItems(list: List<ro.ak.vodunify.core.reconcile.LibraryEntry>, tab: LibraryTab): List<LibraryItem> = coroutineScope {
                 list.map { e ->
                     async {
@@ -133,7 +147,16 @@ class LibraryViewModel @Inject constructor(
                 rows = rows,
             )
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState())
+        .onEach {
+            computed = true
+            if (it.filter == LibraryFilter()) snapshots.save(it)
+        }
+
+    /** Pe loc ultimul ecran salvat (din memorie sau de pe disc), apoi cel calculat acum. */
+    val state: StateFlow<LibraryUiState> = merge(
+        flow { snapshots.load()?.let { if (!computed) emit(it) } },
+        fresh,
+    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), snapshots.memory ?: LibraryUiState())
 
     val syncStatus: StateFlow<SyncStatus> = tracking.status
 
@@ -144,6 +167,7 @@ class LibraryViewModel @Inject constructor(
         val connected: Boolean,
         val settings: CatalogSettings,
         val layout: LibraryLayout,
+        val hidden: Map<String, Long>,
     )
 
     fun selectTab(tab: LibraryTab) {
@@ -164,8 +188,6 @@ class LibraryViewModel @Inject constructor(
         viewModelScope.launch { tracking.syncIfStale() }
     }
 
-    private val artCache = ConcurrentHashMap<String, CatalogItem>()
-    private val artGate = Semaphore(6)
 
     private suspend fun art(kind: TitleKind, tmdbId: Long?, settings: CatalogSettings): CatalogItem? {
         if (tmdbId == null || !catalog.isConfigured) return null
@@ -177,6 +199,10 @@ class LibraryViewModel @Inject constructor(
     }
 
     private companion object {
+        /** Pe tot procesul: o redeschidere a Listei mele nu mai cere din nou posterele. */
+        val artCache = ConcurrentHashMap<String, CatalogItem>()
+        val artGate = Semaphore(6)
+
         const val LOCAL_LABEL = "AK Scrobbler"
 
         /** Afișăm primele 300; restul se văd filtrând. */

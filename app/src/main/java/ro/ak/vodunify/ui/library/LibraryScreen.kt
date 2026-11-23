@@ -73,7 +73,7 @@ fun LibraryScreen(viewModel: LibraryViewModel = hiltViewModel()) {
         return
     }
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(spec.posterWidth + 8.dp),
+        columns = GridCells.FixedSize(spec.posterWidth),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 12.dp),
         // Aceeași distanță între postere ca în rândurile din Acasă.
@@ -82,11 +82,13 @@ fun LibraryScreen(viewModel: LibraryViewModel = hiltViewModel()) {
     ) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Lista mea", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                    if (status is SyncStatus.Running) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    if (state.connected && ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED) {
-                        OutlinedButton(onClick = viewModel::syncNow, enabled = status !is SyncStatus.Running) { Text("Sincronizează") }
+                // Fără titlul „Lista mea” (e deja fila curentă din meniu).
+                if (ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (status is SyncStatus.Running) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        if (state.connected) {
+                            OutlinedButton(onClick = viewModel::syncNow, enabled = status !is SyncStatus.Running) { Text("Sincronizează") }
+                        }
                     }
                 }
                 (status as? SyncStatus.Failed)?.let {
@@ -157,16 +159,18 @@ private fun LibraryRows(state: LibraryUiState, status: SyncStatus, viewModel: Li
     val actions = LocalCatalogActions.current
     PivotScroll(pivot = 54.dp, enabled = spec.isTv) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 8.dp, bottom = 120.dp)) {
-            item(key = "header") {
-                Row(
-                    Modifier.padding(horizontal = spec.screenPadding),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text("Lista mea", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                    if (status is SyncStatus.Running) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    if (state.connected && ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED) {
-                        OutlinedButton(onClick = viewModel::syncNow, enabled = status !is SyncStatus.Running) { Text("Sincronizează") }
+            // Fără titlul „Lista mea” deasupra primului rând (e deja fila curentă din meniu).
+            if (ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED) {
+                item(key = "header") {
+                    Row(
+                        Modifier.padding(horizontal = spec.screenPadding),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        if (status is SyncStatus.Running) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        if (state.connected) {
+                            OutlinedButton(onClick = viewModel::syncNow, enabled = status !is SyncStatus.Running) { Text("Sincronizează") }
+                        }
                     }
                 }
             }
@@ -214,6 +218,23 @@ private fun LibraryCard(item: LibraryItem, rowKey: String = "library") {
         onClick = { item.tmdbId?.let { actions.openTitle(item.kind, it) } },
         modifier = Modifier.wrapContentSize().size(spec.posterWidth, spec.posterHeight),
         restoreKey = "$rowKey|${item.key}",
+        // OK ținut apăsat: meniul titlului (scoate din Lista mea, văzut / nevăzut, Continuă vizionarea).
+        onLongClick = {
+            item.tmdbId?.let { id ->
+                actions.titleMenu(
+                    ro.ak.vodunify.core.catalog.CatalogItem(
+                        id = id,
+                        kind = item.kind,
+                        title = item.title,
+                        year = null,
+                        overview = "",
+                        posterUrl = item.posterUrl,
+                        backdropUrl = null,
+                        rating = null,
+                    ),
+                )
+            }
+        },
     ) {
         Box(Modifier.fillMaxSize().semantics { contentDescription = listOf(item.title, item.subtitle).filter { it.isNotBlank() }.joinToString(", ") }) {
             NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)

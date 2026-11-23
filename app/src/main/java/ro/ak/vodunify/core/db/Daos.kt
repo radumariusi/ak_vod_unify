@@ -148,6 +148,21 @@ interface TrackingDao {
     @Query("SELECT * FROM watch_events WHERE mediaKey = :mediaKey ORDER BY watchedAt DESC")
     fun historyFor(mediaKey: String): Flow<List<WatchEventEntity>>
 
+    /** Șterge vizionările unui film / episod din toate sursele, în afară de [keep] (ex. Trakt/SIMKL ascunse). */
+    @Query(
+        "DELETE FROM watch_events WHERE mediaKey = :mediaKey AND season IS :season AND episode IS :episode " +
+            "AND source NOT IN (:keep)",
+    )
+    suspend fun deleteItemHistory(mediaKey: String, season: Int?, episode: Int?, keep: List<String>)
+
+    /** Șterge tot istoricul unui titlu (film sau toate episoadele serialului), în afară de sursele [keep]. */
+    @Query("DELETE FROM watch_events WHERE mediaKey = :mediaKey AND source NOT IN (:keep)")
+    suspend fun deleteTitleHistory(mediaKey: String, keep: List<String>)
+
+    /** Există istoric (din orice sursă afișată) pentru titlu. */
+    @Query("SELECT MAX(watchedAt) FROM watch_events WHERE mediaKey = :mediaKey AND source NOT IN (:hidden)")
+    fun lastWatchedAt(mediaKey: String, hidden: List<String>): Flow<Long?>
+
     /** Câte vizionări ale aceluiași film / episod există deja (din orice sursă) în intervalul dat. */
     @Query(
         "SELECT COUNT(*) FROM watch_events WHERE mediaKey = :mediaKey AND season IS :season AND episode IS :episode " +

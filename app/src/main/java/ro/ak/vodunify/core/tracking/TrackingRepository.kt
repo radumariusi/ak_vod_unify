@@ -24,6 +24,7 @@ import ro.ak.vodunify.core.connector.ConnectorKind
 import ro.ak.vodunify.core.connector.ConnectorRegistry
 import ro.ak.vodunify.core.connector.DeviceAuthConnector
 import ro.ak.vodunify.core.connector.ExternalTrackers
+import ro.ak.vodunify.core.connector.EpisodeNumber
 import ro.ak.vodunify.core.connector.MediaRef
 import ro.ak.vodunify.core.connector.MediaType
 import ro.ak.vodunify.core.connector.ShowProgress
@@ -58,6 +59,11 @@ data class TitleTrackState(
     val watched: Boolean,
     /** Progresul de reluare cel mai recent; null dacă nu e început. */
     val resume: ResumePointEntity?,
+    /**
+     * Titlul apare în Lista mea: e „De văzut” sau are istoric / minut salvat (din AK Scrobbler sau importat
+     * din Netflix / Trakt) și nu l-ai scos de mână.
+     */
+    val inMyList: Boolean = inWatchlist,
 )
 
 /**
@@ -68,7 +74,15 @@ data class TitleTrackState(
 class TrackingRepository @Inject constructor(
     private val registry: ConnectorRegistry,
     private val dao: TrackingDao,
+    private val hidden: HiddenTitles,
 ) {
+    /** Titlurile scoase de mână din Lista mea (vezi [HiddenTitles]). */
+    val hiddenTitles: StateFlow<Map<String, Long>> get() = hidden.all
+
+    /** Sursele ale căror date nu se arată (și nu se șterg): Trakt/SIMKL cât timp sunt ascunse. */
+    private val protectedSources: List<String>
+        get() = if (ExternalTrackers.ENABLED) emptyList() else ExternalTrackers.SOURCES.toList()
+
     private val syncMutex = Mutex()
     private val _status = MutableStateFlow<SyncStatus>(SyncStatus.Idle)
     val status: StateFlow<SyncStatus> = _status.asStateFlow()
@@ -135,11 +149,25 @@ class TrackingRepository @Inject constructor(
             ) { inList, watched, resume -> TitleTrackState(inList, watched, resume.firstOrNull()) }
         } else {
             // Doar datele locale: ce a rămas de la Trakt/SIMKL nu mai contează.
-            combine(dao.watchlist(), dao.watchedTitles(), dao.resumeFor(mediaKey)) { list, watched, resume ->
+            combine(
+                combine(dao.watchlist(), dao.watchedTitles(), dao.resumeFor(mediaKey)) { a, b, c -> Triple(a, b, c) },
+                dao.lastWatchedAt(mediaKey, protectedSources),
+                hidden.all,
+            ) { (list, watchedList, resumeList), lastWatched, hiddenMap ->
+                val listed = list.filter { it.ref.mediaKey == mediaKey && ExternalTrackers.isVisible(it.source) }
+                val watched = watchedList.filter { it.ref.mediaKey == mediaKey && ExternalTrackers.isVisible(it.source) }
+                val resume = resumeList.firstOrNull { ExternalTrackers.isVisible(it.source) }
+                val lastActivity = maxOf(
+                    lastWatched ?: 0L,
+                    watched.maxOfOrNull { it.lastWatchedAt } ?: 0L,
+                    resume?.updatedAt ?: 0L,
+                )
+                val hasActivity = lastWatched != null || watched.isNotEmpty() || resume != null
                 TitleTrackState(
-                    inWatchlist = list.any { it.ref.mediaKey == mediaKey && ExternalTrackers.isVisible(it.source) },
-                    watched = watched.any { it.ref.mediaKey == mediaKey && ExternalTrackers.isVisible(it.source) },
-                    resume = resume.firstOrNull { ExternalTrackers.isVisible(it.source) },
+                    inWatchlist = listed.isNotEmpty(),
+                    watched = watched.isNotEmpty(),
+                    resume = resume,
+                    inMyList = listed.isNotEmpty() || (hasActivity && !HiddenTitles.isHidden(hiddenMap, mediaKey, lastActivity)),
                 )
             }
         }
@@ -305,18 +333,53 @@ class TrackingRepository @Inject constructor(
             dao.deleteResumeById("$LOCAL_SOURCE|${media.itemKey}")
             if (media.type == MediaType.MOVIE) dao.removeFromWatchlist(media.titleKey)
         } else {
-            dao.deleteHistory(LOCAL_SOURCE, media.titleKey, media.season, media.episode)
+            // Din toate sursele (AK Scrobbler, Netflix, Trakt importat), altfel titlurile importate rămân „văzute”.
+            when (media.type) {
+                MediaType.EPISODE -> dao.deleteItemHistory(media.titleKey, media.season, media.episode, protectedSources)
+                else -> dao.deleteTitleHistory(media.titleKey, protectedSources)
+            }
             if (media.type != MediaType.EPISODE) dao.removeWatched(media.titleKey)
         }
         return 1
+    }
+
+    /**
+     * Marchează mai multe episoade ale unui serial (un sezon întreg sau tot serialul) văzute / nevăzute,
+     * doar în baza locală.
+     */
+    suspend fun setEpisodesWatched(show: MediaRef, episodes: List<EpisodeNumber>, watched: Boolean) {
+        if (episodes.isEmpty()) return
+        val base = show.copy(type = MediaType.EPISODE, episodeTitle = null)
+        if (watched) {
+            val now = System.currentTimeMillis()
+            val existing = dao.historyFor(show.titleKey).first().visible { it.source }
+                .mapNotNull { e -> e.ref.season?.let { s -> e.ref.episode?.let { EpisodeNumber(s, it) } } }
+                .toSet()
+            // Câte o milisecundă între ele, ca ordinea episoadelor să rămână în istoric; cele deja văzute rămân cum sunt.
+            val fresh = episodes.filter { it !in existing }
+            dao.insertHistory(
+                fresh.mapIndexed { i, n ->
+                    TrackingEntities.history(
+                        WatchEvent(base.copy(season = n.season, episode = n.episode), Instant.ofEpochMilli(now - fresh.size + i), LOCAL_SOURCE),
+                    )
+                },
+            )
+            episodes.forEach { n -> dao.deleteResumeById("$LOCAL_SOURCE|${base.copy(season = n.season, episode = n.episode).itemKey}") }
+            hidden.show(show.titleKey)
+        } else {
+            episodes.forEach { n -> dao.deleteItemHistory(show.titleKey, n.season, n.episode, protectedSources) }
+        }
     }
 
     private suspend fun setInWatchlistLocally(media: MediaRef, inWatchlist: Boolean): Int {
         if (inWatchlist) {
             val title = if (media.type == MediaType.EPISODE) media.asShow() else media
             dao.upsertWatchlist(listOf(TrackingEntities.watchlist(WatchlistEntry(title, Instant.now(), LOCAL_SOURCE))))
+            hidden.show(media.titleKey)
         } else {
+            // Scos din Lista mea: și din „De văzut”, și ascuns, chiar dacă are istoric (ex. importat din Netflix).
             dao.removeFromWatchlist(media.titleKey)
+            hidden.hide(media.titleKey)
         }
         return 1
     }

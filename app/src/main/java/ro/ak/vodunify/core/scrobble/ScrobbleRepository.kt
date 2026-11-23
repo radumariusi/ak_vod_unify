@@ -155,7 +155,14 @@ class ScrobbleRepository @Inject constructor(
             resolveSiblings(event.playId)
         }
         val media = match.media
-        val duration = reportedDuration ?: match.runtimeMs
+        // Durata citită de pe ecran poate fi greșită (ex. ora din zi luată drept minut): dacă e mult
+        // sub durata din TMDb, ne luăm după TMDb, ca să nu trecem ca văzut un episod abia început.
+        val runtime = match.runtimeMs
+        val duration = when {
+            reportedDuration == null -> runtime
+            runtime != null && event.fields["title_source"] == "screen" && reportedDuration < runtime * 6 / 10 -> runtime
+            else -> reportedDuration
+        }
         val position = if (event.estimated) ScrobbleRules.mergeEstimated(event.positionMs, knownPosition(media)) else event.positionMs
         val progress = ScrobbleRules.progress(position, duration)
 

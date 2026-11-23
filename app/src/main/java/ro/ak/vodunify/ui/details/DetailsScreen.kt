@@ -150,6 +150,7 @@ private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel, c
                 canMark = connected,
                 onSelectSeason = viewModel::selectSeason,
                 onToggle = { ep -> viewModel.toggleEpisode(details, ep) },
+                onToggleSeason = { n, seen -> viewModel.toggleSeason(details, n, seen) },
                 onPlay = { ep -> chooser.play(details.playbackRequest(ep), details.availability) },
                 onBack = {
                     showingEpisodes = false
@@ -224,15 +225,19 @@ private fun Overview(
                         OutlinedButton(onClick = onEpisodes, modifier = Modifier.focusRequester(episodesFocus)) { Text("Episoade") }
                     }
                     if (connected) {
-                        val inList = track?.inWatchlist == true
+                        val inList = track?.inMyList == true
                         if (inList) {
                             FilledTonalButton(onClick = { viewModel.toggleWatchlist(details) }, enabled = !busy) { Text("✓ În Lista mea") }
                         } else {
                             OutlinedButton(onClick = { viewModel.toggleWatchlist(details) }, enabled = !busy) { Text("+ Lista mea") }
                         }
+                        // Starea, ca la Lista mea: „✓ Văzut” când e văzut, „Nevăzut” când nu; apăsarea o schimbă.
                         if (details.item.kind == TitleKind.MOVIE) {
-                            OutlinedButton(onClick = { viewModel.toggleWatched(details) }, enabled = !busy) {
-                                Text(if (track?.watched == true) "✓ Văzut" else "Văzut")
+                            WatchedToggle(track?.watched == true, enabled = !busy) { viewModel.toggleWatched(details) }
+                        } else if (isTvShow) {
+                            val seriesWatched = progress?.let { it.aired > 0 && it.completed >= it.aired } == true
+                            WatchedToggle(seriesWatched, enabled = !busy, watchedLabel = "✓ Serial văzut", unwatchedLabel = "Serial nevăzut") {
+                                viewModel.toggleSeries(details, seriesWatched)
                             }
                         }
                     }
@@ -256,6 +261,22 @@ private fun Overview(
             item(key = "studios") { StudioRow(details.studios) }
             item(key = "attribution") { AttributionNote() }
         }
+    }
+}
+
+/** Văzut / nevăzut: plin cu „✓” când e văzut, contur când nu. */
+@Composable
+private fun WatchedToggle(
+    watched: Boolean,
+    enabled: Boolean,
+    watchedLabel: String = "✓ Văzut",
+    unwatchedLabel: String = "Nevăzut",
+    onClick: () -> Unit,
+) {
+    if (watched) {
+        FilledTonalButton(onClick = onClick, enabled = enabled) { Text(watchedLabel) }
+    } else {
+        OutlinedButton(onClick = onClick, enabled = enabled) { Text(unwatchedLabel) }
     }
 }
 
@@ -441,6 +462,7 @@ private fun EpisodesPane(
     canMark: Boolean,
     onSelectSeason: (Int) -> Unit,
     onToggle: (Episode) -> Unit,
+    onToggleSeason: (Int, Boolean) -> Unit,
     onPlay: (Episode) -> Unit,
     onBack: () -> Unit,
 ) {
@@ -455,7 +477,7 @@ private fun EpisodesPane(
         Column(Modifier.fillMaxSize().padding(horizontal = spec.screenPadding, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onBack) { Text("Înapoi la fișă") }
             Dropdown("Sezonul", current, seasons, ::seasonLabel, { onSelectSeason(it.number) })
-            SeasonEpisodes(current, episodes, watched, next, canMark, onToggle, onPlay, Modifier.weight(1f))
+            SeasonEpisodes(current, episodes, watched, next, canMark, onToggle, onToggleSeason, onPlay, Modifier.weight(1f))
         }
         return
     }
@@ -488,7 +510,7 @@ private fun EpisodesPane(
                 }
             }
         }
-        SeasonEpisodes(current, episodes, watched, next, canMark, onToggle, onPlay, Modifier.weight(0.72f))
+        SeasonEpisodes(current, episodes, watched, next, canMark, onToggle, onToggleSeason, onPlay, Modifier.weight(0.72f))
     }
 }
 
@@ -526,11 +548,24 @@ private fun SeasonEpisodes(
     next: EpisodeNumber?,
     canMark: Boolean,
     onToggle: (Episode) -> Unit,
+    onToggleSeason: (Int, Boolean) -> Unit,
     onPlay: (Episode) -> Unit,
     modifier: Modifier,
 ) {
     Column(modifier.fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(season.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(season.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            val loaded = (episodes as? LoadState.Data)?.value?.takeIf { it.number == season.number }
+            if (canMark && loaded != null) {
+                val aired = ro.ak.vodunify.core.tracking.SeriesMarker.aired(loaded.episodes)
+                if (aired.isNotEmpty()) {
+                    val seasonWatched = aired.all { EpisodeNumber(it.season, it.number) in watched }
+                    WatchedToggle(seasonWatched, enabled = true, watchedLabel = "✓ Sezon văzut", unwatchedLabel = "Sezon nevăzut") {
+                        onToggleSeason(season.number, seasonWatched)
+                    }
+                }
+            }
+        }
         when (episodes) {
             null, LoadState.Loading -> LoadingPanel()
             is LoadState.Failed -> ErrorPanel(episodes.error, onRetry = null)
@@ -581,7 +616,7 @@ private fun EpisodeList(
                     onClick = { onPlay(ep) },
                 )
                 if (canMark) {
-                    OutlinedButton(onClick = { onToggle(ep) }) { Text(if (number in watched) "Nevăzut" else "Văzut") }
+                    WatchedToggle(number in watched, enabled = true) { onToggle(ep) }
                 }
             }
         }
