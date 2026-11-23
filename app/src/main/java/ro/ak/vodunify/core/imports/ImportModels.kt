@@ -7,7 +7,10 @@ object ImportSources {
     const val NETFLIX = "netflix"
     const val PRIME_VIDEO = "primevideo"
 
-    val labels: Map<String, String> = linkedMapOf(NETFLIX to "Netflix", PRIME_VIDEO to "Prime Video")
+    /** Istoricul din contul Trakt (AK Import RO), separat de conectorul Trakt (sursa „trakt”). */
+    const val TRAKT = "trakt_import"
+
+    val labels: Map<String, String> = linkedMapOf(NETFLIX to "Netflix", PRIME_VIDEO to "Prime Video", TRAKT to "Trakt")
 }
 
 /**
@@ -32,6 +35,15 @@ data class ImportItem(
     /** Numerele sezonului / episodului, când serviciul le dă separat (Netflix „Watched”). */
     val seasonNumber: Int? = null,
     val episodeNumber: Int? = null,
+    /**
+     * Codul TMDb, când sursa îl dă (Trakt): al filmului sau, pentru episoade, al serialului.
+     * Cu el nu mai căutăm titlul după nume.
+     */
+    val tmdb: Long? = null,
+    val imdb: String? = null,
+    /** "movie" sau "episode" (doar împreună cu [tmdb]). */
+    val kind: String? = null,
+    val year: Int? = null,
 )
 
 /** Un lot trimis de AK Import (sau citit din CSV). */

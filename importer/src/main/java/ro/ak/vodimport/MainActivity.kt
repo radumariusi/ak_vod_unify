@@ -67,6 +67,13 @@ class MainActivity : Activity() {
                 if (first == null) first = b
             }
         }
+        // Trakt: un singur cont, fără VPN, deci doar în AK Import RO.
+        if (BuildConfig.ROUTE == "RO") {
+            column.addView(text("Trakt", 20f, bold = true).also { it.setPadding(0, dp(16), 0, 0) })
+            column.addView(text("Tot istoricul din contul Trakt, în afară de ce ai văzut pe Netflix (acela vine din istoricul Netflix).", 14f))
+            statusViews[TraktImport.SERVICE] = text(statusLine(prefs.getString("last_${TraktImport.SERVICE}", null)), 14f).also(column::addView)
+            column.addView(button("Conectează-te și importă din Trakt") { startActivity(Intent(this, TraktActivity::class.java)) })
+        }
         setContentView(ScrollView(this).apply { addView(column) })
         first?.requestFocus()
         checkRoute()

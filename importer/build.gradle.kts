@@ -16,6 +16,9 @@ val localProps = Properties().apply {
 
 val appVersionCode = (System.getenv("VERSION_CODE") ?: localProps.getProperty("VERSION_CODE"))?.toIntOrNull() ?: 1
 val appVersionName = System.getenv("VERSION_NAME") ?: localProps.getProperty("VERSION_NAME") ?: "0.1.0"
+// Trakt: doar Client ID (aplicațiile Trakt noi nu mai au secret); din local.properties sau din CI.
+val traktClientId = (localProps.getProperty("TRAKT_CLIENT_ID") ?: System.getenv("TRAKT_CLIENT_ID") ?: "").trim()
+    .replace("\\", "\\\\").replace("\"", "\\\"")
 val keystorePath = System.getenv("SIGNING_KEYSTORE_PATH") ?: localProps.getProperty("SIGNING_KEYSTORE_PATH")
 
 fun mainAppId(debug: Boolean) = if (debug) "ro.ak.vodunify.debug" else "ro.ak.vodunify"
@@ -30,6 +33,7 @@ android {
         targetSdk = 35
         versionCode = appVersionCode
         versionName = appVersionName
+        buildConfigField("String", "TRAKT_CLIENT_ID", "\"$traktClientId\"")
     }
 
     flavorDimensions += "route"

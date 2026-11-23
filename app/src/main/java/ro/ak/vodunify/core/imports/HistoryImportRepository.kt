@@ -18,11 +18,13 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import ro.ak.vodunify.BuildConfig
+import ro.ak.vodunify.core.connector.ExternalIds
 import ro.ak.vodunify.core.connector.MediaRef
 import ro.ak.vodunify.core.connector.MediaType
 import ro.ak.vodunify.core.connector.WatchEvent
 import ro.ak.vodunify.core.db.ResumePointEntity
 import ro.ak.vodunify.core.db.TrackingDao
+import ro.ak.vodunify.core.scrobble.ScrobbleMatch
 import ro.ak.vodunify.core.scrobble.ScrobbleMatcher
 import ro.ak.vodunify.core.tracking.TrackingEntities
 import java.io.File
@@ -34,7 +36,7 @@ import javax.inject.Singleton
  * Istoricul importat din servicii (AK Import RO/US sau CSV-ul Netflix):
  *  1. fiecare lot ajunge într-o coadă pe disc (rapid, fără rețea);
  *  2. un lucru în fundal (WorkManager, cu rețea) găsește titlurile în TMDb și le scrie ca sursă
- *     proprie („netflix”, „primevideo”): vizionările terminate în istoric, cele începute ca
+ *     proprie („netflix”, „primevideo”, „trakt_import”): vizionările terminate în istoric, cele începute ca
  *     puncte de reluare (cu minutul exact, dacă serviciul îl dă).
  *
  * Reimportul e sigur: id-urile sunt deterministe, deci nu apar dubluri.
@@ -111,8 +113,10 @@ class HistoryImportRepository @Inject constructor(
         val finishedAt = mutableMapOf<String, Long>()
 
         for (item in batch.items) {
-            val guesses = ImportParser.guesses(item)
-            val match = if (guesses.isEmpty()) null else matcher.match(guesses, item.duration?.times(1000))
+            val match = direct(item) ?: run {
+                val guesses = ImportParser.guesses(item)
+                if (guesses.isEmpty()) null else matcher.match(guesses, item.duration?.times(1000))
+            }
             if (match == null) {
                 unmatched++
                 if (samples.size < 15) samples += label(item)
@@ -150,8 +154,37 @@ class HistoryImportRepository @Inject constructor(
         writeHistory(history.filter { it.watchedAt.toEpochMilli() > 0 }, service)
         writeWatchedMovies(history, service)
         if (resumes.isNotEmpty()) dao.upsertResume(resumes)
+        // Din Trakt aducem tot, în afară de ce vine din istoricul Netflix (acela e mai exact).
+        // Merge în orice ordine: la importul Trakt și la cel Netflix.
+        if (service == ImportSources.TRAKT || service == ImportSources.NETFLIX) {
+            dao.deleteHistoryCoveredBy(drop = ImportSources.TRAKT, keep = ImportSources.NETFLIX)
+        }
 
         updateStats(batch, matched, unmatched, resumes.size, samples)
+    }
+
+    /** Sursa dă codul TMDb (Trakt): titlul e sigur, fără căutare după nume. */
+    private fun direct(item: ImportItem): ScrobbleMatch? {
+        val tmdb = item.tmdb?.takeIf { it > 0 } ?: return null
+        val ids = ExternalIds(tmdb = tmdb, imdb = item.imdb?.takeIf { it.isNotBlank() })
+        val media = when (item.kind) {
+            "movie" -> MediaRef(MediaType.MOVIE, ids, item.title.ifBlank { "Fără titlu" }, item.year)
+            "episode" -> {
+                val season = item.seasonNumber ?: return null
+                val episode = item.episodeNumber ?: return null
+                MediaRef(
+                    type = MediaType.EPISODE,
+                    ids = ids,
+                    title = item.series?.takeIf { it.isNotBlank() } ?: "Fără titlu",
+                    year = item.year,
+                    season = season,
+                    episode = episode,
+                    episodeTitle = item.episode?.takeIf { it.isNotBlank() },
+                )
+            }
+            else -> return null
+        }
+        return ScrobbleMatch(media, null)
     }
 
     private suspend fun writeHistory(events: List<WatchEvent>, service: String) {
