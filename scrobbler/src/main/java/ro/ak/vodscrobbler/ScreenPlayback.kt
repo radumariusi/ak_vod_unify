@@ -12,26 +12,34 @@ package ro.ak.vodscrobbler
  * Pur (fără Android), ca să poată fi testat.
  */
 class ScreenPlayback(val packageName: String, val appLabel: String) {
-    val tracker = SessionTracker(packageName, appLabel)
+    val tracker = SessionTracker(packageName, appLabel).also { it.screenOnly = true }
     var guess: ScreenGuess? = null
         private set
     var finished = false
         private set
 
     private var lastScreenPos: Long? = null
+
+    /** Ultima pereche de timpi fără indiciu și dacă al doilea s-a dovedit a fi timpul rămas. */
+    private var lastPair: Pair<Long, Long>? = null
+    private var secondIsRemaining: Boolean? = null
     private var lastScreenAt = 0L
     private var lastForegroundAt = 0L
 
     /** O citire a ecranului aplicației (ea e în prim-plan). [details] = pagina titlului de dinainte. */
-    fun onScreen(g: ScreenGuess?, times: ScreenTimes, now: Long, details: ScreenGuess? = null): List<Outgoing> {
+    fun onScreen(g: ScreenGuess?, rawTimes: ScreenTimes, now: Long, details: ScreenGuess? = null): List<Outgoing> {
         lastForegroundAt = now
         val out = mutableListOf<Outgoing>()
+        val times = resolvePair(rawTimes)
         val duration = tracker.media?.durationMs
         val pos = times.position(duration)
 
         // Titlul: de pe ecranul playerului (cu timpi sau linie de episod), altfel pagina titlului.
         val title = g?.takeIf { !times.isEmpty || it.subtitle != null } ?: if (guess == null) details else null
-        if (title != null && title != guess) {
+        // Același episod (S2E10) citit din alt panou al playerului („TV-MA · S2:E10”): păstrăm serialul știut.
+        val sameEpisode = title != null && guess != null && title.title != guess!!.title &&
+            episodeCode(title.subtitle) != null && episodeCode(title.subtitle) == episodeCode(guess!!.subtitle)
+        if (title != null && title != guess && !sameEpisode) {
             val continuing = guess != null && lastScreenPos != null && pos != null &&
                 kotlin.math.abs(pos - (tracker.position(now) ?: pos)) < 120_000
             guess = title
@@ -39,7 +47,7 @@ class ScreenPlayback(val packageName: String, val appLabel: String) {
             title.subtitle?.let { fields["display_subtitle"] = it }
             out += tracker.onMetadata(MediaInfo(fields, times.durationMs ?: duration), now, correction = continuing)
         }
-        if (times.durationMs != null || pos != null) tracker.onScreenTimes(null, times.durationMs, now)
+        if (times.durationMs != null || pos != null) tracker.onScreenTimes(null, times.durationMs, now, fromScreen = true)
 
         if (pos != null) {
             val prev = lastScreenPos
@@ -68,8 +76,39 @@ class ScreenPlayback(val packageName: String, val appLabel: String) {
         return tracker.onTick(now)
     }
 
+    /**
+     * Doi timpi fără alt indiciu: dacă între două citiri primul crește și al doilea scade cu cât
+     * a crescut primul (suma rămâne aceeași), al doilea e timpul rămas, nu durata.
+     */
+    private fun resolvePair(t: ScreenTimes): ScreenTimes {
+        val pair = t.rawPair ?: return t
+        val prev = lastPair
+        lastPair = pair
+        if (prev != null && pair.first - prev.first >= 5_000) {
+            val sumNow = pair.first + pair.second
+            val sumBefore = prev.first + prev.second
+            secondIsRemaining = when {
+                kotlin.math.abs(sumNow - sumBefore) <= 3_000 && pair.second < prev.second -> true
+                kotlin.math.abs(pair.second - prev.second) <= 3_000 -> false
+                else -> secondIsRemaining
+            }
+        }
+        return when (secondIsRemaining) {
+            true -> ScreenTimes(pair.first, pair.first + pair.second, pair.second, pair)
+            // Al doilea mai mic decât primul și nu știm încă: nu ghicim durata.
+            null -> if (pair.second > pair.first) t else t.copy(durationMs = null)
+            false -> t
+        }
+    }
+
     companion object {
         const val GONE_AFTER_MS = 20_000L
+
+        private val EPISODE_CODE = Regex("""(?i)(?<![\p{L}\d])[ST](\d{1,2})\s*[:.,\-]?\s*(?:E|Ep\.?\s?)(\d{1,3})(?!\d)""")
+
+        /** „S2:E10 - The Queen Is Dead” → „2x10”. */
+        fun episodeCode(s: String?): String? =
+            s?.let { EPISODE_CODE.find(it) }?.let { "${it.groupValues[1].toInt()}x${it.groupValues[2].toInt()}" }
 
         /** Pornim doar pe ecranul unui player: minut + durată (un ceas singur nu e player). */
         fun looksLikePlayer(times: ScreenTimes): Boolean =

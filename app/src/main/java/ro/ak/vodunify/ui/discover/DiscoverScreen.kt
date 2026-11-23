@@ -47,7 +47,7 @@ fun DiscoverScreen(viewModel: DiscoverViewModel = hiltViewModel()) {
     val periods = remember { DiscoverPeriod.options() }
 
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(spec.posterWidth + 8.dp),
+        columns = GridCells.FixedSize(spec.posterWidth),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 12.dp),
         // Aceeași distanță între postere ca în rândurile din Acasă.

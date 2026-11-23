@@ -1,5 +1,6 @@
 package ro.ak.vodunify.ui.library
 
+import kotlinx.serialization.Serializable
 import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.core.connector.ExternalTrackers
 import ro.ak.vodunify.core.db.TrackedRef
@@ -26,11 +27,14 @@ enum class LibraryTab(val label: String, val status: LibraryStatus?) {
 }
 
 /** O sursă în filtru: id + nume afișat. */
+@Serializable
 data class SourceOption(val id: String, val label: String)
 
+@Serializable
 data class LibraryFilter(val tab: LibraryTab = LibraryTab.ALL, val source: String? = null)
 
 /** Card din bibliotecă. */
+@Serializable
 data class LibraryItem(
     val key: String,
     val kind: TitleKind,

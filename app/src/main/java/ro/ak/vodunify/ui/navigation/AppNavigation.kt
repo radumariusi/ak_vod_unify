@@ -98,6 +98,7 @@ import ro.ak.vodunify.ui.theme.GlassIdle
 import ro.ak.vodunify.ui.theme.OnFocusFill
 import ro.ak.vodunify.ui.theme.PillShape
 import androidx.compose.ui.graphics.Brush
+import androidx.navigation.NavBackStackEntry
 import ro.ak.vodunify.ui.components.TitleMenuHost
 import ro.ak.vodunify.ui.components.TitleMenuViewModel
 
@@ -353,10 +354,43 @@ private fun NavTab(
     }
 }
 
-private fun NavHostController.navigateTop(dest: TopDestination) {
-    navigate(dest.route) {
-        popUpTo(graph.findStartDestination().id) { saveState = true }
-        launchSingleTop = true
-        restoreState = true
+/**
+ * Paginile deschise în fiecare filă (ex. un film deschis din Descoperă), păstrate când treci pe altă filă și
+ * redeschise când revii. Ținute de noi: salvarea automată a navigației nu merge pentru fila de start (Acasă)
+ * și o încurca și pe celelalte (revenirea arăta mereu pagina principală a filei).
+ */
+private object TabStacks {
+    val saved = HashMap<String, List<String>>()
+}
+
+/** Ruta concretă a unei pagini („title/movie/603”), din șablon și argumente. */
+private fun NavBackStackEntry.concreteRoute(): String? {
+    val pattern = destination.route ?: return null
+    val args = arguments
+    return pattern.replace(Regex("\\{([^}]+)\\}")) { m ->
+        @Suppress("DEPRECATION")
+        args?.get(m.groupValues[1])?.toString().orEmpty()
     }
+}
+
+private fun NavHostController.navigateTop(dest: TopDestination) {
+    val stack = currentBackStack.value.filter { it.destination.route != null && it.destination !is androidx.navigation.NavGraph }
+    val tops = TopDestination.entries.map { it.route }.toSet()
+    val tabIndex = stack.indexOfLast { it.destination.route in tops }
+    val tab = stack.getOrNull(tabIndex)?.destination?.route
+    if (tab != null) {
+        // Pe ce filă ești și ce pagini ai deschis în ea.
+        TabStacks.saved[tab] = stack.drop(tabIndex + 1).mapNotNull { it.concreteRoute() }
+    }
+    if (tab == dest.route) {
+        // Apăsat pe fila curentă: înapoi la pagina ei principală.
+        TabStacks.saved.remove(dest.route)
+        popBackStack(dest.route, inclusive = false)
+        return
+    }
+    navigate(dest.route) {
+        popUpTo(graph.findStartDestination().id)
+        launchSingleTop = true
+    }
+    TabStacks.saved[dest.route].orEmpty().forEach { route -> runCatching { navigate(route) } }
 }

@@ -12,7 +12,16 @@ data class ScreenGuess(val title: String, val subtitle: String?)
 data class ScreenRange(val current: Float, val max: Float, val isPercent: Boolean)
 
 /** Minutul și durata citite de pe ecran (oricare poate lipsi). [remainingMs] = „-45:12”. */
-data class ScreenTimes(val positionMs: Long?, val durationMs: Long?, val remainingMs: Long?) {
+data class ScreenTimes(
+    val positionMs: Long?,
+    val durationMs: Long?,
+    val remainingMs: Long?,
+    /**
+     * Doi timpi fără alt indiciu („43:53 | 02:12”): al doilea poate fi durata sau timpul rămas.
+     * [ScreenPlayback] decide după mai multe citiri (rămasul scade cât crește minutul).
+     */
+    val rawPair: Pair<Long, Long>? = null,
+) {
     val isEmpty: Boolean get() = positionMs == null && durationMs == null && remainingMs == null
 
     /** Poziția, folosind durata știută din altă parte dacă ecranul arată doar timpul rămas. */
@@ -108,31 +117,105 @@ object ScreenText {
         n in PLAY_WORDS || n.startsWith("play ") || n.startsWith("reda ") || n.startsWith("resume ") || n.startsWith("continua ")
     }
 
+    private val MERIDIEM = Regex("""(?i)^(am|pm|a\.m\.|p\.m\.)$""")
+    private val WITH_MERIDIEM = Regex("""(?i)^(\d{1,2}):(\d{2})\s*(am|pm|a\.m\.|p\.m\.)$""")
+    private val ENDS_AT = Regex(
+        """(?i)(ends at|ends|finishes at|se termin[aă] la|termin[aă] la|sf[aâ]r[sș]it la|final la)\s*(\d{1,2}):(\d{2})\s*(am|pm|a\.m\.|p\.m\.)?""",
+    )
+
+    /** Un timp citit de pe ecran: [ms] ca minut:secundă, [dayMinute] dacă ar fi ora din zi (ore:minute). */
+    private class Found(val ms: Long, val negative: Boolean, val dayMinute: Int?, val isClock: Boolean)
+
+    private fun dayMinute(h: Int, m: Int, meridiem: String?): Int? {
+        if (m > 59) return null
+        val mer = meridiem?.lowercase()?.replace(".", "")
+        return when (mer) {
+            "am" -> if (h in 1..12) (h % 12) * 60 + m else null
+            "pm" -> if (h in 1..12) (h % 12 + 12) * 60 + m else null
+            else -> if (h in 0..23) h * 60 + m else null
+        }
+    }
+
     /**
      * Timpii din player: „12:34 / 58:10”, „12:34” + „-45:36”, „-45:36” singur, sau bara de progres.
+     *
+     * Unele playere (DebridStream) arată și ora din zi („12:46” + „AM”) și „Ends at 1:32 AM”,
+     * iar timpul rămas fără minus („43:53 | 02:12”). Ora o aruncăm, iar din „Ends at” − ora aflăm
+     * cât a rămas, ca să știm dacă al doilea timp e durata sau timpul rămas.
      */
     fun times(items: List<ScreenItem>, ranges: List<ScreenRange> = emptyList()): ScreenTimes {
         var position: Long? = null
         var duration: Long? = null
         var remaining: Long? = null
-        val plain = mutableListOf<Long>()
-        for (item in items) {
-            val t = item.text.trim()
+        val found = mutableListOf<Found>()
+        var endsAt: Int? = null
+        val texts = items.map { it.text.trim() }
+        for ((i, t) in texts.withIndex()) {
+            ENDS_AT.find(t)?.let { m ->
+                endsAt = endsAt ?: dayMinute(m.groupValues[2].toInt(), m.groupValues[3].toInt(), m.groupValues[4].ifEmpty { null })
+            }
             if (t.length > 24) continue
-            val found = CLOCK.findAll(t).toList()
-            if (found.isEmpty()) continue
+            val withMeridiem = WITH_MERIDIEM.matchEntire(t)
+            if (withMeridiem != null) {
+                val g = withMeridiem.groupValues
+                found += Found(0, false, dayMinute(g[1].toInt(), g[2].toInt(), g[3]), isClock = true)
+                continue
+            }
+            val matches = CLOCK.findAll(t).toList()
+            if (matches.isEmpty()) continue
             // Doar texte care sunt aproape numai timp (nu „Episodul 3: 12:30 PM”).
             val rest = CLOCK.replace(t, "").replace(Regex("[\\s/|·•]+"), "")
             if (rest.length > 2) continue
-            for (m in found) {
+            // „12:46” urmat de „AM” / „PM” = ora din zi, nu minutul filmului.
+            val nextIsMeridiem = texts.getOrNull(i + 1)?.let { MERIDIEM.matches(it) } == true
+            for (m in matches) {
                 val ms = clockMs(m) ?: continue
-                if (m.groupValues[1].isNotEmpty()) remaining = remaining ?: ms else plain += ms
+                val dm = if (m.groupValues[4].isEmpty()) {
+                    dayMinute(m.groupValues[2].toInt(), m.groupValues[3].toInt(), if (nextIsMeridiem) texts[i + 1] else null)
+                } else {
+                    null
+                }
+                found += Found(ms, m.groupValues[1].isNotEmpty(), dm, isClock = nextIsMeridiem && matches.size == 1)
             }
         }
-        when {
-            plain.size >= 2 && plain[1] > plain[0] -> { position = plain[0]; duration = plain[1] }
-            plain.size == 1 && remaining != null -> { position = plain[0]; duration = plain[0] + remaining }
-            plain.size >= 2 -> position = plain[0]
+        val clock = found.firstOrNull { it.isClock }?.dayMinute
+        var plain = found.filter { !it.isClock && !it.negative }
+        found.firstOrNull { !it.isClock && it.negative }?.let { remaining = it.ms }
+
+        // Cât a rămas după „Ends at” (rezoluție de un minut).
+        fun hintFrom(c: Int?): Long? {
+            val e = endsAt ?: return null
+            val cm = c ?: return null
+            return (((e - cm) % 1440 + 1440) % 1440) * 60_000L
+        }
+        var hint = hintFrom(clock)
+        // Ora fără AM/PM (format 24 h): una dintre cele trei valori e ora; o găsim după „Ends at”.
+        if (hint == null && endsAt != null && plain.size >= 3) {
+            for (c in plain) {
+                val h = hintFrom(c.dayMinute) ?: continue
+                val others = plain.filter { it !== c }
+                if (others.size >= 2 && pairFits(others[0].ms, others[1].ms, h) != null) {
+                    plain = others
+                    hint = h
+                    break
+                }
+            }
+        }
+        val values = plain.map { it.ms }
+        if (values.size >= 2) {
+            val a = values[0]
+            val b = values[1]
+            when (if (hint != null) pairFits(a, b, hint) else null) {
+                PairKind.REMAINING -> { position = a; remaining = b; duration = a + b }
+                PairKind.DURATION -> { position = a; duration = b }
+                null -> when {
+                    b > a -> { position = a; duration = b }
+                    else -> position = a
+                }
+            }
+        } else if (values.size == 1) {
+            position = values[0]
+            remaining?.let { duration = values[0] + it }
         }
         // Bara de progres: secunde sau milisecunde (după mărimea maximului) ori procent.
         for (r in ranges) {
@@ -154,9 +237,23 @@ object ScreenText {
                 }
             }
         }
-        if (duration != null && remaining != null && position == null) position = (duration - remaining).coerceAtLeast(0)
-        return ScreenTimes(position, duration, remaining)
+        val d = duration
+        val r = remaining
+        if (d != null && r != null && position == null) position = (d - r).coerceAtLeast(0)
+        val pair = if (values.size >= 2 && hint == null) values[0] to values[1] else null
+        return ScreenTimes(position, duration, remaining, pair)
     }
+
+    private enum class PairKind { REMAINING, DURATION }
+
+    /** Al doilea timp e timpul rămas (cât arată „Ends at” − ora) sau durata totală? */
+    private fun pairFits(a: Long, b: Long, remainingHint: Long): PairKind? = when {
+        kotlin.math.abs(b - remainingHint) <= HINT_TOLERANCE_MS -> PairKind.REMAINING
+        b > a && kotlin.math.abs((b - a) - remainingHint) <= HINT_TOLERANCE_MS -> PairKind.DURATION
+        else -> null
+    }
+
+    private const val HINT_TOLERANCE_MS = 90_000L
 
     private fun clockMs(m: MatchResult): Long? {
         val a = m.groupValues[2].toLong()

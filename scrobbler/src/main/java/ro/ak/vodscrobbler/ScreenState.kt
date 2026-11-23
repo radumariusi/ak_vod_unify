@@ -43,7 +43,7 @@ object ScreenState {
     fun publish(s: ScreenSnapshot) {
         main.post {
             latest[s.packageName] = s
-            if (s.hasPlayButton && s.guess != null) lastDetails[s.packageName] = s
+            if (s.hasPlayButton && s.guess != null && s.times.isEmpty) lastDetails[s.packageName] = s
             listener?.invoke(s)
         }
     }

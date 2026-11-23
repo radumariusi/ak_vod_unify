@@ -43,6 +43,7 @@ import javax.inject.Inject
 @HiltViewModel
 class TitleMenuViewModel @Inject constructor(
     private val tracking: TrackingRepository,
+    private val seriesMarker: ro.ak.vodunify.core.tracking.SeriesMarker,
 ) : ViewModel() {
     private val _item = MutableStateFlow<CatalogItem?>(null)
     val item: StateFlow<CatalogItem?> = _item.asStateFlow()
@@ -70,7 +71,7 @@ class TitleMenuViewModel @Inject constructor(
     )
 
     fun toggleList() = act { i, s ->
-        val inList = s?.inWatchlist == true
+        val inList = s?.inMyList == true
         tracking.setInWatchlist(ref(i), !inList)
         if (inList) "„${i.title}” scos din Lista mea" else "„${i.title}” adăugat în Lista mea (De văzut)"
     }
@@ -79,6 +80,12 @@ class TitleMenuViewModel @Inject constructor(
         val watched = s?.watched == true
         tracking.setWatched(ref(i), !watched)
         if (watched) "„${i.title}” marcat ca nevăzut" else "„${i.title}” marcat ca văzut"
+    }
+
+    /** Tot serialul (episoadele apărute) văzut / nevăzut. */
+    fun markSeries(watched: Boolean) = act { i, _ ->
+        val n = seriesMarker.mark(i.id, i.title, i.year, null, watched)
+        if (watched) "„${i.title}”: $n episoade marcate ca văzute" else "„${i.title}” marcat ca nevăzut"
     }
 
     fun removeFromContinue() = act { i, _ ->
@@ -128,7 +135,7 @@ fun TitleMenuHost(viewModel: TitleMenuViewModel, onOpen: (TitleKind, Long) -> Un
         title = { Text(i.title + (i.year?.let { " ($it)" } ?: "")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                val inList = state?.inWatchlist == true
+                val inList = state?.inMyList == true
                 Button(onClick = viewModel::toggleList, modifier = Modifier.fillMaxWidth().focusRequester(first)) {
                     Text(if (inList) "Scoate din Lista mea" else "+ Lista mea (De văzut)")
                 }
@@ -140,6 +147,13 @@ fun TitleMenuHost(viewModel: TitleMenuViewModel, onOpen: (TitleKind, Long) -> Un
                 if (i.kind == TitleKind.MOVIE) {
                     OutlinedButton(onClick = viewModel::toggleWatched, modifier = Modifier.fillMaxWidth()) {
                         Text(if (state?.watched == true) "Marchează nevăzut" else "Marchează văzut")
+                    }
+                } else {
+                    OutlinedButton(onClick = { viewModel.markSeries(true) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Marchează tot serialul văzut")
+                    }
+                    OutlinedButton(onClick = { viewModel.markSeries(false) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Marchează tot serialul nevăzut")
                     }
                 }
                 OutlinedButton(

@@ -1,5 +1,6 @@
 package ro.ak.vodunify.ui.components
 
+import android.os.SystemClock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -19,10 +20,15 @@ import androidx.compose.ui.input.key.type
  */
 fun Modifier.ignoreHeldOk(): Modifier = composed {
     var armed by remember { mutableStateOf(false) }
+    // Momentul deschiderii: orice OK apăsat înainte (cel ținut ca să deschidă meniul) e ignorat, oricum
+    // ar trimite telecomanda repetările și ridicarea (pe unele TV-uri, TCL, nu vin ca „repetare”).
+    val openedAt = remember { SystemClock.uptimeMillis() }
     onPreviewKeyEvent { e ->
         val ok = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter
         when {
-            !ok || armed -> false
+            !ok -> false
+            e.nativeKeyEvent.downTime < openedAt -> true
+            armed -> false
             e.type == KeyEventType.KeyDown && e.nativeKeyEvent.repeatCount == 0 -> {
                 armed = true
                 false

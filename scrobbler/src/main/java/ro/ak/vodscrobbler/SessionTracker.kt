@@ -73,6 +73,9 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
     /** Aplicația ne-a dat măcar o dată poziția (altfel o luăm de pe ecran sau o numărăm noi). */
     private var positionFromSession = false
 
+    /** Redare urmărită doar de pe ecran (fără sesiune media): durata de pe ecran se poate corecta. */
+    var screenOnly = false
+
     /** Timpul de redare numărat de noi, pentru aplicațiile care nu dau deloc poziția. */
     private var playingSince: Long? = null
     private var playedMs: Long = 0L
@@ -222,8 +225,9 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
      * Minutul / durata citite de pe ecranul playerului. Poziția de pe ecran o folosim doar dacă
      * aplicația nu ne-o dă prin sesiunea media (aceea e mai precisă).
      */
-    fun onScreenTimes(positionMs: Long?, durationMs: Long?, now: Long) {
-        if (durationMs != null && durationMs > 0 && media?.durationMs == null) {
+    fun onScreenTimes(positionMs: Long?, durationMs: Long?, now: Long, fromScreen: Boolean = false) {
+        // Durata de pe ecran o actualizăm la fiecare citire (prima poate fi greșită); cea din sesiune rămâne.
+        if (durationMs != null && durationMs > 0 && (media?.durationMs == null || (fromScreen && screenOnly))) {
             media = (media ?: MediaInfo(emptyMap(), null)).copy(durationMs = durationMs)
         }
         if (positionMs != null && positionMs >= 0 && !positionFromSession) {
