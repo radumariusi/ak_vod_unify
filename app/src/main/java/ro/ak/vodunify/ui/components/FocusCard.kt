@@ -58,22 +58,39 @@ fun FocusCard(
     val focused by interaction.collectIsFocusedAsState()
     val scale by animateFloatAsState(if (focused) focusScale else 1f, label = "cardScale")
     val restore = LocalFocusRestore.current
+    val entry = focusEntryId()
+    val homeRow = LocalHomeRowKey.current
     val isTv = layoutSpec().isTv
     val requester = remember { FocusRequester() }
-    if (restoreKey != null && restore.pending == restoreKey && restore.current == restore.origin) {
-        LaunchedEffect(restoreKey) {
-            withFrameNanos { } // după prima așezare a cardului
-            if (runCatching { requester.requestFocus() }.isSuccess) restore.pending = null
+    val position = restore.pending?.takeIf { it.entry == entry && it.cardKey == restoreKey && it.homeRow == homeRow }
+    if (isTv && position != null) {
+        LaunchedEffect(position) {
+            repeat(4) {
+                withFrameNanos { }
+                if (focused) {
+                    restore.consume(position)
+                    return@LaunchedEffect
+                }
+                runCatching { requester.requestFocus() }
+            }
         }
     }
+    val rememberFocus = {
+        if (restoreKey != null && entry != null && isTv) restore.remember(entry, restoreKey, homeRow)
+    }
     val click: () -> Unit = {
-        if (restoreKey != null && isTv) restore.remember(restoreKey)
+        rememberFocus()
         onClick()
     }
     val base = modifier
         .scale(scale)
         .focusRequester(requester)
-        .onFocusChanged { if (it.isFocused) onFocused?.invoke() }
+        .onFocusChanged {
+            if (it.isFocused) {
+                position?.let(restore::consume)
+                onFocused?.invoke()
+            }
+        }
     val border = if (focused) BorderStroke(FocusBorderWidth, FocusBorder) else null
     if (onLongClick == null) {
         Surface(
@@ -90,7 +107,10 @@ fun FocusCard(
     }
     // Cu apăsare lungă: tap / ținut apăsat pe telefon, OK / OK ținut apăsat pe telecomandă.
     val currentClick by rememberUpdatedState(click)
-    val currentLong by rememberUpdatedState(onLongClick)
+    val currentLong by rememberUpdatedState {
+        rememberFocus()
+        onLongClick()
+    }
     var longFired by remember { mutableStateOf(false) }
     Surface(
         modifier = base

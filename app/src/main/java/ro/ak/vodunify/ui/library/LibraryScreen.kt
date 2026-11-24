@@ -10,6 +10,8 @@ import androidx.compose.ui.semantics.semantics
 import ro.ak.vodunify.ui.components.PlatformBadge
 import ro.ak.vodunify.ui.components.PosterRatings
 import ro.ak.vodunify.ui.components.PosterViewingStatus
+import ro.ak.vodunify.core.catalog.TitleKind
+import ro.ak.vodunify.core.playback.PosterStage
 import ro.ak.vodunify.ui.components.Dropdown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -155,6 +157,22 @@ fun LibraryScreen(viewModel: LibraryViewModel = hiltViewModel()) {
                         Button(onClick = actions.openSettings) { Text("Deschide Setări") }
                     }
                 }
+                state.filter.tab == LibraryTab.ALL || state.filter.tab == LibraryTab.WATCHLIST -> {
+                    val saved = state.items.filter { it.posterStage == PosterStage.UNWATCHED }
+                    listOf(TitleKind.MOVIE to "Vreau să văd Filme", TitleKind.TV to "Vreau să văd Seriale").forEach { (kind, title) ->
+                        val part = saved.filter { it.kind == kind }
+                        item(key = title, span = { GridItemSpan(maxLineSpan) }) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(title, style = MaterialTheme.typography.titleMedium)
+                                if (part.isEmpty()) EmptyWatchlist()
+                            }
+                        }
+                        items(part, key = { it.key }) { item -> LibraryCard(item) }
+                    }
+                    items(state.items.filterNot { it.posterStage == PosterStage.UNWATCHED }, key = { it.key }) { item ->
+                        LibraryCard(item)
+                    }
+                }
                 state.items.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
                     Text(
                         if (status is SyncStatus.Running) "Se sincronizează…" else "Nimic aici pentru filtrul ales.",
@@ -179,7 +197,7 @@ private fun LibraryRows(state: LibraryUiState, status: SyncStatus, viewModel: Li
     val rows = remember(rowHeight, list, scope) { HomeRows(rowHeight, list, scope) }
     val animate by UiPrefs.rowAnimation.collectAsStateWithLifecycle()
     val keys = remember(state.rows, header) {
-        (if (header) listOf<String?>(null) else emptyList()) + state.rows.map { it.key }
+        (if (header) listOf<String?>(null) else emptyList()) + state.rows.map { row -> row.key.takeIf { row.items.isNotEmpty() } }
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val bottom = if (spec.isTv) (maxHeight - rowHeight).coerceAtLeast(24.dp) else 24.dp
@@ -223,7 +241,12 @@ private fun LibraryRows(state: LibraryUiState, status: SyncStatus, viewModel: Li
                             )
                         }
                         else -> itemsIndexed(state.rows, key = { _, row -> row.key }) { index, row ->
-                            HomeRowFocus(row.key, index + if (header) 1 else 0) {
+                            if (row.items.isEmpty()) {
+                                Column {
+                                    SectionTitle(row.title)
+                                    EmptyWatchlist(Modifier.padding(horizontal = spec.screenPadding, vertical = 8.dp))
+                                }
+                            } else HomeRowFocus(row.key, index + if (header) 1 else 0) {
                                 Column {
                                     SectionTitle(row.title)
                                     DefaultScroll {
@@ -244,6 +267,11 @@ private fun LibraryRows(state: LibraryUiState, status: SyncStatus, viewModel: Li
     }
 }
 
+@Composable
+private fun EmptyWatchlist(modifier: Modifier = Modifier) {
+    Text("Niciun titlu salvat și neînceput.", modifier, style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
 
 @Composable
 private fun LibraryCard(item: LibraryItem, rowKey: String = "library") {

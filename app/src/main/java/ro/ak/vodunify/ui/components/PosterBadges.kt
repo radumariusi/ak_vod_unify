@@ -57,6 +57,7 @@ import ro.ak.vodunify.core.catalog.mediaKey
 import ro.ak.vodunify.core.playback.PosterActivity
 import ro.ak.vodunify.core.playback.PosterBadge
 import ro.ak.vodunify.core.playback.PosterBadgeRequest
+import ro.ak.vodunify.core.playback.ServiceBadge
 import ro.ak.vodunify.core.playback.PosterStage
 
 /*
@@ -199,15 +200,16 @@ fun AppIconBadge(packageName: String, modifier: Modifier = Modifier, fallbackLab
     val iconPainter = remember(icon) { icon?.let { BitmapPainter(it) } }
     when {
         logoUrl != null -> SquareLogo(logoUrl, iconPainter, modifier)
-        !ready -> Box(modifier.size(BadgeHeight))
         icon != null -> Image(
             icon,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = modifier.size(BadgeHeight).clip(BadgeShape),
         )
+        fallbackLabel != null -> LetterLogo(fallbackLabel, modifier)
+        !ready -> Box(modifier.size(BadgeHeight))
         else -> {
-            val label = fallbackLabel ?: remember(packageName) { AppIcons.label(context, packageName) }
+            val label = remember(packageName) { AppIcons.label(context, packageName) }
             label?.takeIf { it.isNotBlank() }?.let { LetterLogo(it, modifier) }
         }
     }
@@ -303,10 +305,11 @@ fun PlatformBadge(
     modifier: Modifier = Modifier,
     stage: PosterStage? = null,
     label: String? = null,
+    confirmedService: ServiceBadge? = null,
 ) {
     val lookup = LocalPosterBadge.current
     val activity = id?.let { LocalPosterActivity.current[mediaKey(kind, it)] }
-    val request = PosterBadgeRequest(kind, id, stage, activity)
+    val request = PosterBadgeRequest(kind, id, stage, activity, confirmedService)
     var badges by remember(lookup, request) { mutableStateOf(lookup?.peek?.invoke(request).orEmpty()) }
     if (lookup != null) LaunchedEffect(lookup, request) { badges = lookup.load(request) }
     if (badges.isEmpty() && label.isNullOrBlank()) return
@@ -332,6 +335,7 @@ fun PlatformBadge(
 sealed interface BadgeSpec {
     data class App(val packageName: String, val label: String? = null) : BadgeSpec
     data class PlaybackSource(val packageName: String?) : BadgeSpec
+    data class ConfirmedService(val service: ServiceBadge) : BadgeSpec
     data object InProgress : BadgeSpec
     data class Cinema(val region: String) : BadgeSpec
     data class Service(val serviceId: String?, val name: String) : BadgeSpec
@@ -343,6 +347,7 @@ fun TitleBadge(spec: BadgeSpec?, kind: TitleKind, id: Long?, modifier: Modifier 
     when (spec) {
         null -> PlatformBadge(kind, id, modifier, label = label)
         BadgeSpec.InProgress -> PlatformBadge(kind, id, modifier, stage = PosterStage.IN_PROGRESS, label = label)
+        is BadgeSpec.ConfirmedService -> PlatformBadge(kind, id, modifier, label = label, confirmedService = spec.service)
         else -> PosterBottomRow(modifier, label) {
             when (spec) {
                 is BadgeSpec.PlaybackSource -> spec.packageName?.let { pkg ->
@@ -353,6 +358,7 @@ fun TitleBadge(spec: BadgeSpec?, kind: TitleKind, id: Long?, modifier: Modifier 
                 is BadgeSpec.Service -> ServiceLogoBadge(spec.serviceId, spec.name)
                 is BadgeSpec.Label -> PosterLabel(spec.text)
                 BadgeSpec.InProgress -> Unit
+                is BadgeSpec.ConfirmedService -> Unit
             }
         }
     }

@@ -108,6 +108,7 @@ import androidx.navigation.NavBackStackEntry
 import ro.ak.vodunify.ui.components.TitleMenuHost
 import ro.ak.vodunify.ui.components.TitleMenuViewModel
 
+@android.annotation.SuppressLint("RestrictedApi")
 @Composable
 fun AppNavigation() {
     val nav = rememberNavController()
@@ -141,7 +142,7 @@ fun AppNavigation() {
     val restore = remember { FocusRestore() }
     var exitPrompt by remember { mutableStateOf(false) }
     val onHome = current == TopDestination.HOME.route
-    SideEffect { restore.current = current }
+    SideEffect { restore.show(backStack?.id, nav.currentBackStack.value.map { it.id }.toSet()) }
     ExpireFocusRestore(restore)
 
     // Înapoi din Acasă cere confirmare (ca în AK VOD Hub); din celelalte file duce în Acasă.

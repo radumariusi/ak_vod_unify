@@ -57,7 +57,8 @@ class CatalogRepository @Inject constructor(
 
         val movies = async { list("movie/popular", mapOf("language" to lang, "region" to region)) }
         val shows = async { list("tv/popular", mapOf("language" to lang)) }
-        val topMovies = async { list("movie/top_rated", mapOf("language" to lang, "region" to region)) }
+        val trendingMovies = async { list("trending/movie/week", mapOf("language" to lang)) }
+        val trendingShows = async { list("trending/tv/week", mapOf("language" to lang)) }
 
         val errors = mutableListOf<Throwable>()
         suspend fun <T> safe(block: suspend () -> T): T? = try {
@@ -75,13 +76,18 @@ class CatalogRepository @Inject constructor(
 
         val serviceCatalogs = async { streamingCatalogs(shelves.map { it.library }, settings) }
 
-        // Fără „În tendințe”: amesteca filme apărute cu filme care încă nu au apărut.
         val rows = mutableListOf<CatalogRow>()
         val popularMovies = safe { TmdbMappers.items(movies.await().results, l, TitleKind.MOVIE) }
         val popularShows = safe { TmdbMappers.items(shows.await().results, l, TitleKind.TV) }
         popularMovies?.let { rows += CatalogRow("movies", "Filme populare", it) }
         popularShows?.let { rows += CatalogRow("shows", "Seriale populare", it) }
-        safe { TmdbMappers.items(topMovies.await().results, l, TitleKind.MOVIE) }?.let { rows += CatalogRow("top_movies", "Filme apreciate", it) }
+        val today = ro.ak.vodunify.core.calendar.time.RomaniaTime.today().toString()
+        safe {
+            TmdbMappers.items(trendingMovies.await().results.filter { !it.adult && isReleased(it.releaseDate, today) }, l, TitleKind.MOVIE)
+        }?.let { rows += CatalogRow("trending_movies", "Filme în tendințe", it) }
+        safe {
+            TmdbMappers.items(trendingShows.await().results.filter { !it.adult && isReleased(it.firstAirDate, today) }, l, TitleKind.TV)
+        }?.let { rows += CatalogRow("trending_shows", "Seriale în tendințe", it) }
 
         val catalogs = serviceCatalogs.await()
         val serviceRows = shelves.map { shelf ->
@@ -96,6 +102,8 @@ class CatalogRepository @Inject constructor(
             rows = nonEmpty,
         )
     }
+
+    private fun isReleased(date: String?, today: String): Boolean = date != null && date.length == 10 && date <= today
 
     /** Can load any configured service. Home supplies only installed services. */
     suspend fun streamingCatalogs(

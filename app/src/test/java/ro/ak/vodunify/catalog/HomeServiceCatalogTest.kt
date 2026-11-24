@@ -85,12 +85,12 @@ class HomeServiceCatalogTest {
         val snapshot = HomeCatalog(emptyList(), listOf(popular, old))
         val shelves = listOf(voyo, plex)
         val checking = snapshot.withInstalledServices(shelves, ServiceCatalogStatus.CHECKING)
-        assertEquals(listOf(voyo.rowId, plex.rowId, popular.id), checking.rows.map { it.id })
-        assertEquals(ServiceFallback(voyo.packageName, ServiceCatalogStatus.CHECKING), checking.rows.first().serviceFallback)
+        assertEquals(listOf(popular.id, voyo.rowId, plex.rowId), checking.rows.map { it.id })
+        assertEquals(ServiceFallback(voyo.packageName, ServiceCatalogStatus.CHECKING), checking.rows[1].serviceFallback)
 
         val failed = checking.withInstalledServices(shelves, ServiceCatalogStatus.UNAVAILABLE)
-        assertEquals(listOf(voyo.rowId, plex.rowId, popular.id), failed.rows.map { it.id })
-        assertEquals(ServiceFallback(voyo.packageName, ServiceCatalogStatus.UNAVAILABLE), failed.rows.first().serviceFallback)
+        assertEquals(listOf(popular.id, voyo.rowId, plex.rowId), failed.rows.map { it.id })
+        assertEquals(ServiceFallback(voyo.packageName, ServiceCatalogStatus.UNAVAILABLE), failed.rows[1].serviceFallback)
     }
 
 }

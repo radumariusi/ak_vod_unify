@@ -195,7 +195,13 @@ private fun BrandRating(rating: Double, modifier: Modifier, logo: @Composable ()
  * pe acest card la întoarcerea din fișă.
  */
 @Composable
-fun PosterCard(item: CatalogItem, modifier: Modifier = Modifier, rowKey: String = "", fillCell: Boolean = false) {
+fun PosterCard(
+    item: CatalogItem,
+    modifier: Modifier = Modifier,
+    rowKey: String = "",
+    fillCell: Boolean = false,
+    badge: BadgeSpec? = null,
+) {
     val spec = layoutSpec()
     val actions = LocalCatalogActions.current
     val backdrop = LocalBackdrop.current
@@ -207,14 +213,14 @@ fun PosterCard(item: CatalogItem, modifier: Modifier = Modifier, rowKey: String 
         modifier = if (fillCell) modifier.fillMaxWidth().aspectRatio(2f / 3) else
             modifier.wrapContentSize().size(spec.posterWidth, spec.posterHeight),
         restoreKey = "$rowKey|${item.mediaKey}",
-        onFocused = { backdrop?.focus(FocusedTitle.of(item)) },
+        onFocused = { backdrop?.focus(FocusedTitle.of(item).copy(badge = badge)) },
         onLongClick = longPress ?: { actions.titleMenu(item) },
     ) {
         Box(Modifier.fillMaxSize().semantics { contentDescription = item.title }) {
             NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
             PosterRatings(item.kind, item.id, item.rating, Modifier.align(Alignment.TopStart).padding(4.dp))
             PosterViewingStatus(item.kind, item.id, Modifier.align(Alignment.TopEnd).padding(4.dp), episodeCount = item.episodeCount)
-            PlatformBadge(item.kind, item.id, Modifier.align(Alignment.BottomStart).padding(4.dp))
+            TitleBadge(badge, item.kind, item.id, Modifier.align(Alignment.BottomStart).padding(4.dp))
         }
     }
 }
@@ -230,17 +236,19 @@ val LocalPosterLongPress = staticCompositionLocalOf<(() -> Unit)?> { null }
 fun rowSpacing() = if (layoutSpec().isTv) 18.dp else 12.dp
 
 @Composable
-fun TitleRow(title: String, items: List<CatalogItem>, modifier: Modifier = Modifier) {
+fun TitleRow(title: String, items: List<CatalogItem>, modifier: Modifier = Modifier, badge: BadgeSpec? = null) {
     if (items.isEmpty()) return
     val spec = layoutSpec()
     Column(modifier.peekRow()) {
         SectionTitle(title)
         DefaultScroll {
+            val state = rememberRestoringRowState(title, items) { it.mediaKey }
             LazyRow(
+                state = state,
                 contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
             ) {
-                items(items, key = { it.mediaKey }) { PosterCard(it, rowKey = title) }
+                items(items, key = { it.mediaKey }) { PosterCard(it, rowKey = title, badge = badge) }
             }
         }
     }

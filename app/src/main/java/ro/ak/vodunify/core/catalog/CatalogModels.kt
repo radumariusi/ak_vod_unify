@@ -165,7 +165,10 @@ data class ServiceShelf(val service: StreamingService, val packageName: String, 
     val rowTitle: String get() = "Pe ${service.displayName} (${library.region})"
 
     fun row(items: List<CatalogItem> = emptyList(), status: ServiceCatalogStatus? = null) =
-        CatalogRow(rowId, rowTitle, items, status?.let { ServiceFallback(packageName, it) })
+        CatalogRow(
+            rowId, rowTitle, items, status?.let { ServiceFallback(packageName, it) },
+            service = if (items.isEmpty()) null else CatalogService(service.id, "${service.displayName} (${library.region})", packageName, market),
+        )
 }
 
 data class ServiceCatalogPage(val items: List<CatalogItem>, val status: ServiceCatalogStatus? = null)
@@ -206,7 +209,12 @@ data class CatalogRow(
     val title: String,
     val items: List<CatalogItem>,
     val serviceFallback: ServiceFallback? = null,
+    val service: CatalogService? = null,
 )
+
+/** Platforma confirmată pentru titlurile din rând. Biblioteca aleasă stabilește ordinea iconiței. */
+@Serializable
+data class CatalogService(val id: String, val label: String, val packageName: String, val market: Market)
 
 @Serializable
 data class ServiceFallback(val packageName: String, val reason: ServiceCatalogStatus)

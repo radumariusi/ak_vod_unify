@@ -35,6 +35,7 @@ import ro.ak.vodunify.core.tracking.SyncStatus
 import ro.ak.vodunify.core.connector.ExternalTrackers
 import ro.ak.vodunify.ui.components.DefaultScroll
 import ro.ak.vodunify.ui.components.peekRow
+import ro.ak.vodunify.ui.components.rememberRestoringRowState
 import ro.ak.vodunify.ui.components.FocusCard
 import ro.ak.vodunify.ui.components.FocusedTitle
 import ro.ak.vodunify.ui.components.PosterLabel
@@ -180,7 +181,9 @@ private fun WideRow(title: String, items: List<PersonalItem>) {
     Column(Modifier.peekRow()) {
         SectionTitle(title)
         DefaultScroll {
+            val state = rememberRestoringRowState(title, items) { it.key }
             LazyRow(
+                state = state,
                 contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
             ) {
@@ -257,7 +260,9 @@ private fun PosterRow(title: String, items: List<PersonalItem>) {
     Column(Modifier.peekRow()) {
         SectionTitle(title)
         DefaultScroll {
+            val state = rememberRestoringRowState(title, items) { it.key }
             LazyRow(
+                state = state,
                 contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
             ) {

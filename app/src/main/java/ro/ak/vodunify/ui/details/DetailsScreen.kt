@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -48,6 +49,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -198,6 +200,7 @@ private fun Overview(
     val message by viewModel.message.collectAsStateWithLifecycle()
     val primaryFocus = remember { FocusRequester() }
     val episodesFocus = remember { FocusRequester() }
+    val listState = rememberLazyListState()
     val isTvShow = details.item.kind == TitleKind.TV && details.seasons.isNotEmpty()
     if (spec.isTv) {
         LaunchedEffect(details.item.mediaKey) {
@@ -211,6 +214,7 @@ private fun Overview(
         val heroHeight = if (spec.isTv) tvTitleHeroHeight(maxHeight, spec) else 0.dp
         KeepFocusedContentVisible(spec.isTv) {
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize().clipToBounds(),
                 contentPadding = PaddingValues(bottom = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -219,7 +223,18 @@ private fun Overview(
                     DetailsHero(details, heroHeight)
                 }
                 item(key = "header") {
-                    Header(details, watch, Modifier.padding(horizontal = spec.screenPadding)) {
+                    Header(
+                        details,
+                        watch,
+                        Modifier.padding(horizontal = spec.screenPadding),
+                        actionsModifier = if (spec.isTv) Modifier
+                            .onFocusChanged {
+                                if (it.hasFocus && (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0)) {
+                                    listState.requestScrollToItem(0)
+                                }
+                            }
+                            .focusGroup() else Modifier,
+                    ) {
                         PrimaryActions(watch, primaryFocus, onPlay, onChoose)
                         if (isTvShow) {
                             OutlinedButton(onClick = onEpisodes, modifier = Modifier.focusRequester(episodesFocus)) { Text("Episoade") }
@@ -328,10 +343,15 @@ private fun Header(
     details: TitleDetails,
     watch: WatchOptions?,
     modifier: Modifier = Modifier,
+    actionsModifier: Modifier = Modifier,
     actions: @Composable () -> Unit,
 ) {
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(
+            modifier = actionsModifier,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             actions()
         }
         WhereToWatch(watch)

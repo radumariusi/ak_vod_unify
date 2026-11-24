@@ -127,7 +127,7 @@ class LibraryViewModel @Inject constructor(
                     val inTab = LibraryLogic.filter(input.entries, LibraryFilter(tab, null))
                     listOf(TitleKind.MOVIE to "Filme", TitleKind.TV to "Seriale").mapNotNull { (kind, label) ->
                         val part = inTab.filter { (it.ref.type == "MOVIE") == (kind == TitleKind.MOVIE) }
-                        if (part.isEmpty()) null else {
+                        if (part.isEmpty() && tab != LibraryTab.WATCHLIST) null else {
                             val title = if (tab == LibraryTab.WATCHLIST) "${tab.label} $label" else "${tab.label} · $label"
                             LibraryRow("$title (${part.size})", toItems(part.take(ROW_ITEMS), tab))
                         }

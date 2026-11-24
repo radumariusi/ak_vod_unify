@@ -67,6 +67,7 @@ import ro.ak.vodunify.core.catalog.CatalogRow
 import ro.ak.vodunify.core.catalog.CatalogItem
 import ro.ak.vodunify.core.catalog.ServiceCatalogStatus
 import ro.ak.vodunify.ui.components.AppIconBadge
+import ro.ak.vodunify.ui.components.BadgeSpec
 import ro.ak.vodunify.ui.components.SectionTitle
 import ro.ak.vodunify.ui.components.peekRow
 import ro.ak.vodunify.core.catalog.HomeCatalog
@@ -76,7 +77,7 @@ import ro.ak.vodunify.ui.components.LoadState
 import ro.ak.vodunify.ui.components.LoadingPanel
 import ro.ak.vodunify.ui.components.FocusedTitle
 import ro.ak.vodunify.ui.components.LocalBackdrop
-import ro.ak.vodunify.ui.components.LocalFocusRestore
+import ro.ak.vodunify.ui.components.returningFocus
 import ro.ak.vodunify.ui.components.HomeRows
 import ro.ak.vodunify.ui.components.LocalHomeRows
 import ro.ak.vodunify.ui.components.FixedRowsScroll
@@ -84,6 +85,8 @@ import ro.ak.vodunify.ui.components.HomeRowFocus
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import ro.ak.vodunify.core.prefs.UiPrefs
+import ro.ak.vodunify.core.playback.PosterBadge
+import ro.ak.vodunify.core.playback.ServiceBadge
 import ro.ak.vodunify.ui.components.RatingChip
 import ro.ak.vodunify.ui.components.TitleBackdrop
 import ro.ak.vodunify.ui.components.TitleRow
@@ -128,7 +131,7 @@ private fun HomeContent(
 ) {
     val spec = layoutSpec()
     val listFocus = remember { FocusRequester() }
-    val restore = LocalFocusRestore.current
+    val returning = returningFocus()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
@@ -142,14 +145,18 @@ private fun HomeContent(
     // Acasă pornește mereu de sus, de la Continuă vizionarea: focusul se pune abia după ce rândurile personale
     // sunt pe ecran (altfel ar cădea pe primul rând din catalog, iar rândurile apărute deasupra l-ar lăsa jos).
     if (spec.isTv) {
-        var started by remember { mutableStateOf(false) }
-        LaunchedEffect(personalReady) {
+        var started by rememberSaveable { mutableStateOf(false) }
+        LaunchedEffect(personalReady, returning) {
             if (started) return@LaunchedEffect
-            if (restore.pending != null) {
+            if (returning != null) {
                 started = true
                 return@LaunchedEffect
             }
             if (!personalReady) delay(PERSONAL_WAIT_MS)
+            if (listState.firstVisibleItemIndex != 0) {
+                started = true
+                return@LaunchedEffect
+            }
             started = true
             listState.scrollToItem(0)
             runCatching { listFocus.requestFocus() }
@@ -182,6 +189,14 @@ private fun HomeContent(
                 }
             }
             val keys = allRows.map { row -> row.key.takeIf { row.focusable } }
+            val returningRow = keys.indexOf(returning?.homeRow).takeIf { returning?.homeRow != null }
+            LaunchedEffect(returning, returningRow) {
+                if (returningRow != null && returningRow >= 0 &&
+                    (listState.firstVisibleItemIndex != returningRow || listState.firstVisibleItemScrollOffset != 0)
+                ) {
+                    listState.scrollToItem(returningRow)
+                }
+            }
             Column(Modifier.fillMaxSize()) {
                 Hero(
                     catalog.hero,
@@ -237,7 +252,10 @@ private fun HomeAttribution(catalog: HomeCatalog) {
 private fun CatalogHomeRow(row: CatalogRow, openService: (String) -> Boolean) {
     val fallback = row.serviceFallback
     if (fallback == null) {
-        TitleRow(row.title, row.items)
+        val badge = row.service?.let {
+            BadgeSpec.ConfirmedService(ServiceBadge(PosterBadge(it.packageName, it.label, it.id), it.market))
+        }
+        TitleRow(row.title, row.items, badge = badge)
         return
     }
     val context = LocalContext.current

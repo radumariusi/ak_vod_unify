@@ -150,7 +150,9 @@ fun HomeRowFocus(key: String, index: Int, content: @Composable () -> Unit) {
         Modifier.focusRequester(requester)
             .onFocusChanged { if (it.hasFocus) rows.entered(key, index) }
             .focusGroup(),
-    ) { content() }
+    ) {
+        CompositionLocalProvider(LocalHomeRowKey provides key, content = content)
+    }
 }
 
 val LocalHomeRows = staticCompositionLocalOf<HomeRows?> { null }

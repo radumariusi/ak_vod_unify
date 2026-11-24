@@ -20,6 +20,7 @@ data class PosterBadgeRequest(
     val titleId: Long?,
     val stage: PosterStage?,
     val activity: PosterActivity?,
+    val confirmedService: ServiceBadge? = null,
 ) {
     fun resolvedStage(total: Int?): PosterStage = stage ?: when {
         total != null && total > 0 && (activity?.watchedEpisodes ?: 0) >= total -> PosterStage.WATCHED
@@ -65,13 +66,18 @@ class PosterBadges @Inject constructor(
     private fun key(request: PosterBadgeRequest) = request.titleId?.let { "${request.kind.path}:$it" }
 
     fun peek(request: PosterBadgeRequest, playback: PlaybackSettings, prefs: PosterBadgeSettings): List<PosterBadge>? {
-        val installed = apps?.takeIf { it.isCurrent() } ?: return null
         val stage = request.resolvedStage(request.titleId?.takeIf { request.kind == TitleKind.TV }?.let(::peekEpisodeTotal))
         val policy = prefs.policy(stage)
+        val installed = apps?.takeIf { it.isCurrent() }
+        if (installed == null) {
+            return request.confirmedService?.let {
+                PosterBadgeRules.select(policy, prefs.serviceOrder, listOf(it), null, null)
+            }
+        }
         val last = lastBadge(request.lastPackage(stage), installed)
         val cached = key(request)?.let(cache::get)
-        if (cached == null && request.titleId != null && !canSkipAvailability(policy, last)) return null
-        return select(policy, last, playback, prefs, installed, cached?.value.orEmpty())
+        if (cached == null && request.titleId != null && request.confirmedService == null && !canSkipAvailability(policy, last)) return null
+        return select(policy, last, playback, prefs, installed, cached?.value.orEmpty(), request.confirmedService)
     }
 
     suspend fun badges(request: PosterBadgeRequest, playback: PlaybackSettings, prefs: PosterBadgeSettings): List<PosterBadge> {
@@ -87,7 +93,7 @@ class PosterBadges @Inject constructor(
         val installed = installed()
         val last = lastBadge(request.lastPackage(stage), installed)
         if (id == null || key == null || lock == null || !catalog.isConfigured || canSkipAvailability(policy, last)) {
-            return select(policy, last, playback, prefs, installed, emptyList())
+            return select(policy, last, playback, prefs, installed, emptyList(), request.confirmedService)
         }
         val availability = lock.withLock {
             val previous = cache.get(key)
@@ -98,7 +104,7 @@ class PosterBadges @Inject constructor(
                 cache.put(key, CachedAvailability(it, System.currentTimeMillis()))
             } ?: previous?.value.orEmpty()
         }
-        return select(policy, last, playback, prefs, installed, availability)
+        return select(policy, last, playback, prefs, installed, availability, request.confirmedService)
     }
 
     fun peekEpisodeTotal(id: Long): Int? = episodeTotals.get(id)
@@ -141,6 +147,7 @@ class PosterBadges @Inject constructor(
         prefs: PosterBadgeSettings,
         apps: Apps,
         availability: List<MarketAvailability>,
+        confirmedService: ServiceBadge?,
     ): List<PosterBadge> {
         val services = availability.flatMap { region ->
             (region.flatrate + region.free).mapNotNull { provider ->
@@ -152,7 +159,7 @@ class PosterBadges @Inject constructor(
         val default = playback.defaultPlayerApp?.takeIf { it.isPlayer && it in apps.installed }
         val playerApp = default ?: TargetApp.players.firstOrNull { it in apps.installed }
         val player = playerApp?.let(apps.installed::get)?.let { PosterBadge(it.packageName, it.label) }
-        return PosterBadgeRules.select(policy, prefs.serviceOrder, services, last, player)
+        return PosterBadgeRules.select(policy, prefs.serviceOrder, listOfNotNull(confirmedService) + services, last, player)
     }
 
     private companion object {

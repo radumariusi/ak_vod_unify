@@ -11,6 +11,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import ro.ak.vodunify.core.catalog.CatalogRow
 import ro.ak.vodunify.core.catalog.HomeCatalog
 import ro.ak.vodunify.core.catalog.MovieReleaseEvent
 import ro.ak.vodunify.core.catalog.TitleReleases
@@ -149,7 +150,7 @@ internal fun mergeSavedCatalog(current: HomeCatalog, saved: HomeCatalog?): HomeC
         if (row.serviceFallback?.reason == ServiceCatalogStatus.UNAVAILABLE && cached != null) cached else row
     }
     val general = if (rows.none { !it.id.startsWith("service_") } && current.hero.isEmpty()) {
-        saved.rows.filterNot { it.id.startsWith("service_") }
+        saved.rows.filter(::isGeneralRow)
     } else emptyList()
     return current.copy(hero = current.hero.ifEmpty { if (general.isNotEmpty()) saved.hero else emptyList() }, rows = general + rows)
 }
@@ -157,7 +158,10 @@ internal fun mergeSavedCatalog(current: HomeCatalog, saved: HomeCatalog?): HomeC
 
 /** Până când verificăm inventarul, afișăm numai rândurile generale din instantaneu. */
 internal fun HomeCatalog.withoutServiceRows(): HomeCatalog =
-    copy(rows = rows.filterNot { it.id.startsWith("service_") })
+    copy(rows = rows.filter(::isGeneralRow))
+
+private fun isGeneralRow(row: CatalogRow): Boolean =
+    !row.id.startsWith("service_") && row.id != "top_movies"
 
 /** Inventarul local hotărăște ce rânduri de servicii apar. */
 internal fun HomeCatalog.withInstalledServices(shelves: List<ServiceShelf>, status: ServiceCatalogStatus): HomeCatalog {
@@ -171,5 +175,5 @@ internal fun HomeCatalog.withInstalledServices(shelves: List<ServiceShelf>, stat
             else -> shelf.row(status = row.serviceFallback?.reason ?: status)
         }
     }
-    return copy(rows = services + rows.filterNot { it.id.startsWith("service_") })
+    return copy(rows = rows.filter(::isGeneralRow) + services)
 }
