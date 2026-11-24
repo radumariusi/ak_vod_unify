@@ -103,7 +103,8 @@ fun CalendarScreen(
     var shownDay by rememberSaveable { mutableStateOf("") }
     var shownWeek by rememberSaveable { mutableStateOf("") }
     var shownMonth by rememberSaveable { mutableStateOf("") }
-    var focusedDay by rememberSaveable { mutableStateOf<String?>(null) }
+    var monthReturnKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var monthSelectedDay by rememberSaveable { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val focusTop = LocalTabTopFocus.current
     val clearFocus = clearReturningFocus()
@@ -128,7 +129,7 @@ fun CalendarScreen(
     BackHandler {
         clearFocus()
         val origin = viewModel.back()
-        focusedDay = origin?.toString()
+        monthReturnKey = origin
         if (origin == null) {
             focusedTitle = null
             scope.launch {
@@ -152,6 +153,7 @@ fun CalendarScreen(
     var showFilters by rememberSaveable { mutableStateOf(false) }
 
     val icons by viewModel.icons.collectAsStateWithLifecycle()
+    val logoLanguage by viewModel.logoLanguage.collectAsStateWithLifecycle(initialValue = null)
     val now by produceState(Instant.now()) {
         while (true) {
             value = Instant.now()
@@ -182,9 +184,15 @@ fun CalendarScreen(
                     if (error != null) Info("Unele lansări nu s-au putut încărca.")
                     when {
                         inMonth -> MonthCalendar(
-                            state.from, state.to, visible, monthList, focusedDay,
-                            onFocusRestored = { focusedDay = null },
+                            state.from, state.to, visible, monthList, monthReturnKey,
+                            selectedDate = monthSelectedDay,
+                            onSelectDate = { monthSelectedDay = it.toString() },
+                            onFocusRestored = { monthReturnKey = null },
                             onOpenDay = viewModel::openDay,
+                            onOpenWeek = viewModel::openWeek,
+                            logoLanguage = logoLanguage,
+                            loadLogo = viewModel::titleLogo,
+                            modifier = Modifier.weight(1f),
                         )
                         shown == null -> Info(if (state.loading) "Se încarcă perioada…" else "Nimic în perioada asta după filtrele tale.")
                         else -> BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
@@ -193,7 +201,6 @@ fun CalendarScreen(
                             val posterSpace = if (state.mode.isDay) spec.posterHeight + 20.dp else tvHomeRowHeight(spec)
                             val limit = if (spec.isTv) (maxHeight - posterSpace).coerceAtLeast(0.dp) else maxHeight * 0.55f
                             val heroHeight = ideal.coerceAtMost(limit)
-                            val logoLanguage by viewModel.logoLanguage.collectAsStateWithLifecycle(initialValue = null)
                             Column(Modifier.fillMaxSize()) {
                                 CalendarHero(shown, heroHeight, logoLanguage, showDate = !state.mode.isDay, loadLogo = viewModel::titleLogo)
                                 if (state.mode.isDay) {

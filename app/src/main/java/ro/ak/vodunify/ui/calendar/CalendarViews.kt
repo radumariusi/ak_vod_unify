@@ -1,63 +1,29 @@
 package ro.ak.vodunify.ui.calendar
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
-import ro.ak.vodunify.core.calendar.time.RomaniaTime
 import ro.ak.vodunify.core.calendar.format.dayLabel
 import ro.ak.vodunify.ui.components.ChoiceDialog
 import ro.ak.vodunify.ui.components.ChoiceOption
 import ro.ak.vodunify.ui.components.TitleHero
 import kotlinx.coroutines.delay
-import ro.ak.vodunify.ui.components.layoutSpec
-import ro.ak.vodunify.ui.components.returningFocus
-import ro.ak.vodunify.ui.theme.Accent
-import java.time.DayOfWeek
-import java.time.LocalDate
-import java.time.format.TextStyle
-import java.time.temporal.TemporalAdjusters
-import java.util.Locale
 
 /** Ce poți face cu un titlu din calendar (OK ținut apăsat / apăsare lungă). */
 class CalendarItemActions(
@@ -185,175 +151,6 @@ internal fun CalendarHero(
                     },
                     overflow = TextOverflow.Ellipsis,
                 )
-            }
-        }
-    }
-}
-
-/**
- * Vederea pe lună, ca un calendar cu imagini: o zi = o celulă cu numărul zilei și posterele mici ale titlurilor
- * (cel mult trei, alăturate), plus câte au rămas în ziua respectivă. Azi e marcat cu roșu. Un singur focus pe zi: OK deschide ziua.
- */
-@Composable
-fun MonthCalendar(
-    from: LocalDate,
-    to: LocalDate,
-    items: List<CalendarItem>,
-    listState: LazyListState,
-    focusedDay: String?,
-    onFocusRestored: () -> Unit,
-    onOpenDay: (LocalDate) -> Unit,
-) {
-    val spec = layoutSpec()
-    val byDay = remember(items) { items.groupBy { it.date } }
-    val start = from.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-    val end = to.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY))
-    val weeks = remember(start, end) { generateSequence(start) { it.plusWeeks(1) }.takeWhile { !it.isAfter(end) }.toList() }
-    val now = LocalCalendarNow.current
-    val today = RomaniaTime.today()
-    val returning = returningFocus()
-    val target = focusedDay ?: returning?.cardKey?.takeIf { it.startsWith("calendar-day|") }?.substringAfter('|')
-    LaunchedEffect(target, start) {
-        val day = target?.let(LocalDate::parse) ?: return@LaunchedEffect
-        if (day in from..to) {
-            val row = weeks.indexOf(day.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))) + 1
-            if (row > 0 && listState.layoutInfo.visibleItemsInfo.none { item -> item.index == row }) listState.scrollToItem(row)
-        }
-    }
-    val gap = if (spec.isCompact) 4.dp else 8.dp
-    val ro = remember { Locale("ro", "RO") }
-
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val cellWidth = (maxWidth - spec.screenPadding * 2 - gap * 6) / 7
-        val padding = if (spec.isCompact) 4.dp else 6.dp
-        val posterGap = 3.dp
-        val insideWidth = cellWidth - padding * 2
-        val slots = if (insideWidth >= 84.dp) 3 else 2
-        val posterWidth = ((insideWidth - posterGap * (slots - 1)) / slots).coerceIn(0.dp, 50.dp)
-        val headingHeight = 26.dp
-        val estimateHeight = padding * 2 + headingHeight
-        LazyColumn(
-            state = listState,
-            verticalArrangement = Arrangement.spacedBy(gap),
-            contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 8.dp),
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            item(key = "weekdays") {
-                Row(horizontalArrangement = Arrangement.spacedBy(gap), modifier = Modifier.fillMaxWidth()) {
-                    DayOfWeek.entries.forEach { d ->
-                        Text(
-                            d.getDisplayName(TextStyle.SHORT, ro).replaceFirstChar { it.uppercase() },
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f).padding(start = 8.dp),
-                        )
-                    }
-                }
-            }
-            weeks.forEach { monday ->
-                item(key = "week-$monday") {
-                    val dates = (0L..6L).map { monday.plusDays(it) }
-                    val showPosters = posterWidth > 0.dp && dates.any { it in byDay }
-                    val height = if (showPosters) estimateHeight + 4.dp + posterWidth * 1.5f else estimateHeight
-                    Row(horizontalArrangement = Arrangement.spacedBy(gap), modifier = Modifier.fillMaxWidth()) {
-                        dates.forEach { day ->
-                            Box(Modifier.weight(1f).height(height)) {
-                                if (day in from..to) {
-                                    val dayItems = byDay[day].orEmpty()
-                                    val titles = remember(dayItems, now) { monthPreview(dayItems, now) }
-                                    MonthCell(
-                                        day, titles, isToday = day == today, restoreDrilledDay = focusedDay == day.toString(),
-                                        padding = padding, headingHeight = headingHeight,
-                                        slots = slots, posterWidth = posterWidth, posterGap = posterGap,
-                                        onFocusRestored = onFocusRestored, onOpen = { onOpenDay(day) },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MonthCell(
-    day: LocalDate,
-    items: List<CalendarItem>,
-    isToday: Boolean,
-    restoreDrilledDay: Boolean,
-    padding: Dp,
-    headingHeight: Dp,
-    slots: Int,
-    posterWidth: Dp,
-    posterGap: Dp,
-    onFocusRestored: () -> Unit,
-    onOpen: () -> Unit,
-) {
-    val requester = remember { FocusRequester() }
-    if (layoutSpec().isTv && restoreDrilledDay) {
-        LaunchedEffect(day) {
-            withFrameNanos { }
-            repeat(4) {
-                withFrameNanos { }
-                runCatching { requester.requestFocus() }
-            }
-        }
-    }
-    PressableCard(
-        onClick = onOpen,
-        onLongClick = onOpen,
-        focusScale = 1.04f,
-        restoreKey = "calendar-day|$day",
-        modifier = Modifier
-            .fillMaxSize()
-            .focusRequester(requester)
-            .onFocusChanged { if (it.isFocused && restoreDrilledDay) onFocusRestored() }
-            .then(if (isToday) Modifier.border(BorderStroke(2.dp, Accent), RoundedCornerShape(10.dp)) else Modifier)
-            .semantics { contentDescription = "${day.dayOfMonth}: ${items.size} titluri" },
-    ) {
-        Column(
-            Modifier.fillMaxSize().padding(padding),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Row(
-                Modifier.fillMaxWidth().height(headingHeight),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    day.dayOfMonth.toString(),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isToday) Accent else MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(Modifier.weight(1f))
-                val remaining = items.size - slots
-                if (remaining > 0) {
-                    Text("+$remaining", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            if (items.isNotEmpty() && posterWidth > 0.dp) {
-                Row(horizontalArrangement = Arrangement.spacedBy(posterGap)) {
-                    items.take(slots).forEach { item ->
-                        Box(
-                            Modifier.width(posterWidth)
-                                .aspectRatio(2f / 3f)
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(MaterialTheme.colorScheme.surface)
-                                .alpha(if (item.passed) 1f else 0.5f),
-                        ) {
-                            if (item.posterUrl == null) {
-                                Text(item.title, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            } else {
-                                AsyncImage(
-                                    model = item.posterUrl, contentDescription = item.title,
-                                    contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
-                                )
-                            }
-                        }
-                    }
-                }
             }
         }
     }

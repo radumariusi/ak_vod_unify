@@ -31,6 +31,9 @@ object UiPrefs {
     private val _libraryLayout = MutableStateFlow(LibraryLayout.ROWS)
     val libraryLayout: StateFlow<LibraryLayout> = _libraryLayout.asStateFlow()
 
+    private val _calendarMonthRows = MutableStateFlow(3)
+    val calendarMonthRows: StateFlow<Int> = _calendarMonthRows.asStateFlow()
+
     private val _posterBadges = MutableStateFlow(PosterBadgeSettings())
     val posterBadges = _posterBadges.asStateFlow()
 
@@ -39,6 +42,7 @@ object UiPrefs {
         val p = context.applicationContext.getSharedPreferences("ui_settings", Context.MODE_PRIVATE)
         prefs = p
         _rowAnimation.value = p.getBoolean("row_animation", false)
+        _calendarMonthRows.value = p.getInt("calendar_month_rows", 3).coerceIn(2, 3)
         _libraryLayout.value = LibraryLayout.entries.firstOrNull { it.name == p.getString("library_layout", null) } ?: LibraryLayout.ROWS
         _posterBadges.value = PosterBadgeSettings(
             policies = PosterStage.entries.associateWith { stage ->
@@ -64,6 +68,12 @@ object UiPrefs {
     fun setLibraryLayout(value: LibraryLayout) {
         _libraryLayout.value = value
         prefs?.edit()?.putString("library_layout", value.name)?.apply()
+    }
+
+    fun setCalendarMonthRows(value: Int) {
+        val rows = value.coerceIn(2, 3)
+        _calendarMonthRows.value = rows
+        prefs?.edit()?.putInt("calendar_month_rows", rows)?.apply()
     }
 
     fun setPosterBadgeMode(stage: PosterStage, mode: PosterBadgeMode) {

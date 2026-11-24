@@ -16,8 +16,13 @@ import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.core.catalog.TitleReleases
 import ro.ak.vodunify.ui.calendar.CalendarMode
 import ro.ak.vodunify.ui.calendar.CalendarPosition
+import ro.ak.vodunify.ui.calendar.MonthLogoGrid
 import ro.ak.vodunify.ui.calendar.groupSameDayEpisodes
+import ro.ak.vodunify.ui.calendar.monthLogoGrid
 import ro.ak.vodunify.ui.calendar.monthPreview
+import ro.ak.vodunify.ui.calendar.monthWeekKey
+import ro.ak.vodunify.ui.calendar.monthWeekNumber
+import ro.ak.vodunify.ui.calendar.monthWeekWindow
 import ro.ak.vodunify.ui.calendar.toItem
 import ro.ak.vodunify.ui.home.FollowedTitle
 import ro.ak.vodunify.ui.home.HomeSections
@@ -73,6 +78,42 @@ class CalendarPresentationTest {
         assertEquals(original, daily.back(day))
         assertEquals(CalendarPosition(CalendarMode.TODAY, day), original.back(day))
         assertEquals(CalendarMode.TODAY, CalendarMode.entries.first())
+    }
+
+    @Test fun weekOpenedAcrossNewYearReturnsToItsOriginalMonthAndButton() {
+        val january = CalendarPosition(CalendarMode.MONTH, LocalDate.of(2027, 1, 1))
+        val monday = LocalDate.of(2026, 12, 28)
+        val weekly = january.openWeek(monday)
+        assertEquals(CalendarMode.WEEK, weekly.mode)
+        assertEquals(monday, weekly.anchor)
+        assertEquals(53, monthWeekNumber(monday))
+        assertEquals(1, monthWeekNumber(monday.plusWeeks(1)))
+        assertEquals(monthWeekKey(monday), weekly.monthFocusKey)
+        assertEquals(january, weekly.back(day))
+    }
+
+    @Test fun weekWindowMovesOnlyAtAnEdgeAndFillsTheLastPage() {
+        assertEquals(0, monthWeekWindow(current = 0, target = 2, visibleRows = 3, totalRows = 6))
+        assertEquals(1, monthWeekWindow(current = 0, target = 3, visibleRows = 3, totalRows = 6))
+        assertEquals(3, monthWeekWindow(current = 2, target = 5, visibleRows = 3, totalRows = 6))
+        assertEquals(2, monthWeekWindow(current = 3, target = 2, visibleRows = 3, totalRows = 6))
+        assertEquals(4, monthWeekWindow(current = 3, target = 5, visibleRows = 2, totalRows = 6))
+    }
+
+    @Test fun monthLogosFitBusyDaysAndGiveSingleTitlesAnUpperSizeLimit() {
+        val count = 20
+        val largeGrid = requireNotNull(monthLogoGrid(count, 880, 105, 53, 8))
+        val moreRoom = requireNotNull(monthLogoGrid(count, 880, 192, 53, 8))
+        val narrowGrid = requireNotNull(monthLogoGrid(count, 320, 88, 40, 4))
+        fun assertFits(grid: MonthLogoGrid, width: Int, height: Int) {
+            val rows = (count + grid.columns - 1) / grid.columns
+            assertTrue(grid.columns * grid.width + (grid.columns - 1) * grid.gap <= width)
+            assertTrue(rows * grid.height + (rows - 1) * grid.gap <= height)
+        }
+        assertFits(largeGrid, 880, 105)
+        assertFits(narrowGrid, 320, 88)
+        assertTrue(moreRoom.height > largeGrid.height)
+        assertEquals(53, monthLogoGrid(1, 880, 192, 53, 8)?.height)
     }
 
     @Test fun homeRangeIncludesOnlyTheSameReleaseDayAndUnseenEpisodes() {

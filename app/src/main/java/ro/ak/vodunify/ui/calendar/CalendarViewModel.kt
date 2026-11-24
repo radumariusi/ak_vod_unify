@@ -119,8 +119,13 @@ internal data class CalendarPosition(
     val anchor: LocalDate,
     val month: LocalDate? = null,
     val openedDay: LocalDate? = null,
+    val openedWeek: LocalDate? = null,
 ) {
     fun openDay(day: LocalDate) = CalendarPosition(CalendarMode.DAY, day, anchor, day)
+
+    fun openWeek(monday: LocalDate) = CalendarPosition(CalendarMode.WEEK, monday, month = anchor, openedWeek = monday)
+
+    val monthFocusKey get() = openedDay?.let(::monthDayKey) ?: openedWeek?.let(::monthWeekKey)
 
     fun back(today: LocalDate) = if (month != null) CalendarPosition(CalendarMode.MONTH, month)
         else CalendarPosition(CalendarMode.TODAY, today)
@@ -174,6 +179,7 @@ class CalendarViewModel @Inject constructor(
         savedDate("anchor") ?: RomaniaTime.today(),
         savedDate("month"),
         savedDate("openedDay"),
+        savedDate("openedWeek"),
     ))
     private fun savedDate(key: String) = savedState.get<String>(key)?.let(LocalDate::parse)
     private val refresh = MutableStateFlow(0)
@@ -364,11 +370,13 @@ class CalendarViewModel @Inject constructor(
 
     fun openDay(date: LocalDate) = updatePosition(position.value.openDay(date))
 
-    /** Un Back din ziua deschisă în lună revine la celula din care ai plecat. */
-    fun back(): LocalDate? {
+    fun openWeek(monday: LocalDate) = updatePosition(position.value.openWeek(monday))
+
+    /** Back revine la ziua sau la butonul săptămânii din luna de origine. */
+    fun back(): String? {
         val current = position.value
         updatePosition(current.back(RomaniaTime.today()))
-        return current.openedDay
+        return current.monthFocusKey
     }
 
     private fun updatePosition(next: CalendarPosition) {
@@ -376,6 +384,7 @@ class CalendarViewModel @Inject constructor(
         savedState["anchor"] = next.anchor.toString()
         savedState["month"] = next.month?.toString()
         savedState["openedDay"] = next.openedDay?.toString()
+        savedState["openedWeek"] = next.openedWeek?.toString()
         position.value = next
     }
 
