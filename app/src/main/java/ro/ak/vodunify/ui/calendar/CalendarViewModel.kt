@@ -154,10 +154,11 @@ class CalendarViewModel @Inject constructor(
     private val loaded = combine(tab, mode, anchor, calendar.settings, refresh) { t, m, a, s, r -> Query(t, m, a, s, r) }
         .flatMapLatest { load(it) }
 
-    private val startedEpisodes = tracking.reconciled.map { view ->
-        view.resume.mapNotNull { resume ->
-            val ref = resume.winner.ref
+    private val startedTitles = tracking.reconciled.map { view ->
+        view.library.mapNotNull { entry ->
+            val ref = entry.resume?.winner?.ref ?: return@mapNotNull null
             val id = ref.tmdbId ?: return@mapNotNull null
+            if (ref.type == "MOVIE") return@mapNotNull "movie:$id"
             val season = ref.season ?: return@mapNotNull null
             val episode = ref.episode ?: return@mapNotNull null
             "$id-$season-$episode"
@@ -165,7 +166,7 @@ class CalendarViewModel @Inject constructor(
     }
 
     val state: StateFlow<CalendarUiState> =
-        combine(loaded, calendar.watched, startedEpisodes, showRejected, onlyFollowed) { s, watched, started, rejected, followed ->
+        combine(loaded, calendar.watched, startedTitles, showRejected, onlyFollowed) { s, watched, started, rejected, followed ->
             s.withViewingStatus(watched, started).copy(showRejected = rejected, onlyFollowed = followed)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CalendarUiState())
 
@@ -179,8 +180,8 @@ class CalendarViewModel @Inject constructor(
 
     private fun CalendarUiState.withViewingStatus(w: WatchedSet, started: Set<String>): CalendarUiState {
         fun List<CalendarItem>.mark() = map { item ->
-            val watched = if (item.isMovie) item.tmdbId.toInt() in w.movies else item.key in w.episodes
-            val inProgress = !item.isMovie && item.key in started
+            val inProgress = (if (item.isMovie) "movie:${item.tmdbId}" else item.key) in started
+            val watched = !inProgress && (if (item.isMovie) item.tmdbId.toInt() in w.movies else item.key in w.episodes)
             if (watched == item.watched && inProgress == item.inProgress) item
             else item.copy(watched = watched, inProgress = inProgress)
         }

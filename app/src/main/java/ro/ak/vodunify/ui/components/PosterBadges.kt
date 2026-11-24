@@ -240,16 +240,16 @@ val LocalPosterEpisodeTotal = staticCompositionLocalOf<TitleLookup<Int>?> { null
 
 /** O informație despre titlu: ce se știe deja din primul cadru, restul în fundal. */
 @Composable
-private fun <T : Any> rememberTitleLookup(lookup: TitleLookup<T>?, kind: TitleKind, id: Long?): T? {
+private fun <T : Any> rememberTitleLookup(lookup: TitleLookup<T>?, kind: TitleKind, id: Long?, refresh: Boolean = false): T? {
     val initial = remember(lookup, kind, id) { if (lookup == null || id == null) null else lookup.peek(kind, id) }
     var value by remember(lookup, kind, id) { mutableStateOf(initial) }
-    if (initial == null && lookup != null && id != null) {
-        LaunchedEffect(lookup, kind, id) { value = runCatching { lookup.load(kind, id) }.getOrNull() }
+    if ((initial == null || refresh) && lookup != null && id != null) {
+        LaunchedEffect(lookup, kind, id) { lookup.load(kind, id)?.let { value = it } }
     }
     return value
 }
 
-/** Bifă pentru titluri văzute, ceas pentru seriale începute. */
+/** Bifă pentru titluri văzute, ceas pentru filme și seriale începute. */
 @Composable
 fun PosterViewingStatus(
     kind: TitleKind,
@@ -259,13 +259,13 @@ fun PosterViewingStatus(
     episodeCount: Int? = null,
 ) {
     val activity = if (stage == null && id != null) LocalPosterActivity.current[mediaKey(kind, id)] else null
-    val total = if (kind == TitleKind.TV && activity?.watchedEpisodes != null) {
-        episodeCount ?: rememberTitleLookup(LocalPosterEpisodeTotal.current, kind, id)
+    val total = if (kind == TitleKind.TV && activity?.watchedEpisodes != null && !activity.hasActiveResume) {
+        rememberTitleLookup(LocalPosterEpisodeTotal.current, kind, id, refresh = true) ?: episodeCount
     } else null
     val resolved = PosterBadgeRequest(kind, id, stage, activity).resolvedStage(total)
     when {
         resolved == PosterStage.WATCHED -> ViewingStatusBadge(watched = true, modifier)
-        kind == TitleKind.TV && resolved == PosterStage.IN_PROGRESS -> ViewingStatusBadge(watched = false, modifier)
+        resolved == PosterStage.IN_PROGRESS -> ViewingStatusBadge(watched = false, modifier)
     }
 }
 

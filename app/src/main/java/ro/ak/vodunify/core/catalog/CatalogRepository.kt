@@ -29,6 +29,8 @@ import ro.ak.vodunify.core.tmdb.TmdbStudioDetails
 import ro.ak.vodunify.core.tmdb.TmdbTitleDetails
 import ro.ak.vodunify.core.tmdb.TmdbWatchProviders
 import ro.ak.vodunify.core.tmdb.TmdbUnauthorizedException
+import ro.ak.vodunify.core.tracking.SeriesMarker
+import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -197,8 +199,9 @@ class CatalogRepository @Inject constructor(
      * Folosit pentru rândurile personale (Trakt); cache 7 zile.
      */
     suspend fun basic(kind: TitleKind, id: Long, settings: CatalogSettings): CatalogItem {
-        val dto = tmdb.get("${kind.path}/$id", mapOf("language" to settings.apiLanguage), TmdbTitleDetails.serializer(), TmdbClient.LONG_TTL)
         val isMovie = kind == TitleKind.MOVIE
+        val ttl = if (isMovie) TmdbClient.LONG_TTL else TmdbClient.DEFAULT_TTL
+        val dto = tmdb.get("${kind.path}/$id", mapOf("language" to settings.apiLanguage), TmdbTitleDetails.serializer(), ttl)
         return CatalogItem(
             id = dto.id,
             kind = kind,
@@ -213,7 +216,7 @@ class CatalogRepository @Inject constructor(
             backdropUrl = TmdbImages.backdrop(dto.backdropPath),
             rating = dto.voteAverage?.takeIf { it > 0 },
             genreIds = dto.genres.map { it.id },
-            episodeCount = dto.numberOfEpisodes,
+            episodeCount = if (isMovie) null else airedEpisodeCount(dto),
             origin = TmdbMappers.origin(dto, kind),
         )
     }
@@ -377,17 +380,7 @@ class CatalogRepository @Inject constructor(
                 .map { PersonSummary(it.id, it.name, TmdbImages.profile(it.profilePath), it.character) },
             crew = crew,
             studios = studios,
-            seasons = dto.seasons
-                .filter { it.episodeCount > 0 }
-                .sortedWith(compareBy { if (it.seasonNumber == 0) Int.MAX_VALUE else it.seasonNumber })
-                .map {
-                    SeasonSummary(
-                        it.seasonNumber,
-                        it.name?.takeIf { n -> n.isNotBlank() } ?: if (it.seasonNumber == 0) "Speciale" else "Sezonul ${it.seasonNumber}",
-                        it.episodeCount,
-                        TmdbMappers.year(it.airDate),
-                    )
-                },
+            seasons = dto.seasonSummaries(),
             availability = TmdbMappers.availabilityFor(dto),
             recommendations = TmdbMappers.items(dto.recommendations?.results.orEmpty(), settings.language, kind),
             imdbId = dto.imdbId ?: dto.externalIds?.imdbId,
@@ -649,3 +642,23 @@ class CatalogRepository @Inject constructor(
     suspend fun clearCache() = tmdb.clearCache()
 
 }
+
+/** TMDb include sezoane anunțate și episoade care încă nu au apărut. */
+internal fun airedEpisodeCount(details: TmdbTitleDetails, today: LocalDate = LocalDate.now()): Int? {
+    val seasons = details.seasonSummaries()
+    if (seasons.none { it.number > 0 }) return details.numberOfEpisodes
+    val last = details.lastEpisodeToAir?.let { EpisodeAir(it.seasonNumber, it.episodeNumber, it.name, it.airDate) }
+    return SeriesMarker.airedCounts(seasons, last, today).values.sum()
+}
+
+private fun TmdbTitleDetails.seasonSummaries() = seasons.filter { it.episodeCount > 0 }
+    .sortedBy { if (it.seasonNumber == 0) Int.MAX_VALUE else it.seasonNumber }
+    .map { season ->
+        SeasonSummary(
+            season.seasonNumber,
+            season.name?.takeIf { it.isNotBlank() } ?: if (season.seasonNumber == 0) "Speciale" else "Sezonul ${season.seasonNumber}",
+            season.episodeCount,
+            TmdbMappers.year(season.airDate),
+            season.airDate,
+        )
+    }

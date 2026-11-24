@@ -37,8 +37,9 @@ class PosterBadgesViewModel @Inject constructor(
     private val logos: ServiceLogos,
 ) : ViewModel() {
     val playbackSettings = playback.settings
-    val activity = combine(tracking.library, tracking.seriesSummaries, tracking.completedPlaybackApps) { library, series, history ->
-        val byTitle = library.associateBy { it.titleKey }
+    val activity = combine(tracking.reconciled, tracking.completedPlaybackApps) { view, history ->
+        val byTitle = view.library.associateBy { it.titleKey }
+        val series = view.series
         buildMap {
             (byTitle.keys + series.keys + history.keys).forEach { key ->
                 val entry = byTitle[key]
@@ -47,14 +48,14 @@ class PosterBadgesViewModel @Inject constructor(
                 val resume = entry?.resume?.winner
                 val lastPlayback = resume?.takeIf { it.appPackage != null && it.updatedAt >= (finished?.at ?: 0L) }
                     ?.appPackage ?: finished?.appPackage
-                val statuses = entry?.statuses.orEmpty()
+                val status = entry?.currentStatus
                 val stage = when {
-                    LibraryStatus.IN_PROGRESS in statuses || LibraryStatus.UP_NEXT in statuses || summary != null -> PosterStage.IN_PROGRESS
-                    LibraryStatus.WATCHED in statuses || finished != null -> PosterStage.WATCHED
+                    status == LibraryStatus.IN_PROGRESS || status == LibraryStatus.UP_NEXT || summary != null -> PosterStage.IN_PROGRESS
+                    status == LibraryStatus.WATCHED -> PosterStage.WATCHED
                     else -> PosterStage.UNWATCHED
                 }
                 if (stage != PosterStage.UNWATCHED) {
-                    put(key, PosterActivity(stage, lastPlayback, finished?.appPackage, summary?.watched))
+                    put(key, PosterActivity(stage, lastPlayback, finished?.appPackage, summary?.watched, resume != null))
                 }
             }
         }

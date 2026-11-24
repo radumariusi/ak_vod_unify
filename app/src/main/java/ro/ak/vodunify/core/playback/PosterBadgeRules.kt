@@ -47,6 +47,7 @@ data class PosterActivity(
     val lastPlaybackPackage: String?,
     val lastWatchedPackage: String?,
     val watchedEpisodes: Int? = null,
+    val hasActiveResume: Boolean = false,
 )
 
 data class PosterBadge(val packageName: String?, val label: String, val serviceId: String? = null)

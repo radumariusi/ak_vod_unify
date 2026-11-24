@@ -55,11 +55,13 @@ class LibraryLogicTest {
         assertEquals("S3E12 · 36/40 episoade", LibraryLogic.seriesLabel(summary, 40, PosterStage.IN_PROGRESS))
     }
 
-    @Test fun posterUsesTheExplicitRowStatusAndFallsBackToTheMostActiveStatusInAll() {
-        val entry = entries.first { it.titleKey == "tv:tmdb:1399" }
-        assertEquals(PosterStage.IN_PROGRESS, LibraryLogic.posterStage(entry, LibraryTab.ALL))
-        assertEquals(PosterStage.WATCHED, LibraryLogic.posterStage(entry, LibraryTab.WATCHED))
-        assertEquals(PosterStage.UNWATCHED, LibraryLogic.posterStage(entry, LibraryTab.WATCHLIST))
+    @Test fun posterUsesTheCurrentStatusAndOmitsRedundantStatusText() {
+        val byKey = entries.associateBy { it.titleKey }
+        assertEquals(PosterStage.IN_PROGRESS, LibraryLogic.posterStage(byKey.getValue(got.titleKey)))
+        assertEquals(PosterStage.WATCHED, LibraryLogic.posterStage(byKey.getValue(matrix.titleKey)))
+        assertEquals(PosterStage.UNWATCHED, LibraryLogic.posterStage(byKey.getValue(dune.titleKey)))
+        assertEquals("1999", LibraryLogic.subtitle(byKey.getValue(matrix.titleKey), LibraryTab.WATCHED))
+        assertEquals("2021", LibraryLogic.subtitle(byKey.getValue(dune.titleKey), LibraryTab.WATCHLIST))
     }
 
 }

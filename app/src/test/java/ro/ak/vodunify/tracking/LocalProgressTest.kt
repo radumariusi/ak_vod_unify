@@ -5,6 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import ro.ak.vodunify.core.catalog.EpisodeAir
 import ro.ak.vodunify.core.catalog.SeasonSummary
+import ro.ak.vodunify.core.catalog.airedEpisodeCount
 import ro.ak.vodunify.core.connector.EpisodeNumber
 import ro.ak.vodunify.core.connector.ExternalIds
 import ro.ak.vodunify.core.connector.MediaRef
@@ -12,9 +13,13 @@ import ro.ak.vodunify.core.connector.MediaType
 import ro.ak.vodunify.core.db.TrackedRef
 import ro.ak.vodunify.core.db.WatchEventEntity
 import ro.ak.vodunify.core.reconcile.LibraryStatus
+import ro.ak.vodunify.core.tmdb.TmdbEpisodeRef
+import ro.ak.vodunify.core.tmdb.TmdbSeasonSummary
+import ro.ak.vodunify.core.tmdb.TmdbTitleDetails
 import ro.ak.vodunify.core.tracking.LocalProgress
 import ro.ak.vodunify.core.tracking.SeriesMarker
 import ro.ak.vodunify.ui.library.LibraryLogic
+import java.time.LocalDate
 
 class LocalProgressTest {
     private val show = MediaRef(MediaType.SHOW, ExternalIds(tmdb = 1), "Serial")
@@ -64,5 +69,21 @@ class LocalProgressTest {
         val marked = LocalProgress.show(show, previous + ep(2, 2, 5), counts, "local")
         assertEquals(marked.aired, marked.completed)
         assertEquals(0, LocalProgress.show(show, emptyList(), counts, "local").completed)
+    }
+
+    @Test
+    fun announcedSeasonDoesNotReopenSeriesUntilItsFirstEpisodeAirs() {
+        val premiere = LocalDate.of(2026, 12, 10)
+        val show = TmdbTitleDetails(
+            id = 1,
+            numberOfEpisodes = 12,
+            seasons = listOf(
+                TmdbSeasonSummary(1, episodeCount = 4, airDate = "2025-01-01"),
+                TmdbSeasonSummary(2, episodeCount = 8, airDate = premiere.toString()),
+            ),
+            lastEpisodeToAir = TmdbEpisodeRef(1, 4),
+        )
+        assertEquals(4, airedEpisodeCount(show, premiere.minusDays(1)))
+        assertEquals(5, airedEpisodeCount(show.copy(lastEpisodeToAir = TmdbEpisodeRef(2, 1)), premiere))
     }
 }

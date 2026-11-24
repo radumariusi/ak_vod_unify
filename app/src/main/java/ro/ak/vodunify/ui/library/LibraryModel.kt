@@ -14,8 +14,8 @@ import ro.ak.vodunify.ui.home.PersonalMapper
 /** Filele din Lista mea. */
 enum class LibraryTab(val label: String, val status: LibraryStatus?) {
     ALL("Toate", null),
-    WATCHLIST("Vreau să văd", LibraryStatus.WATCHLIST),
     IN_PROGRESS("În curs", LibraryStatus.IN_PROGRESS),
+    WATCHLIST("Vreau să văd", LibraryStatus.WATCHLIST),
     UP_NEXT("Următorul episod", LibraryStatus.UP_NEXT),
     WATCHED("Văzute", LibraryStatus.WATCHED),
     ;
@@ -63,7 +63,8 @@ object LibraryLogic {
         val byKey = entries.associateBy { it.titleKey }
         val merged = entries.map { e ->
             val s = series[e.titleKey] ?: return@map e
-            e.withSeries(seriesStatus(s, totals[e.titleKey]), s.lastAt)
+            val status = if (e.resume != null) LibraryStatus.IN_PROGRESS else seriesStatus(s, totals[e.titleKey])
+            e.withSeries(status, s.lastAt)
         }
         val added = series.filterKeys { it !in byKey }.map { (key, s) ->
             val status = seriesStatus(s, totals[key])
@@ -82,10 +83,10 @@ object LibraryLogic {
     }
 
     private fun seriesStatus(s: SeriesSummary, total: Int?): LibraryStatus =
-        if (total != null && total > 0 && s.watched >= total) LibraryStatus.WATCHED else LibraryStatus.IN_PROGRESS
+        if (s.isComplete(total)) LibraryStatus.WATCHED else LibraryStatus.IN_PROGRESS
 
     private fun LibraryEntry.withSeries(status: LibraryStatus, at: Long): LibraryEntry = copy(
-        statuses = statuses + status,
+        statuses = (statuses - LibraryStatus.IN_PROGRESS - LibraryStatus.WATCHED) + status,
         sources = sources + LOCAL_SOURCE,
         sourcesByStatus = sourcesByStatus + (status to (sourcesByStatus[status].orEmpty() + LOCAL_SOURCE)),
         lastActivityAt = maxOf(lastActivityAt, at),
@@ -99,24 +100,19 @@ object LibraryLogic {
         return if (total != null && total > 0) "$last · ${minOf(s.watched, total)}/$total episoade" else "$last · ${s.watched} episoade văzute"
     }
 
-    fun posterStage(entry: LibraryEntry, tab: LibraryTab): PosterStage = when (tab) {
-        LibraryTab.IN_PROGRESS, LibraryTab.UP_NEXT -> PosterStage.IN_PROGRESS
-        LibraryTab.WATCHED -> PosterStage.WATCHED
-        LibraryTab.WATCHLIST -> PosterStage.UNWATCHED
-        LibraryTab.ALL -> when {
-            LibraryStatus.IN_PROGRESS in entry.statuses || LibraryStatus.UP_NEXT in entry.statuses -> PosterStage.IN_PROGRESS
-            LibraryStatus.WATCHED in entry.statuses -> PosterStage.WATCHED
-            else -> PosterStage.UNWATCHED
-        }
+    fun posterStage(entry: LibraryEntry): PosterStage = when (entry.currentStatus) {
+        LibraryStatus.IN_PROGRESS, LibraryStatus.UP_NEXT -> PosterStage.IN_PROGRESS
+        LibraryStatus.WATCHED -> PosterStage.WATCHED
+        else -> PosterStage.UNWATCHED
     }
 
     fun filter(entries: List<LibraryEntry>, f: LibraryFilter): List<LibraryEntry> = entries.filter { e ->
         val status = f.tab.status
-        if (f.tab == LibraryTab.WATCHLIST && posterStage(e, LibraryTab.ALL) != PosterStage.UNWATCHED) return@filter false
+        if (status != null && status != e.currentStatus) return@filter false
         when {
             status == null && f.source == null -> true
             status == null -> f.source in e.sources
-            f.source == null -> status in e.statuses
+            f.source == null -> true
             else -> f.source in e.sourcesByStatus[status].orEmpty()
         }
     }
@@ -144,9 +140,6 @@ object LibraryLogic {
             }
             (tab == LibraryTab.UP_NEXT || tab == LibraryTab.ALL) && next != null ->
                 PersonalMapper.episodeLabel(next.ref.season, next.ref.episode)?.let { parts += "Urmează $it" }
-            tab == LibraryTab.WATCHLIST || (tab == LibraryTab.ALL && LibraryStatus.WATCHLIST in e.statuses && LibraryStatus.WATCHED !in e.statuses) ->
-                parts += "Vreau să văd"
-            LibraryStatus.WATCHED in e.statuses -> parts += if (e.ref.type == "MOVIE") "Văzut" else "Început"
         }
         if (parts.isEmpty()) e.ref.year?.let { parts += it.toString() }
         return parts.joinToString(" · ")

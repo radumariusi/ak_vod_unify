@@ -222,7 +222,7 @@ private fun WideCard(item: PersonalItem, rowKey: String) {
             PosterRatings(item.kind, item.tmdbId, item.rating, Modifier.align(Alignment.TopStart).padding(6.dp))
             PosterViewingStatus(
                 item.kind, item.tmdbId, Modifier.align(Alignment.TopEnd).padding(6.dp),
-                stage = PosterStage.IN_PROGRESS.takeIf { item.tmdbId == null && item.showsProgress },
+                stage = PosterStage.IN_PROGRESS,
             )
             TitleBadge(
                 wideBadge(item), item.kind, item.tmdbId,

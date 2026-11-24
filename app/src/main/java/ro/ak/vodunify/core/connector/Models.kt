@@ -54,6 +54,8 @@ data class MediaRef(
     fun asShow(): MediaRef = copy(type = MediaType.SHOW, season = null, episode = null, episodeTitle = null)
 }
 
+internal fun seasonTrackingKey(titleKey: String, season: Int) = "$titleKey:s$season"
+
 /** O vizionare completă (istoric). */
 data class WatchEvent(
     val media: MediaRef,

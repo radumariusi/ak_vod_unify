@@ -12,6 +12,7 @@ import ro.ak.vodunify.core.catalog.CatalogRepository
 import ro.ak.vodunify.core.catalog.MarketAvailability
 import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.core.prefs.CatalogSettings
+import ro.ak.vodunify.core.tmdb.TmdbClient
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -23,6 +24,7 @@ data class PosterBadgeRequest(
     val confirmedService: ServiceBadge? = null,
 ) {
     fun resolvedStage(total: Int?): PosterStage = stage ?: when {
+        activity?.hasActiveResume == true -> PosterStage.IN_PROGRESS
         total != null && total > 0 && (activity?.watchedEpisodes ?: 0) >= total -> PosterStage.WATCHED
         else -> activity?.stage ?: PosterStage.UNWATCHED
     }
@@ -40,6 +42,7 @@ class PosterBadges @Inject constructor(
     private val resolver: TargetResolver,
 ) {
     private data class CachedAvailability(val value: List<MarketAvailability>, val at: Long)
+    private data class CachedEpisodeTotal(val count: Int, val at: Long)
     private data class Apps(
         val installed: Map<TargetApp, InstalledApp>,
         val labels: Map<String, String>,
@@ -48,7 +51,7 @@ class PosterBadges @Inject constructor(
     )
 
     private val cache = LruCache<String, CachedAvailability>(600)
-    private val episodeTotals = LruCache<Long, Int>(300)
+    private val episodeTotals = LruCache<Long, CachedEpisodeTotal>(300)
     private val titleLocks = Array(16) { Mutex() }
     private val gate = Semaphore(4)
     private val appsLock = Mutex()
@@ -84,7 +87,8 @@ class PosterBadges @Inject constructor(
         val id = request.titleId
         val key = key(request)
         val lock = key?.let { titleLocks[(it.hashCode() and Int.MAX_VALUE) % titleLocks.size] }
-        val total = if (id != null && request.stage == null && request.activity?.watchedEpisodes != null && request.kind == TitleKind.TV) {
+        val activity = request.activity
+        val total = if (id != null && request.stage == null && activity?.watchedEpisodes != null && !activity.hasActiveResume && request.kind == TitleKind.TV) {
             episodeTotal(id)
         } else null
         val stage = request.resolvedStage(total)
@@ -107,15 +111,21 @@ class PosterBadges @Inject constructor(
         return select(policy, last, playback, prefs, installed, availability, request.confirmedService)
     }
 
-    fun peekEpisodeTotal(id: Long): Int? = episodeTotals.get(id)
+    fun peekEpisodeTotal(id: Long): Int? = episodeTotals.get(id)?.count
 
     suspend fun episodeTotal(id: Long): Int? {
         if (!catalog.isConfigured) return null
         val key = "${TitleKind.TV.path}:$id"
         return titleLocks[(key.hashCode() and Int.MAX_VALUE) % titleLocks.size].withLock {
-            peekEpisodeTotal(id) ?: cachedRequest {
-                catalog.basic(TitleKind.TV, id, CatalogSettings()).episodeCount?.also { episodeTotals.put(id, it) }
+            val cached = episodeTotals.get(id)
+            if (cached != null && System.currentTimeMillis() - cached.at < TmdbClient.DEFAULT_TTL) {
+                return@withLock cached.count
             }
+            cachedRequest {
+                catalog.basic(TitleKind.TV, id, CatalogSettings()).episodeCount?.also {
+                    episodeTotals.put(id, CachedEpisodeTotal(it, System.currentTimeMillis()))
+                }
+            } ?: cached?.count
         }
     }
 

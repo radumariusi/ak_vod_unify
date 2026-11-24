@@ -248,7 +248,7 @@ private fun Overview(
                             if (details.item.kind == TitleKind.MOVIE) {
                                 WatchedToggle(track?.watched == true) { viewModel.toggleWatched(details) }
                             } else if (isTvShow) {
-                                val seriesWatched = progress?.let { it.aired > 0 && it.completed >= it.aired } == true
+                                val seriesWatched = track?.resume == null && progress?.let { it.aired > 0 && it.completed >= it.aired } == true
                                 WatchedToggle(seriesWatched, watchedLabel = "✓ Serial văzut", unwatchedLabel = "Marchează serialul văzut") {
                                     viewModel.toggleSeries(details, seriesWatched)
                                 }

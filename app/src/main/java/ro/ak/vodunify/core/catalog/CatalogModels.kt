@@ -119,7 +119,13 @@ data class MarketAvailability(
     val isEmpty: Boolean get() = flatrate.isEmpty() && free.isEmpty() && rent.isEmpty() && buy.isEmpty()
 }
 
-data class SeasonSummary(val number: Int, val name: String, val episodeCount: Int, val year: Int?)
+data class SeasonSummary(
+    val number: Int,
+    val name: String,
+    val episodeCount: Int,
+    val year: Int?,
+    val airDate: String? = null,
+)
 
 data class Episode(
     val season: Int,

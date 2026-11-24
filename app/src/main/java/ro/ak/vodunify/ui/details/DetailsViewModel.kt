@@ -170,7 +170,7 @@ class DetailsViewModel @Inject constructor(
 
     fun toggleWatchlist(details: TitleDetails) {
         val inList = trackState.value?.inMyList == true
-        act(if (inList) "Scos din Lista mea" else "Adăugat în Lista mea (De văzut)") {
+        act(if (inList) "Scos din Lista mea" else "Adăugat în Lista mea") {
             tracking.setInWatchlist(ref(details), !inList)
         }
     }

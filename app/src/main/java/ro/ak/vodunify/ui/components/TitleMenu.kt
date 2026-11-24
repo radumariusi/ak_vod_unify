@@ -73,7 +73,7 @@ class TitleMenuViewModel @Inject constructor(
     fun toggleList() = act { i, s ->
         val inList = s?.inMyList == true
         tracking.setInWatchlist(ref(i), !inList)
-        if (inList) "„${i.title}” scos din Lista mea" else "„${i.title}” adăugat în Lista mea (De văzut)"
+        if (inList) "„${i.title}” scos din Lista mea" else "„${i.title}” adăugat în Lista mea"
     }
 
     fun toggleWatched() = act { i, s ->

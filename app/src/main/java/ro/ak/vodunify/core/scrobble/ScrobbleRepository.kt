@@ -287,17 +287,21 @@ class ScrobbleRepository @Inject constructor(
         val last = prefs.getLong(key, 0L)
         val lastPackage = prefs.getString(packageKey, null)
         val resumeId = "$LOCAL_SOURCE|${media.itemKey}"
+        val replay = trackingDao.resumeById(resumeId)?.updatedAt?.let { it > last && it <= at } == true
         val duplicate = kotlin.math.abs(at - last) < TimeUnit.HOURS.toMillis(6) &&
-            (at <= last || lastPackage == appPackage)
-        if (duplicate) {
+            (at <= last || (lastPackage == appPackage && !replay))
+        if (duplicate && (at <= last ||
+                trackingDao.hasWatchAtOrAfter(LOCAL_SOURCE, media.titleKey, media.season, media.episode, last))
+        ) {
             trackingDao.deleteResumeByIdBefore(resumeId, at)
             return
         }
         val event = WatchEvent(media, Instant.ofEpochMilli(at), LOCAL_SOURCE)
         val history = TrackingEntities.history(event).copy(appPackage = appPackage, playbackAt = at)
         val watched = if (at >= last && media.type != MediaType.EPISODE) TrackingEntities.watched(event) else null
-        trackingDao.completePlayback(resumeId, history, watched)
-        if (at >= last) prefs.edit().putLong(key, at).putString(packageKey, appPackage).apply()
+        if (trackingDao.completePlayback(resumeId, history, watched) && at >= last) {
+            prefs.edit().putLong(key, at).putString(packageKey, appPackage).apply()
+        }
     }
 
     private fun recordProof(event: ScrobbleEvent, fromServiceCode: Boolean, media: MediaRef) {

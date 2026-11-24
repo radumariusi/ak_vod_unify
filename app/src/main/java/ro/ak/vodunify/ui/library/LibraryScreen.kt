@@ -158,6 +158,13 @@ fun LibraryScreen(viewModel: LibraryViewModel = hiltViewModel()) {
                     }
                 }
                 state.filter.tab == LibraryTab.ALL || state.filter.tab == LibraryTab.WATCHLIST -> {
+                    val started = state.items.filter { it.posterStage == PosterStage.IN_PROGRESS }
+                    if (started.isNotEmpty()) {
+                        item(key = "în-curs", span = { GridItemSpan(maxLineSpan) }) {
+                            Text("În curs", style = MaterialTheme.typography.titleMedium)
+                        }
+                        items(started, key = { it.key }) { item -> LibraryCard(item) }
+                    }
                     val saved = state.items.filter { it.posterStage == PosterStage.UNWATCHED }
                     listOf(TitleKind.MOVIE to "Vreau să văd Filme", TitleKind.TV to "Vreau să văd Seriale").forEach { (kind, title) ->
                         val part = saved.filter { it.kind == kind }
@@ -169,8 +176,12 @@ fun LibraryScreen(viewModel: LibraryViewModel = hiltViewModel()) {
                         }
                         items(part, key = { it.key }) { item -> LibraryCard(item) }
                     }
-                    items(state.items.filterNot { it.posterStage == PosterStage.UNWATCHED }, key = { it.key }) { item ->
-                        LibraryCard(item)
+                    val watched = state.items.filter { it.posterStage == PosterStage.WATCHED }
+                    if (watched.isNotEmpty()) {
+                        item(key = "văzute", span = { GridItemSpan(maxLineSpan) }) {
+                            Text("Văzute", style = MaterialTheme.typography.titleMedium)
+                        }
+                        items(watched, key = { it.key }) { item -> LibraryCard(item) }
                     }
                 }
                 state.items.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {

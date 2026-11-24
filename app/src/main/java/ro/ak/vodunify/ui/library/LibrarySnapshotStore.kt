@@ -17,7 +17,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class LibrarySnapshotStore @Inject constructor(@ApplicationContext context: Context) {
-    private val file = File(context.filesDir, "library_snapshot.json")
+    private val file = File(context.filesDir, "library_snapshot_v2.json")
     private val lock = Mutex()
     private val json = Json { ignoreUnknownKeys = true }
 

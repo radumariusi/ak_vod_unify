@@ -51,7 +51,7 @@ class SeriesMarker @Inject constructor(
             }
         }
         check(list.isNotEmpty()) { "TMDb nu indică niciun episod apărut." }
-        tracking.markEpisodesWatched(show, list)
+        tracking.markEpisodesWatched(show, list, wholeShow = seasons == null)
         return list.size
     }
 
@@ -62,10 +62,13 @@ class SeriesMarker @Inject constructor(
         internal fun airedCounts(
             seasons: List<SeasonSummary>,
             lastAiredEpisode: EpisodeAir?,
+            today: LocalDate = LocalDate.now(),
         ): Map<Int, Int> {
             val last = lastAiredEpisode?.takeIf { it.season > 0 && it.episode > 0 }
             return seasons.asSequence().filter { it.number > 0 }.mapNotNull { season ->
+                val startsLater = season.airDate?.let { runCatching { LocalDate.parse(it).isAfter(today) }.getOrDefault(false) } == true
                 val count = when {
+                    startsLater -> 0
                     last == null || season.number < last.season -> season.episodeCount
                     season.number == last.season -> minOf(last.episode, season.episodeCount)
                     else -> 0

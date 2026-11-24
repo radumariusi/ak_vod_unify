@@ -36,7 +36,6 @@ import ro.ak.vodunify.core.calendar.tmdb.TmdbCalendarApi
 import ro.ak.vodunify.core.calendar.tmdb.TmdbFetch
 import ro.ak.vodunify.core.calendar.today.TodayDigest
 import ro.ak.vodunify.core.connector.MediaType
-import ro.ak.vodunify.core.db.TrackingDao
 import ro.ak.vodunify.core.prefs.CatalogPreferences
 import ro.ak.vodunify.core.reconcile.LibraryStatus
 import ro.ak.vodunify.core.tmdb.TmdbClient
@@ -77,7 +76,6 @@ class CalendarRepository @Inject constructor(
     private val prefs: CalendarPreferences,
     private val catalogPrefs: CatalogPreferences,
     private val tracking: TrackingRepository,
-    private val trackingDao: TrackingDao,
     private val playback: PlaybackPreferences,
     private val resolver: TargetResolver,
     http: OkHttpClient,
@@ -145,10 +143,10 @@ class CalendarRepository @Inject constructor(
         s.copy(trackedShows = shows.distinctBy { it.id }, trackedMovies = movies.distinctBy { it.id })
     }.distinctUntilChanged()
 
-    val watched: Flow<WatchedSet> = trackingDao.latestWatches().map { list ->
+    val watched: Flow<WatchedSet> = tracking.reconciled.map { view ->
         val episodes = mutableSetOf<String>()
         val movies = mutableSetOf<Int>()
-        list.filter { ro.ak.vodunify.core.connector.ExternalTrackers.isVisible(it.source) }.forEach { w ->
+        view.latestWatches.forEach { w ->
             val id = w.ref.tmdbId?.toInt() ?: return@forEach
             if (w.ref.season != null && w.ref.episode != null) {
                 episodes += "$id-${w.ref.season}-${w.ref.episode}"
