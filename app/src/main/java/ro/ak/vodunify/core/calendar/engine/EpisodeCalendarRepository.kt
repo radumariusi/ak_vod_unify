@@ -25,6 +25,7 @@ import ro.ak.vodunify.core.calendar.tmdb.CalendarImages
 import ro.ak.vodunify.core.calendar.tmdb.TvDetailsDto
 import ro.ak.vodunify.core.calendar.tmdb.TvSummaryDto
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -94,7 +95,6 @@ class EpisodeCalendarRepository(
                 else -> true
             }
         }
-        val anticipated = anticipatedDeferred.await()
         val useImdb = imdbRatings != null && omdbKey.isNotBlank()
 
         fun build(entries: List<EpisodeEntry>): CalendarResult {
@@ -124,12 +124,12 @@ class EpisodeCalendarRepository(
             { entries -> build(entries).takeIf { it.entries.isNotEmpty() }?.let { update(it) }; Unit }
         }
         val results = loadCalendarTitles(showIds, concurrency, publish) { showId ->
-            episodesForShow(api, showId, windowFrom, windowTo, settings, anticipated, omdbKey.takeIf { useImdb })
+            episodesForShow(api, showId, windowFrom, windowTo, settings, anticipatedDeferred, omdbKey.takeIf { useImdb })
         }
         if (results.isNotEmpty() && results.all { it.isFailure }) {
             throw results.first().exceptionOrNull() ?: TmdbException("TMDB: eroare necunoscută")
         }
-        build(results.flatMap { it.getOrDefault(emptyList()) })
+        build(results.flatMap { it.getOrDefault(emptyList()) }).copy(complete = results.none { it.isFailure })
     }
 
     private suspend fun discoverShows(api: TmdbApi, from: LocalDate, to: LocalDate, maxPages: Int): List<TvSummaryDto> {
@@ -150,7 +150,7 @@ class EpisodeCalendarRepository(
         from: LocalDate,
         to: LocalDate,
         settings: CalendarSettings,
-        anticipated: Set<Int>,
+        anticipated: Deferred<Set<Int>>,
         omdbKey: String?,
     ): List<EpisodeEntry> {
         val details = api.tvDetails(showId)
@@ -195,10 +195,11 @@ class EpisodeCalendarRepository(
         val imdb = if (omdbKey != null && imdbId != null) imdbRatings?.rating(imdbId, omdbKey) else null
         val followed = settings.isFollowed(details.id)
 
+        val isAnticipated = details.id in anticipated.await()
+
         return dated.map { (episode, date) ->
             val release = resolver.original(date, originCountries, networkIds)
             val isNewShow = episode.seasonNumber == 1
-            val isAnticipated = details.id in anticipated
             val verdict = QualityGate.evaluate(
                 QualityInput(
                     isNewShow = isNewShow,

@@ -269,13 +269,13 @@ private fun InterfaceCategory() {
     val library by ro.ak.vodunify.core.prefs.UiPrefs.libraryLayout.collectAsStateWithLifecycle()
     SettingsCard("Interfață") {
         OnOffDropdown(
-            label = "Animație la schimbarea rândului (Acasă, TV)",
+            label = "Animație la schimbarea rândului (TV)",
             value = animation,
             onSelect = ro.ak.vodunify.core.prefs.UiPrefs::setRowAnimation,
             on = "Pornită: rândul urcă animat",
             off = "Oprită: rândul apare pe loc",
         )
-        SettingHint("Oprită, Acasă e mai fluidă pe televizoarele mai lente.")
+        SettingHint("Se aplică în Acasă, Calendar și Lista mea.")
         Spacer(Modifier.height(4.dp))
         Dropdown(
             label = "Lista mea",

@@ -159,6 +159,7 @@ class MovieCalendarRepository(
             throw results.first().exceptionOrNull() ?: TmdbException("TMDB: eroare necunoscută")
         }
         build(results.flatMap { it.getOrDefault(emptyList()) })
+            .copy(complete = discovered.none { it.isFailure } && results.none { it.isFailure })
     }
 
     /** (region, TMDB release types) to ask `discover/movie` for. */

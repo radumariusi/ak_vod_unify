@@ -1,6 +1,8 @@
 package ro.ak.vodunify.core.calendar.anticipated
 
 import ro.ak.vodunify.core.calendar.tmdb.TmdbApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import java.time.LocalDate
 
 /**
@@ -38,13 +40,13 @@ class TmdbAnticipatedMoviesSource(
 
     @Volatile private var cached: Triple<LocalDate, Long, Set<Int>>? = null
 
-    override suspend fun movieIds(tmdb: TmdbApi, today: LocalDate): Set<Int> {
-        cached?.let { (day, at, ids) -> if (day == today && now() - at < ttlMillis) return ids }
-        val upcoming = top(tmdb, today, today.plusDays(lookAheadDays), upcomingCount)
-        val recent = top(tmdb, today.minusDays(lookBackDays), today.minusDays(1), recentCount)
-        val ids = upcoming + recent
+    override suspend fun movieIds(tmdb: TmdbApi, today: LocalDate): Set<Int> = coroutineScope {
+        cached?.let { (day, at, ids) -> if (day == today && now() - at < ttlMillis) return@coroutineScope ids }
+        val upcoming = async { top(tmdb, today, today.plusDays(lookAheadDays), upcomingCount) }
+        val recent = async { top(tmdb, today.minusDays(lookBackDays), today.minusDays(1), recentCount) }
+        val ids = upcoming.await() + recent.await()
         cached = Triple(today, now(), ids)
-        return ids
+        ids
     }
 
     private suspend fun top(tmdb: TmdbApi, from: LocalDate, to: LocalDate, count: Int): Set<Int> {

@@ -19,11 +19,13 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import ro.ak.vodunify.core.calendar.android.CalendarRepository
+import ro.ak.vodunify.core.calendar.android.CachedCalendar
 import ro.ak.vodunify.core.calendar.android.CalendarWorker
 import ro.ak.vodunify.core.calendar.android.WatchedSet
 import ro.ak.vodunify.core.calendar.model.CalendarSettings
@@ -206,7 +208,7 @@ class CalendarViewModel @Inject constructor(
     val state: StateFlow<CalendarUiState> =
         combine(loaded, calendar.watched, startedTitles, showRejected, onlyFollowed) { s, watched, started, rejected, followed ->
             s.withViewingStatus(watched, started).copy(showRejected = rejected, onlyFollowed = followed)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CalendarUiState())
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CalendarUiState())
 
     val isConfigured: Boolean get() = calendar.isConfigured
 
@@ -265,26 +267,24 @@ class CalendarViewModel @Inject constructor(
             rejected = r.rejected.map { it.toItem(false) },
             summary = CalendarSummary(r.entries.size, r.rejected.size, r.hiddenByCategory, r.hiddenByUser, r.notOnMyApps, r.usedImdb),
         )
-        fun source(
-            cached: suspend () -> CalendarUiState?,
-            preview: suspend () -> CalendarUiState?,
-            fetch: suspend (suspend (CalendarUiState) -> Unit) -> CalendarUiState,
+        fun <T> source(
+            stored: suspend () -> CachedCalendar<T>,
+            map: (T) -> CalendarUiState,
+            fetch: suspend (suspend (T) -> Unit) -> T,
         ): Flow<CalendarUiState> = flow {
-            val exact = cached()
-            if (exact != null && !force) {
-                emit(exact)
+            val cache = stored()
+            var previous = cache.value?.let(map)
+            if (cache.fresh && !force && previous != null) {
+                emit(previous)
                 return@flow
             }
-            var previous = exact ?: preview()
             emit((previous ?: base).copy(loading = true))
             try {
-                emit(fetch { partial ->
-                    // Păstrăm lansările deja afișate din cache până sosește lista completă.
-                    val shown = previous
-                    val display = if (shown == null) partial else mergeCalendarStates(base, shown, partial, sameSource = true)
+                emit(map(fetch { partial ->
+                    val display = map(partial)
                     previous = display
                     if (display.passed.orEmpty().isNotEmpty()) emit(display.copy(loading = true))
-                })
+                }))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -293,14 +293,14 @@ class CalendarViewModel @Inject constructor(
         }
 
         val episodes = source(
-            cached = { calendar.cachedEpisodes(from, to, q.settings)?.let(::episodesState) },
-            preview = { calendar.previewEpisodes(from, to, q.settings)?.let(::episodesState) },
-            fetch = { update -> episodesState(calendar.episodes(from, to, q.settings, force) { update(episodesState(it)) }) },
+            stored = { calendar.storedEpisodes(from, to, q.settings) },
+            map = ::episodesState,
+            fetch = { update -> calendar.episodes(from, to, q.settings, force, update) },
         )
         val movies = source(
-            cached = { calendar.cachedMovies(from, to, q.settings)?.let(::moviesState) },
-            preview = { calendar.previewMovies(from, to, q.settings)?.let(::moviesState) },
-            fetch = { update -> moviesState(calendar.movies(from, to, q.settings, force) { update(moviesState(it)) }) },
+            stored = { calendar.storedMovies(from, to, q.settings) },
+            map = ::moviesState,
+            fetch = { update -> calendar.movies(from, to, q.settings, force, update) },
         )
         return when (q.tab) {
             CalendarTab.SHOWS -> episodes
@@ -310,7 +310,7 @@ class CalendarViewModel @Inject constructor(
     }
 
     private fun mergeCalendarStates(
-        base: CalendarUiState, a: CalendarUiState, b: CalendarUiState, sameSource: Boolean = false,
+        base: CalendarUiState, a: CalendarUiState, b: CalendarUiState,
     ): CalendarUiState {
         fun ordered(first: List<CalendarItem>, second: List<CalendarItem>) =
             (second + first).distinctBy { it.key }.sortedWith(compareBy(
@@ -321,8 +321,7 @@ class CalendarViewModel @Inject constructor(
         val rejected = ordered(a.rejected, b.rejected).filterNot { it.key in visibleKeys }
         val left = a.summary
         val right = b.summary
-        val summary = if (sameSource) right.copy(count = entries.orEmpty().size, rejected = rejected.size)
-        else CalendarSummary(
+        val summary = CalendarSummary(
             entries.orEmpty().size, rejected.size, left.hiddenByCategory + right.hiddenByCategory,
             left.hiddenByUser + right.hiddenByUser, left.notOnMyApps + right.notOnMyApps, left.usedImdb || right.usedImdb,
         )

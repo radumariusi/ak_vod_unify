@@ -39,6 +39,12 @@ interface TmdbCacheDao {
     @Upsert
     suspend fun put(entry: TmdbCacheEntity)
 
+    @Query("SELECT * FROM tmdb_cache WHERE `key` BETWEEN :first AND :last ORDER BY `key`")
+    suspend fun window(first: String, last: String): List<TmdbCacheEntity>
+
+    @Upsert
+    suspend fun putAll(entries: List<TmdbCacheEntity>)
+
     @Query("DELETE FROM tmdb_cache WHERE fetchedAt < :olderThan")
     suspend fun prune(olderThan: Long)
 

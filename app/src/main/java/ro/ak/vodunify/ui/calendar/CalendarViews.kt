@@ -15,14 +15,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyGridState
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -55,7 +51,6 @@ import ro.ak.vodunify.ui.components.ChoiceOption
 import ro.ak.vodunify.ui.components.TitleHero
 import kotlinx.coroutines.delay
 import ro.ak.vodunify.ui.components.layoutSpec
-import ro.ak.vodunify.ui.components.rowSpacing
 import ro.ak.vodunify.ui.components.returningFocus
 import ro.ak.vodunify.ui.theme.Accent
 import java.time.DayOfWeek
@@ -122,28 +117,16 @@ fun CalendarItemMenu(item: CalendarItem, actions: CalendarItemActions, onDismiss
     )
 }
 
-/** Vederea pe zi, cu aceleași postere verticale ca în Lista mea. */
+/** Azi și Zi: posterele pot fi parcurse orizontal, în același rând. */
 @Composable
 internal fun DayView(
     items: List<CalendarItem>,
-    gridState: LazyGridState,
+    rowState: LazyListState,
     actions: CalendarItemActions,
     onFocus: (CalendarItem) -> Unit,
 ) {
-    val spec = layoutSpec()
     var menu by remember { mutableStateOf<CalendarItem?>(null) }
-    LazyVerticalGrid(
-        columns = GridCells.FixedSize(spec.posterWidth),
-        state = gridState,
-        contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
-        verticalArrangement = Arrangement.spacedBy(rowSpacing()),
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        items(items, key = { it.key }) { item ->
-            CalendarPosterCard(item, "calendar-poster|${item.key}", onFocus, actions.open) { menu = it }
-        }
-    }
+    CalendarPosterRow(items, "calendar-poster", actions, onFocus, onLongClick = { menu = it }, state = rowState)
     menu?.let { item -> CalendarItemMenu(item, actions) { menu = null } }
 }
 
@@ -238,40 +221,53 @@ fun MonthCalendar(
         }
     }
     val gap = if (spec.isCompact) 4.dp else 8.dp
-    val cellHeight = if (spec.isCompact) 96.dp else 118.dp
     val ro = remember { Locale("ro", "RO") }
 
-    LazyColumn(
-        state = listState,
-        verticalArrangement = Arrangement.spacedBy(gap),
-        contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 8.dp),
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        item(key = "weekdays") {
-            Row(horizontalArrangement = Arrangement.spacedBy(gap), modifier = Modifier.fillMaxWidth()) {
-                DayOfWeek.entries.forEach { d ->
-                    Text(
-                        d.getDisplayName(TextStyle.SHORT, ro).replaceFirstChar { it.uppercase() },
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f).padding(start = 8.dp),
-                    )
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val cellWidth = (maxWidth - spec.screenPadding * 2 - gap * 6) / 7
+        val padding = if (spec.isCompact) 4.dp else 6.dp
+        val posterGap = 3.dp
+        val insideWidth = cellWidth - padding * 2
+        val slots = if (insideWidth >= 84.dp) 3 else 2
+        val posterWidth = ((insideWidth - posterGap * (slots - 1)) / slots).coerceIn(0.dp, 50.dp)
+        val headingHeight = 26.dp
+        val estimateHeight = padding * 2 + headingHeight
+        LazyColumn(
+            state = listState,
+            verticalArrangement = Arrangement.spacedBy(gap),
+            contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 8.dp),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            item(key = "weekdays") {
+                Row(horizontalArrangement = Arrangement.spacedBy(gap), modifier = Modifier.fillMaxWidth()) {
+                    DayOfWeek.entries.forEach { d ->
+                        Text(
+                            d.getDisplayName(TextStyle.SHORT, ro).replaceFirstChar { it.uppercase() },
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f).padding(start = 8.dp),
+                        )
+                    }
                 }
             }
-        }
-        weeks.forEach { monday ->
-            item(key = "week-$monday") {
-                Row(horizontalArrangement = Arrangement.spacedBy(gap), modifier = Modifier.fillMaxWidth()) {
-                    (0L..6L).map { monday.plusDays(it) }.forEach { day ->
-                        val inMonth = !day.isBefore(from) && !day.isAfter(to)
-                        val dayItems = if (inMonth) byDay[day].orEmpty() else emptyList()
-                        Box(Modifier.weight(1f).height(cellHeight)) {
-                            if (inMonth) {
-                                val titles = remember(dayItems, now) { monthPreview(dayItems, now) }
-                                MonthCell(
-                                    day, titles, isToday = day == today, restoreDrilledDay = focusedDay == day.toString(),
-                                    onFocusRestored = onFocusRestored, onOpen = { onOpenDay(day) },
-                                )
+            weeks.forEach { monday ->
+                item(key = "week-$monday") {
+                    val dates = (0L..6L).map { monday.plusDays(it) }
+                    val showPosters = posterWidth > 0.dp && dates.any { it in byDay }
+                    val height = if (showPosters) estimateHeight + 4.dp + posterWidth * 1.5f else estimateHeight
+                    Row(horizontalArrangement = Arrangement.spacedBy(gap), modifier = Modifier.fillMaxWidth()) {
+                        dates.forEach { day ->
+                            Box(Modifier.weight(1f).height(height)) {
+                                if (day in from..to) {
+                                    val dayItems = byDay[day].orEmpty()
+                                    val titles = remember(dayItems, now) { monthPreview(dayItems, now) }
+                                    MonthCell(
+                                        day, titles, isToday = day == today, restoreDrilledDay = focusedDay == day.toString(),
+                                        padding = padding, headingHeight = headingHeight,
+                                        slots = slots, posterWidth = posterWidth, posterGap = posterGap,
+                                        onFocusRestored = onFocusRestored, onOpen = { onOpenDay(day) },
+                                    )
+                                }
                             }
                         }
                     }
@@ -287,6 +283,11 @@ private fun MonthCell(
     items: List<CalendarItem>,
     isToday: Boolean,
     restoreDrilledDay: Boolean,
+    padding: Dp,
+    headingHeight: Dp,
+    slots: Int,
+    posterWidth: Dp,
+    posterGap: Dp,
     onFocusRestored: () -> Unit,
     onOpen: () -> Unit,
 ) {
@@ -312,45 +313,43 @@ private fun MonthCell(
             .then(if (isToday) Modifier.border(BorderStroke(2.dp, Accent), RoundedCornerShape(10.dp)) else Modifier)
             .semantics { contentDescription = "${day.dayOfMonth}: ${items.size} titluri" },
     ) {
-        BoxWithConstraints(Modifier.fillMaxSize().padding(6.dp)) {
-            val posterGap = 3.dp
-            val slots = if (maxWidth >= 84.dp) 3 else 2
-            val remaining = items.size - slots
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        day.dayOfMonth.toString(),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isToday) Accent else MaterialTheme.colorScheme.onSurface,
-                    )
-                    Spacer(Modifier.weight(1f))
-                    if (remaining > 0) {
-                        Text("+$remaining", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+        Column(
+            Modifier.fillMaxSize().padding(padding),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                Modifier.fillMaxWidth().height(headingHeight),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    day.dayOfMonth.toString(),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isToday) Accent else MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.weight(1f))
+                val remaining = items.size - slots
+                if (remaining > 0) {
+                    Text("+$remaining", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
-                    val width = minOf((maxWidth - posterGap * (slots - 1)) / slots, maxHeight * (2f / 3f), 50.dp)
-                    if (width > 0.dp) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(posterGap)) {
-                            items.take(slots).forEach { item ->
-                                Box(
-                                    Modifier
-                                        .widthIn(min = width, max = width)
-                                        .aspectRatio(2f / 3f)
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(MaterialTheme.colorScheme.surface)
-                                        .alpha(if (item.passed) 1f else 0.5f),
-                                ) {
-                                    if (item.posterUrl == null) {
-                                        Text(item.title, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                    } else {
-                                        AsyncImage(
-                                            model = item.posterUrl, contentDescription = item.title,
-                                            contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
-                                        )
-                                    }
-                                }
+            }
+            if (items.isNotEmpty() && posterWidth > 0.dp) {
+                Row(horizontalArrangement = Arrangement.spacedBy(posterGap)) {
+                    items.take(slots).forEach { item ->
+                        Box(
+                            Modifier.width(posterWidth)
+                                .aspectRatio(2f / 3f)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(MaterialTheme.colorScheme.surface)
+                                .alpha(if (item.passed) 1f else 0.5f),
+                        ) {
+                            if (item.posterUrl == null) {
+                                Text(item.title, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            } else {
+                                AsyncImage(
+                                    model = item.posterUrl, contentDescription = item.title,
+                                    contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
+                                )
                             }
                         }
                     }

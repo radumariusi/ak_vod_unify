@@ -17,10 +17,11 @@ enum class MovieReleaseKind(val label: String, val short: String) {
 }
 
 /** One release of a movie, as worked out from TMDB release dates and providers. */
+@Serializable
 data class MovieRelease(
     val kind: MovieReleaseKind,
     val region: Region,
-    val date: LocalDate,
+    @Serializable(with = CalendarDateSerializer::class) val date: LocalDate,
     /** The streaming service, for [MovieReleaseKind.STREAMING]. */
     val service: StreamingApp? = null,
     /** True when [service] is installed and set to [region] in Settings. */
@@ -32,6 +33,7 @@ data class MovieRelease(
 )
 
 /** One movie release in the calendar, with its moment already in Romania time. */
+@Serializable
 data class MovieEntry(
     val movieId: Int,
     val title: String,
@@ -43,7 +45,7 @@ data class MovieEntry(
     val kind: MovieReleaseKind,
     val region: Region,
     /** Release moment in Europe/Bucharest; for cinema only the date matters. */
-    val releaseAt: ZonedDateTime,
+    @Serializable(with = CalendarMomentSerializer::class) val releaseAt: ZonedDateTime,
     /** False for cinema releases: TMDB only knows the day, there's no hour to show. */
     val hasTime: Boolean,
     /** True when the hour is estimated. */
@@ -78,6 +80,7 @@ data class MovieEntry(
 }
 
 /** What the movie calendar shows for a period, plus what was left out and why. */
+@Serializable
 data class MovieCalendarResult(
     val entries: List<MovieEntry>,
     /** Releases that failed the quality gate, kept so the UI can show them on demand. */
@@ -92,4 +95,5 @@ data class MovieCalendarResult(
     val usedImdb: Boolean = false,
     /** Name of the anticipated-list source, for the UI. */
     val anticipatedSource: String = "",
+    val complete: Boolean = true,
 )

@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import ro.ak.vodunify.ui.components.ChoiceDialog
 import ro.ak.vodunify.ui.components.ChoiceOption
 import ro.ak.vodunify.ui.components.Dropdown
@@ -58,6 +57,7 @@ import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.ui.components.ErrorPanel
 import ro.ak.vodunify.ui.components.IconButton
 import ro.ak.vodunify.ui.components.tvTitleHeroHeight
+import ro.ak.vodunify.ui.components.tvHomeRowHeight
 import ro.ak.vodunify.ui.components.layoutSpec
 import ro.ak.vodunify.ui.components.clearReturningFocus
 import ro.ak.vodunify.ui.navigation.LocalTabTopFocus
@@ -97,7 +97,7 @@ fun CalendarScreen(
         }
     }
 
-    val dayGrid = rememberLazyGridState()
+    val dayRow = rememberLazyListState()
     val weekList = rememberLazyListState()
     val monthList = rememberLazyListState()
     var shownDay by rememberSaveable { mutableStateOf("") }
@@ -112,7 +112,7 @@ fun CalendarScreen(
     LaunchedEffect(state.mode, period) {
         when {
             state.mode.isDay -> {
-                if (shownDay.isNotEmpty() && shownDay != period) dayGrid.scrollToItem(0)
+                if (shownDay.isNotEmpty() && shownDay != period) dayRow.scrollToItem(0)
                 shownDay = period
             }
             state.mode == CalendarMode.MONTH -> {
@@ -132,7 +132,7 @@ fun CalendarScreen(
         if (origin == null) {
             focusedTitle = null
             scope.launch {
-                dayGrid.scrollToItem(0)
+                dayRow.scrollToItem(0)
                 focusTop()
             }
         }
@@ -190,12 +190,14 @@ fun CalendarScreen(
                         else -> BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
                             // Lasă loc posterelor și când bara se așază pe două rânduri pe un ecran îngust.
                             val ideal = if (spec.isTv) tvTitleHeroHeight(maxHeight, spec).coerceAtLeast(150.dp) else spec.heroHeight
-                            val heroHeight = ideal.coerceAtMost(maxHeight * 0.55f)
+                            val posterSpace = if (state.mode.isDay) spec.posterHeight + 20.dp else tvHomeRowHeight(spec)
+                            val limit = if (spec.isTv) (maxHeight - posterSpace).coerceAtLeast(0.dp) else maxHeight * 0.55f
+                            val heroHeight = ideal.coerceAtMost(limit)
                             val logoLanguage by viewModel.logoLanguage.collectAsStateWithLifecycle(initialValue = null)
                             Column(Modifier.fillMaxSize()) {
                                 CalendarHero(shown, heroHeight, logoLanguage, showDate = !state.mode.isDay, loadLogo = viewModel::titleLogo)
                                 if (state.mode.isDay) {
-                                    DayView(grouped, dayGrid, itemActions, onFocus)
+                                    DayView(grouped, dayRow, itemActions, onFocus)
                                 } else {
                                     WeekList(
                                         state.days, grouped, weekList, state.tab.noun, itemActions, onFocus,

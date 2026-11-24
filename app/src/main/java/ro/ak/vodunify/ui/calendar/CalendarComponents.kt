@@ -39,12 +39,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import ro.ak.vodunify.ui.components.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,12 +59,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -76,6 +82,16 @@ import coil.compose.AsyncImage
 import ro.ak.vodunify.core.calendar.format.dayLabel
 import ro.ak.vodunify.core.calendar.time.RomaniaTime
 import ro.ak.vodunify.ui.components.layoutSpec
+import ro.ak.vodunify.ui.components.DefaultScroll
+import ro.ak.vodunify.ui.components.FixedRowsScroll
+import ro.ak.vodunify.ui.components.HomeRowFocus
+import ro.ak.vodunify.ui.components.HomeRows
+import ro.ak.vodunify.ui.components.LocalHomeRows
+import ro.ak.vodunify.ui.components.returningFocus
+import ro.ak.vodunify.ui.components.rowSpacing
+import ro.ak.vodunify.ui.components.tvHomeRowHeight
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ro.ak.vodunify.core.prefs.UiPrefs
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.Instant
@@ -235,49 +251,96 @@ internal fun CalendarPosterCard(
 
 /** Vederea pe săptămână: o zi pe rând, postere în rând orizontal. */
 @Composable
-fun WeekList(
+internal fun CalendarPosterRow(
+    entries: List<CalendarItem>,
+    rowKey: String,
+    actions: CalendarItemActions,
+    onFocus: (CalendarItem) -> Unit,
+    onLongClick: (CalendarItem) -> Unit,
+    state: LazyListState = rememberRestoringRowState(rowKey, entries) { it.key },
+) {
+    val spec = layoutSpec()
+    DefaultScroll {
+        LazyRow(
+            state = state,
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
+            contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 10.dp),
+        ) {
+            items(entries, key = { it.key }) { item ->
+                CalendarPosterCard(item, "$rowKey|${item.key}", onFocus, actions.open, onLongClick)
+            }
+        }
+    }
+}
+
+@Composable
+internal fun WeekList(
     days: List<LocalDate>,
     items: List<CalendarItem>,
     listState: LazyListState,
     noun: String,
     actions: CalendarItemActions,
     onFocus: (CalendarItem) -> Unit,
-    /** „Următoare”: zilele fără nimic nu se afișează. */
     skipEmpty: Boolean = false,
 ) {
     val spec = layoutSpec()
-    val byDay = items.groupBy { it.date }
+    val byDay = remember(items) { items.groupBy { it.date } }
+    val shownDays = remember(days, byDay, skipEmpty) { if (skipEmpty) days.filter { it in byDay } else days }
+    val keys = remember(shownDays, byDay) { shownDays.map { day -> "calendar-week|$day".takeIf { day in byDay } } }
+    val slot = tvHomeRowHeight(spec)
+    val scope = rememberCoroutineScope()
+    val rows = remember(slot, listState, scope) { HomeRows(slot, listState, scope) }
+    val animate by UiPrefs.rowAnimation.collectAsStateWithLifecycle()
     var menu by remember { mutableStateOf<CalendarItem?>(null) }
-    LazyColumn(
-        state = listState,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(vertical = 8.dp),
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        days.forEach { day ->
-            val entries = byDay[day].orEmpty()
-            if (skipEmpty && entries.isEmpty()) return@forEach
-            item(key = "day-$day") {
-                Text(
-                    dayLabel(day) + if (entries.isEmpty()) " · nimic" else " · ${entries.sumOf { it.episodeMembers.size.coerceAtLeast(1) }} $noun",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(horizontal = spec.screenPadding).padding(top = 8.dp),
-                )
-            }
-            if (entries.isNotEmpty()) {
-                item(key = "row-$day") {
+
+    val returning = returningFocus()
+    val returnRow = returning?.homeRow ?: returning?.cardKey?.substringBeforeLast('|')
+    val returnIndex = keys.indexOf(returnRow).takeIf { returnRow != null }
+    LaunchedEffect(returning, returnIndex) {
+        if (returnIndex != null && returnIndex >= 0) {
+            val visible = listState.layoutInfo.visibleItemsInfo.any { it.index == returnIndex }
+            if (!visible || (spec.isTv && (listState.firstVisibleItemIndex != returnIndex ||
+                        listState.firstVisibleItemScrollOffset != 0))) listState.scrollToItem(returnIndex)
+        }
+    }
+
+    FixedRowsScroll(spec.isTv) {
+        CompositionLocalProvider(LocalHomeRows provides rows.takeIf { spec.isTv }) {
+            LazyColumn(
+                state = listState,
+                verticalArrangement = Arrangement.spacedBy(if (spec.isTv) 0.dp else 8.dp),
+                contentPadding = if (spec.isTv) PaddingValues(bottom = slot) else PaddingValues(vertical = 8.dp),
+                modifier = Modifier.fillMaxSize().clipToBounds()
+                    .onPreviewKeyEvent { spec.isTv && rows.move(it, keys, animate) },
+            ) {
+                itemsIndexed(shownDays, key = { _, day -> "calendar-week|$day" }) { index, day ->
+                    val entries = byDay[day].orEmpty()
                     val rowKey = "calendar-week|$day"
-                    LazyRow(
-                        state = rememberRestoringRowState(rowKey, entries) { it.key },
-                        horizontalArrangement = Arrangement.spacedBy(ro.ak.vodunify.ui.components.rowSpacing()),
-                        contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 8.dp),
-                    ) {
-                        items(entries, key = { it.key }) { item ->
-                            CalendarPosterCard(item, "$rowKey|${item.key}", onFocus, actions.open) {
-                                if (it.episodeMembers.isEmpty()) actions.watch(it) else menu = it
+                    val content: @Composable () -> Unit = {
+                        val fixedHeight = if (entries.isEmpty()) 40.dp else slot
+                        Column(if (spec.isTv) Modifier.height(fixedHeight) else Modifier) {
+                            val count = entries.sumOf { it.episodeMembers.size.coerceAtLeast(1) }
+                            Box(
+                                Modifier.fillMaxWidth().padding(horizontal = spec.screenPadding)
+                                    .then(if (spec.isTv) Modifier.height(40.dp) else Modifier.padding(top = 8.dp)),
+                                contentAlignment = Alignment.CenterStart,
+                            ) {
+                                Text(
+                                    dayLabel(day) + if (entries.isEmpty()) " · nimic" else " · $count $noun",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            if (entries.isNotEmpty()) {
+                                CalendarPosterRow(entries, rowKey, actions, onFocus, onLongClick = {
+                                    if (it.episodeMembers.isEmpty()) actions.watch(it) else menu = it
+                                })
                             }
                         }
                     }
+                    if (entries.isEmpty()) content() else HomeRowFocus(rowKey, index, content)
                 }
             }
         }

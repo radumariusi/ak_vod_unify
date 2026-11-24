@@ -1,10 +1,12 @@
 package ro.ak.vodunify.core.calendar.model
 
+import kotlinx.serialization.Serializable
 import ro.ak.vodunify.core.calendar.quality.QualityVerdict
 import java.time.LocalDate
 import java.time.ZonedDateTime
 
 /** Where a title can be watched, according to TMDB / JustWatch. */
+@Serializable
 data class ProviderAvailability(
     val providerId: Int,
     val providerName: String,
@@ -13,9 +15,11 @@ data class ProviderAvailability(
 )
 
 /** IMDb rating as reported by OMDb. */
+@Serializable
 data class ImdbRating(val rating: Double, val votes: Int)
 
 /** One episode in the calendar, with its release time already in Romania time. */
+@Serializable
 data class EpisodeEntry(
     val showId: Int,
     val showName: String,
@@ -26,7 +30,7 @@ data class EpisodeEntry(
     val episodeTitle: String?,
     val overview: String?,
     /** Release moment in Europe/Bucharest. */
-    val releaseAt: ZonedDateTime,
+    @Serializable(with = CalendarMomentSerializer::class) val releaseAt: ZonedDateTime,
     /** True when the hour is estimated (TMDB only gives a date). */
     val timeIsApproximate: Boolean,
     /** The installed app (and its region) where the user can watch it, if any. */
@@ -63,6 +67,7 @@ data class EpisodeEntry(
  * What the calendar shows for a period, plus what was left out and why, so the
  * user can see when thresholds are too strict.
  */
+@Serializable
 data class CalendarResult(
     val entries: List<EpisodeEntry>,
     /** Episodes that failed the quality gate, kept so the UI can show them on demand. */
@@ -77,6 +82,8 @@ data class CalendarResult(
     val usedImdb: Boolean = false,
     /** Name of the anticipated-list source, for the UI. */
     val anticipatedSource: String = "",
+    /** Un rezultat incomplet se reîncearcă mai devreme și completează ce era păstrat local. */
+    val complete: Boolean = true,
 ) {
     fun byDay(): Map<LocalDate, List<EpisodeEntry>> = entries.groupBy { it.releaseDate }
 }
