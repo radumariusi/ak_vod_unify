@@ -97,6 +97,7 @@ fun CalendarSection(viewModel: CalendarSettingsViewModel = hiltViewModel()) {
                 )
             }
             }
+            Hint("Aceleași categorii filtrează și Noutăți, În curând, Populare și În tendințe pe Acasă.")
             Hint("Ce urmărești apare mereu, chiar dacă e într-o categorie ascunsă.")
 
             Label("Notificări și canalul „Azi apare”")

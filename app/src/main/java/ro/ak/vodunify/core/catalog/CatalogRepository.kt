@@ -212,7 +212,9 @@ class CatalogRepository @Inject constructor(
             posterUrl = TmdbImages.poster(dto.posterPath),
             backdropUrl = TmdbImages.backdrop(dto.backdropPath),
             rating = dto.voteAverage?.takeIf { it > 0 },
+            genreIds = dto.genres.map { it.id },
             episodeCount = dto.numberOfEpisodes,
+            origin = TmdbMappers.origin(dto, kind),
         )
     }
 
@@ -283,7 +285,9 @@ class CatalogRepository @Inject constructor(
             posterUrl = TmdbImages.poster(dto.posterPath),
             backdropUrl = TmdbImages.backdrop(dto.backdropPath),
             rating = dto.voteAverage?.takeIf { it > 0 },
+            genreIds = dto.genres.map { it.id },
             episodeCount = dto.numberOfEpisodes,
+            origin = TmdbMappers.origin(dto, kind),
         )
         fun air(e: ro.ak.vodunify.core.tmdb.TmdbEpisodeRef?) = e?.let { EpisodeAir(it.seasonNumber, it.episodeNumber, it.name, it.airDate) }
         return TitleReleases(

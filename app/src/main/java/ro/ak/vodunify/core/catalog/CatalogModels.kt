@@ -39,6 +39,7 @@ data class CatalogItem(
     val note: String? = null,
     /** Numărul de episoade (doar la seriale, din pagina titlului). */
     val episodeCount: Int? = null,
+    val origin: TitleOrigin = TitleOrigin(),
 ) {
     /** Cheie stabilă comună cu tabela `media` (ex. "movie:tmdb:603"). */
     val mediaKey: String get() = mediaKey(kind, id)
@@ -46,6 +47,14 @@ data class CatalogItem(
     val subtitle: String
         get() = listOfNotNull(year?.toString(), kind.label, note?.takeIf { it.isNotBlank() }).joinToString(" · ")
 }
+
+@Serializable
+data class TitleOrigin(
+    val language: String? = null,
+    val countries: List<String> = emptyList(),
+    val originalTitle: String? = null,
+    val type: String? = null,
+)
 
 fun mediaKey(kind: TitleKind, id: Long) = "${kind.path}:tmdb:$id"
 

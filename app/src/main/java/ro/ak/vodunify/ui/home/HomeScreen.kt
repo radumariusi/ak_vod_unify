@@ -245,7 +245,10 @@ private fun HomeContent(
 
 @Composable
 private fun HomeAttribution(catalog: HomeCatalog) {
-    AttributionNote(includeWhatToWatch = catalog.rows.any { it.id == "service_voyo_RO" && it.items.isNotEmpty() })
+    AttributionNote(
+        includeWhatToWatch = catalog.rows.any { it.id == "service_voyo_RO" && it.items.isNotEmpty() },
+        includeHomeCharts = true,
+    )
 }
 
 @Composable

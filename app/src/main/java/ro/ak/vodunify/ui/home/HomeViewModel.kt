@@ -8,12 +8,14 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -35,6 +37,7 @@ import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.core.catalog.MovieReleaseEvent
 import ro.ak.vodunify.core.catalog.ReleaseChannel
 import ro.ak.vodunify.core.calendar.android.CALENDAR_TO_SERVICE
+import ro.ak.vodunify.core.calendar.android.CalendarPreferences
 import ro.ak.vodunify.core.calendar.android.CalendarRepository
 import ro.ak.vodunify.core.calendar.model.MovieRelease
 import ro.ak.vodunify.core.calendar.model.MovieReleaseKind
@@ -52,6 +55,7 @@ import ro.ak.vodunify.ui.components.LoadState
 import ro.ak.vodunify.ui.components.loadCatching
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
+import kotlinx.serialization.json.Json
 import android.content.Context
 import coil.imageLoader
 import coil.request.ImageRequest
@@ -68,6 +72,8 @@ class HomeViewModel @Inject constructor(
     private val calendar: CalendarRepository,
     @ApplicationContext private val context: Context,
     private val snapshots: HomeSnapshotStore,
+    private val json: Json,
+    calendarPreferences: CalendarPreferences,
 ) : ViewModel() {
 
     private val reload = MutableStateFlow(0)
@@ -91,10 +97,20 @@ class HomeViewModel @Inject constructor(
     private val _state = MutableStateFlow<LoadState<HomeCatalog>>(
         snapshots.memory?.catalog?.let { LoadState.Data(it.withoutServiceRows()) } ?: LoadState.Loading,
     )
-    val state: StateFlow<LoadState<HomeCatalog>> = _state.asStateFlow()
-
     private val _personal = MutableStateFlow(snapshots.memory?.personal ?: PersonalRows(PersonalState.LOADING))
-    val personal: StateFlow<PersonalRows> = _personal.asStateFlow()
+    private val chart = MutableStateFlow(HomePopularityChart())
+    private val contentFilter = combine(
+        calendarPreferences.settings.map { it.hiddenCategories }.distinctUntilChanged(), chart, ::HomeContentFilter,
+    ).stateIn(viewModelScope, SharingStarted.Eagerly, HomeContentFilter())
+
+    private fun filtered(state: LoadState<HomeCatalog>, filter: HomeContentFilter): LoadState<HomeCatalog> =
+        if (state is LoadState.Data) LoadState.Data(filter.catalog(state.value)) else state
+
+    val state: StateFlow<LoadState<HomeCatalog>> = combine(_state, contentFilter, ::filtered)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, filtered(_state.value, contentFilter.value))
+
+    val personal: StateFlow<PersonalRows> = combine(_personal, contentFilter) { rows, filter -> filter.personal(rows) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, contentFilter.value.personal(_personal.value))
 
     private val configured = tracking.trackers.any { it.isConfigured }
 
@@ -232,6 +248,15 @@ class HomeViewModel @Inject constructor(
     }
 
     init {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    context.assets.open("home_popularity.json").bufferedReader().use {
+                        json.decodeFromString<HomePopularityChart>(it.readText())
+                    }
+                }.getOrNull()
+            }?.let { chart.value = it }
+        }
         viewModelScope.launch { tracking.syncIfStale() }
         // Calendarul de azi se pregătește în fundal, ca fila Calendar să apară pe loc.
         viewModelScope.launch {

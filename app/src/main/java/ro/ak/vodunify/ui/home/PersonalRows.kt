@@ -5,6 +5,7 @@ import ro.ak.vodunify.core.catalog.CatalogItem
 import ro.ak.vodunify.core.catalog.MovieReleaseEvent
 import ro.ak.vodunify.core.catalog.ReleaseChannel
 import ro.ak.vodunify.core.catalog.TitleKind
+import ro.ak.vodunify.core.catalog.TitleOrigin
 import ro.ak.vodunify.core.catalog.TitleReleases
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -43,6 +44,8 @@ data class PersonalItem(
     val episodeCode: String? = null,
     /** Când ai văzut ultima dată (Continuă vizionarea), epoch ms. */
     val watchedAt: Long? = null,
+    val origin: TitleOrigin = TitleOrigin(),
+    val genreIds: List<Int> = emptyList(),
 ) {
     /** Titlul ca element de catalog (pentru meniul rapid de la OK ținut apăsat). */
     fun asCatalogItem(): CatalogItem? = tmdbId?.let {
@@ -191,6 +194,8 @@ object HomeSections {
             showsProgress = false,
             overview = i.overview,
             rating = i.rating,
+            origin = i.origin,
+            genreIds = i.genreIds,
             release = release?.takeIf { it.channel != ReleaseChannel.UNKNOWN },
             eventDate = date?.toString(),
             episodeCode = code,
