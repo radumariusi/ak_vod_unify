@@ -50,8 +50,8 @@ enum class StreamingService(
 
     val tmdbProviderIds: Set<Int> get() = if (isCustom) setOfNotNull(AppRegistry.customProvider(id)) else baseProviderIds
 
-    /** În liste: serviciile din catalog și cele adăugate de tine (locurile libere nu). */
-    val isActive: Boolean get() = !isCustom || AppRegistry.customProvider(id) != null
+    /** Un serviciu adăugat ocupă un loc după asocierea cu aplicația instalată. */
+    val isActive: Boolean get() = !isCustom || TargetApp.byId(appId)?.let(AppRegistry::packageFor) != null
 
     companion object {
         fun byId(id: String): StreamingService? = entries.firstOrNull { it.id == id }
@@ -141,7 +141,7 @@ enum class TargetApp(
         "Sesiune media (titlu + minut)",
     ),
     APPLE_TV("appletv", "Apple TV", AppRole.OFFICIAL, listOf("com.apple.atve.androidtv.appletv"), listOf("appletv"), "Cititor de ecran (titlul și minutul din player)"),
-    VOYO("voyo", "VOYO", AppRole.OFFICIAL, listOf("net.cme.voyo.ro.tvapp", "net.cme.voyo.ro"), listOf("voyo", "voyo.ro", "voyoro", "voyoromania")),
+    VOYO("voyo", "VOYO", AppRole.OFFICIAL, listOf("net.cme.voyo.ro.tvapp", "net.cme.voyo.ro"), listOf("voyo", "voyo.ro", "voyoro", "voyoromania", "voyotv")),
     PEACOCK("peacock", "Peacock", AppRole.OFFICIAL, listOf("com.peacocktv.peacockandroid"), listOf("peacock"), "Sesiune media (titlu + minut)"),
     TUBI("tubi", "Tubi", AppRole.OFFICIAL, listOf("com.tubitv"), listOf("tubi", "tubitv")),
     PLUTO("pluto", "Pluto TV", AppRole.OFFICIAL, listOf("tv.pluto.android"), listOf("plutotv")),

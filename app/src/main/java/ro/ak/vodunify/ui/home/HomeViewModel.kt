@@ -21,6 +21,7 @@ import ro.ak.vodunify.core.catalog.CatalogItem
 import ro.ak.vodunify.core.catalog.CatalogRepository
 import ro.ak.vodunify.core.catalog.HomeCatalog
 import ro.ak.vodunify.core.catalog.ServiceShelf
+import ro.ak.vodunify.core.catalog.ServiceCatalogStatus
 import ro.ak.vodunify.core.playback.AppRegistry
 import ro.ak.vodunify.core.playback.InstalledApp
 import ro.ak.vodunify.core.playback.PlaybackPreferences
@@ -76,7 +77,9 @@ class HomeViewModel @Inject constructor(
     fun refreshApps() {
         refreshInstalled?.cancel()
         refreshInstalled = viewModelScope.launch {
-            val apps = withContext(Dispatchers.IO) { runCatching { resolver.installedApps() }.getOrNull() }
+            val apps = withContext(Dispatchers.IO) {
+                runCatching { resolver.installedApps(includeServicesWithoutLauncher = true) }.getOrNull()
+            }
             installed.value = apps ?: installed.value.orEmpty()
         }
     }
@@ -300,15 +303,20 @@ class HomeViewModel @Inject constructor(
                 }
                 s to shelves
             }.collectLatest { (settings, shelves) ->
+                val previous = (_state.value as? LoadState.Data)?.value
+                val pending = (previous ?: HomeCatalog(emptyList(), emptyList()))
+                    .withInstalledServices(shelves, ServiceCatalogStatus.CHECKING)
+                if (previous != null || pending.rows.isNotEmpty()) _state.value = LoadState.Data(pending)
+
                 val result = loadCatching { catalog.home(settings, shelves) }
                 if (result is LoadState.Data) {
-                    val previous = (_state.value as? LoadState.Data)?.value
-                    val catalog = mergeSavedCatalog(result.value, previous)
-                    _state.value = LoadState.Data(catalog)
-                    snapshots.saveCatalog(catalog)
-                } else if (_state.value !is LoadState.Data) {
-                    // O eroare nu șterge rândurile deja afișate.
-                    _state.value = result
+                    val visible = mergeSavedCatalog(result.value, pending)
+                        .withInstalledServices(shelves, ServiceCatalogStatus.UNAVAILABLE)
+                    _state.value = LoadState.Data(visible)
+                    snapshots.saveCatalog(visible)
+                } else {
+                    val fallback = pending.withInstalledServices(shelves, ServiceCatalogStatus.UNAVAILABLE)
+                    _state.value = if (fallback.rows.isNotEmpty() || fallback.hero.isNotEmpty()) LoadState.Data(fallback) else result
                 }
             }
         }

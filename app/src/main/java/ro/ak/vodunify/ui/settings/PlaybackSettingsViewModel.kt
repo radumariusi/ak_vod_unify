@@ -69,7 +69,7 @@ class PlaybackSettingsViewModel @Inject constructor(
     }
 
     /** Serviciu de streaming nou: furnizorul TMDb ales, deschis în aplicația [pkg]. False = nu mai sunt locuri. */
-    fun addService(providerId: Int, name: String, pkg: String): Boolean {
+    fun addService(providerId: Int?, name: String, pkg: String): Boolean {
         val slot = StreamingService.freeSlot() ?: return false
         AppRegistry.addService(slot, providerId, name, pkg)
         refreshInstalled()

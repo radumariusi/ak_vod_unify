@@ -253,6 +253,7 @@ private fun CatalogHomeRow(row: CatalogRow, openService: (String) -> Boolean) {
                 Text("Deschide aplicația")
             }
             val status = when (fallback.reason) {
+                ServiceCatalogStatus.CHECKING -> "Se verifică disponibilitatea titlurilor…"
                 ServiceCatalogStatus.NO_PROVIDER -> "TMDb nu listează serviciul în această bibliotecă."
                 ServiceCatalogStatus.NO_TITLES -> "TMDb nu listează momentan titluri pentru această bibliotecă."
                 ServiceCatalogStatus.UNAVAILABLE -> "Catalogul nu s-a putut încărca acum."

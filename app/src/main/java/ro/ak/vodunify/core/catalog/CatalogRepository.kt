@@ -106,12 +106,7 @@ class CatalogRepository @Inject constructor(
                     parts.any { it.second == ServiceCatalogStatus.NO_TITLES } -> ServiceCatalogStatus.NO_TITLES
                     else -> ServiceCatalogStatus.NO_PROVIDER
                 }
-                CatalogRow(
-                    id = "service_${shelf.service.id}_${shelf.market.code}",
-                    title = "Pe ${shelf.service.displayName} (${shelf.market.code})",
-                    items = items,
-                    serviceFallback = status?.let { ServiceFallback(shelf.packageName, it) },
-                )
+                shelf.row(items, status)
             }
         }.awaitAll()
 

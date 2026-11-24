@@ -154,7 +154,13 @@ data class TitleDetails(
 )
 
 /** Un rând „Pe Netflix (RO)” din Acasă: serviciul tău, în biblioteca lui. */
-data class ServiceShelf(val service: StreamingService, val packageName: String, val market: Market)
+data class ServiceShelf(val service: StreamingService, val packageName: String, val market: Market) {
+    val rowId: String get() = "service_${service.id}_${market.code}"
+    val rowTitle: String get() = "Pe ${service.displayName} (${market.code})"
+
+    fun row(items: List<CatalogItem> = emptyList(), status: ServiceCatalogStatus? = null) =
+        CatalogRow(rowId, rowTitle, items, status?.let { ServiceFallback(packageName, it) })
+}
 
 /** Lista furnizorilor pentru tipul de titlu și piața cerută are prioritate peste ID-urile de rezervă. */
 internal fun homeProviderIds(service: StreamingService, directory: List<ProviderInfo>?): Set<Int> =
@@ -197,7 +203,7 @@ data class CatalogRow(
 @Serializable
 data class ServiceFallback(val packageName: String, val reason: ServiceCatalogStatus)
 
-enum class ServiceCatalogStatus { NO_PROVIDER, NO_TITLES, UNAVAILABLE }
+enum class ServiceCatalogStatus { CHECKING, NO_PROVIDER, NO_TITLES, UNAVAILABLE }
 
 @Serializable
 data class HomeCatalog(val hero: List<CatalogItem>, val rows: List<CatalogRow>)

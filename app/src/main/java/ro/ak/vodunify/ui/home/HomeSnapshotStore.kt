@@ -15,6 +15,7 @@ import ro.ak.vodunify.core.catalog.HomeCatalog
 import ro.ak.vodunify.core.catalog.MovieReleaseEvent
 import ro.ak.vodunify.core.catalog.TitleReleases
 import ro.ak.vodunify.core.catalog.ServiceCatalogStatus
+import ro.ak.vodunify.core.catalog.ServiceShelf
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -151,4 +152,20 @@ internal fun mergeSavedCatalog(current: HomeCatalog, saved: HomeCatalog?): HomeC
         saved.rows.filterNot { it.id.startsWith("service_") }
     } else emptyList()
     return current.copy(hero = current.hero.ifEmpty { if (general.isNotEmpty()) saved.hero else emptyList() }, rows = general + rows)
+}
+
+
+/** Inventarul local hotărăște ce rânduri de servicii apar. TMDb completează numai titlurile lor. */
+internal fun HomeCatalog.withInstalledServices(shelves: List<ServiceShelf>, status: ServiceCatalogStatus): HomeCatalog {
+    val saved = rows.associateBy { it.id }
+    val services = shelves.map { shelf ->
+        val row = saved[shelf.rowId]
+        when {
+            row == null -> shelf.row(status = status)
+            row.items.isNotEmpty() -> shelf.row(row.items)
+            row.serviceFallback?.reason == ServiceCatalogStatus.CHECKING -> shelf.row(status = status)
+            else -> shelf.row(status = row.serviceFallback?.reason ?: status)
+        }
+    }
+    return copy(rows = services + rows.filterNot { it.id.startsWith("service_") })
 }

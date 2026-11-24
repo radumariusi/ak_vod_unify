@@ -33,9 +33,11 @@ class TargetResolver @Inject constructor(@ApplicationContext private val context
     private val isTv: Boolean by lazy { DeviceInfo.isTv(context) }
 
     /** Aplicațiile cunoscute instalate acum. Rapid (doar interogări locale); apelează din nou la revenire. */
-    fun installedApps(): Map<TargetApp, InstalledApp> {
+    fun installedApps(includeServicesWithoutLauncher: Boolean = false): Map<TargetApp, InstalledApp> {
         AppRegistry.init(context)
         val launchables by lazy { launcherActivities().filter { it.first != context.packageName } }
+        fun officialPackageExists(app: TargetApp, pkg: String): Boolean =
+            includeServicesWithoutLauncher && app.role == AppRole.OFFICIAL && runCatching { pm.getApplicationInfo(pkg, 0).enabled }.getOrDefault(false)
         val result = LinkedHashMap<TargetApp, InstalledApp>()
         val claimed = HashSet<String>()
         fun take(app: TargetApp, pkg: String) {
@@ -44,18 +46,24 @@ class TargetResolver @Inject constructor(@ApplicationContext private val context
         }
         val active = TargetApp.active
         // 1. Aplicația aleasă de tine pentru o intrare (Setări → Aplicații și servicii).
-        active.forEach { app -> AppRegistry.packageFor(app)?.takeIf { launchIntent(it) != null }?.let { take(app, it) } }
+        active.forEach { app ->
+            AppRegistry.packageFor(app)?.takeIf { launchIntent(it) != null || officialPackageExists(app, it) }?.let { take(app, it) }
+        }
         // 2. Pachetele cunoscute.
         active.filter { it !in result }.forEach { app ->
-            app.packages.firstOrNull { it !in claimed && launchIntent(it) != null }?.let { take(app, it) }
+            val packages = app.packages.filterNot { it in claimed }
+            val pkg = packages.firstOrNull { launchIntent(it) != null } ?: packages.firstOrNull { officialPackageExists(app, it) }
+            pkg?.let { take(app, it) }
         }
         // 3. Numele din launcher: fiecare aplicație instalată merge la intrarea care i se potrivește cel mai bine
         //    (ex. „Nuvio RS” la Nuvio RS, nu la Nuvio).
-        val pending = active.filter { it !in result && it.labelHints.isNotEmpty() }
-        if (pending.isNotEmpty()) {
+        if (active.any { it !in result }) {
+            fun byLabel(label: String): TargetApp? =
+                active.maxByOrNull { it.labelScore(label) }?.takeIf { it.matchesLabel(label) }
             launchables.filter { it.first !in claimed }.forEach { (pkg, label) ->
-                val best = TargetApp.active.filter { it.labelScore(label) > 0 }.maxByOrNull { it.labelScore(label) }
-                if (best != null && best in pending && best !in result) take(best, pkg)
+                val best = TargetApp.byPackage(pkg) ?: byLabel(label)
+                    ?: labelOf(pkg)?.takeIf { it != label }?.let(::byLabel)
+                if (best != null && best in active && best !in result) take(best, pkg)
             }
         }
         return result

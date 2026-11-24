@@ -268,7 +268,7 @@ private fun ManageAppsCard(viewModel: PlaybackSettingsViewModel, installed: Map<
                 listOf(
                     ChoiceOption("Player nou (tip Stremio)", label, heading = "Nouă"),
                     ChoiceOption("Player IPTV nou", label),
-                    ChoiceOption("Serviciu de streaming nou", "Alegi apoi serviciul (pentru disponibilitate și siglă)"),
+                    ChoiceOption("Serviciu de streaming nou", "Poți alege și furnizorul TMDb"),
                 )
             ChoiceDialog(
                 title = "Ce este $label?",
@@ -300,15 +300,16 @@ private fun ManageAppsCard(viewModel: PlaybackSettingsViewModel, installed: Map<
             val (pkg, label) = picked ?: return
             ChoiceDialog(
                 title = "Ce serviciu este $label?",
-                options = if (providers.isEmpty()) {
-                    listOf(ChoiceOption("Se încarcă lista TMDb…", enabled = false))
-                } else {
-                    providers.map { ChoiceOption(it.second) }
-                },
+                options = listOf(ChoiceOption("Adaugă fără furnizor TMDb", "Apare pe Acasă cu buton de deschidere")) +
+                    providers.map { ChoiceOption(it.second) },
                 selected = null,
                 onPick = { i ->
-                    providers.getOrNull(i)?.let { (id, name) ->
-                        message = if (viewModel.addService(id, name, pkg)) "Am adăugat serviciul $name ($label)." else "Nu mai sunt locuri libere pentru servicii: elimină unul adăugat."
+                    val provider = providers.getOrNull(i - 1)
+                    val name = provider?.second ?: label
+                    message = if (viewModel.addService(provider?.first, name, pkg)) {
+                        "Am adăugat serviciul $name."
+                    } else {
+                        "Nu mai sunt locuri libere pentru servicii. Elimină unul adăugat."
                     }
                     step = 0
                 },

@@ -50,11 +50,11 @@ object AppRegistry {
     }
 
     /** Serviciu nou: furnizorul TMDb [providerId] cu numele lui, deschis în aplicația instalată [packageName]. */
-    fun addService(service: StreamingService, providerId: Int, name: String, packageName: String) {
+    fun addService(service: StreamingService, providerId: Int?, name: String, packageName: String) {
         val p = prefs ?: return
         val app = TargetApp.byId(service.appId) ?: return
         p.edit().apply {
-            putInt("provider_${service.id}", providerId)
+            if (providerId == null) remove("provider_${service.id}") else putInt("provider_${service.id}", providerId)
             putString("name_${service.id}", name)
             putString("pkg_${app.id}", packageName)
             putString("name_${app.id}", name)
