@@ -1,45 +1,28 @@
 name: Release APK
 
-# Rulează DOAR manual: Actions → Release APK → Run workflow.
 on:
-  workflow_dispatch:
-    inputs:
-      version_name:
-        description: "Versiune (ex. 0.1.0)"
-        required: true
-      prerelease:
-        description: "Marchează ca pre-release"
-        type: boolean
-        default: false
-      apk_only:
-        description: "Salvează APK-urile semnate ca artefact pentru testare"
-        type: boolean
-        default: false
+  push:
+    branches: [codex/app-changes]
+    paths: ['.github/workflows/release.yml']
 
 permissions:
   contents: write
 
 jobs:
   release:
+    if: github.event.head_commit.message == 'Build AK Scrobbler v0.3.26 for in-app update'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
     env:
-      VERSION_NAME: ${{ inputs.version_name }}
+      VERSION_NAME: 0.3.26
       VERSION_CODE: ${{ github.run_number }}
-      TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
-      TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
-      TRAKT_CLIENT_SECRET: ${{ secrets.TRAKT_CLIENT_SECRET }}
-      SIMKL_CLIENT_ID: ${{ secrets.SIMKL_CLIENT_ID }}
-      SIMKL_CLIENT_SECRET: ${{ secrets.SIMKL_CLIENT_SECRET }}
-      WETRAKR_API_KEY: ${{ secrets.WETRAKR_API_KEY }}
-      OMDB_API_KEY: ${{ secrets.OMDB_API_KEY }}
-      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
       SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
       SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
       SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: 'a176bc05b52845be8c4cb40b71a4134ec16d23f0'
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -74,54 +57,64 @@ jobs:
           [ -n "$SIGNING_KEY_ALIAS" ] || echo "SIGNING_KEY_ALIAS=akvod" >> "$GITHUB_ENV"
           [ -n "$SIGNING_KEY_PASSWORD" ] || echo "SIGNING_KEY_PASSWORD=$SIGNING_STORE_PASSWORD" >> "$GITHUB_ENV"
 
-      - name: Refresh Home popularity data
+      - name: Test, lint and build signed AK Scrobbler
         run: |
-          if ! timeout 90s python3 tools/refresh-home-popularity.py; then
-            echo "::warning::Netflix charts could not be refreshed; using the bundled index."
-          fi
+          ./gradlew --no-daemon --max-workers=2 -Pkotlin.compiler.execution.strategy=in-process :scrobbler:testDebugUnitTest :scrobbler:lintDebug :scrobbler:assembleRelease
+          python3 -c 'from pathlib import Path; import xml.etree.ElementTree as E; suites = [E.parse(p).getroot() for p in Path("scrobbler/build/test-results/testDebugUnitTest").glob("TEST-*.xml")]; print("Scrobbler tests:", sum(int(s.attrib["tests"]) for s in suites))'
 
-      - name: Build signed release APK
-        run: ./gradlew --no-daemon assembleRelease
-
-      - name: Rename APK
+      - name: Preserve the existing Unify APK and verify signing
         id: apk
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          SRC=app/build/outputs/apk/release/app-release.apk
-          if [ ! -f "$SRC" ]; then
-            echo "::error::APK-ul semnat nu a fost generat."; ls -la app/build/outputs/apk/release; exit 1
-          fi
-          OUT="ak-vod-unify-${VERSION_NAME}-vc${VERSION_CODE}.apk"
-          cp "$SRC" "$OUT"
-          echo "file=$OUT" >> "$GITHUB_OUTPUT"
-          SCR=scrobbler/build/outputs/apk/release/scrobbler-release.apk
-          if [ ! -f "$SCR" ]; then
-            echo "::error::APK-ul AK Scrobbler nu a fost generat."; ls -la scrobbler/build/outputs/apk/release; exit 1
-          fi
-          SOUT="ak-scrobbler-${VERSION_NAME}-vc${VERSION_CODE}.apk"
-          cp "$SCR" "$SOUT"
-          echo "scrobbler=$SOUT" >> "$GITHUB_OUTPUT"
+          previous=$(mktemp -d)
+          gh release download v0.3.25 --pattern '*.apk' --dir "$previous"
+          unify=ak-vod-unify-0.3.25-vc45.apk
+          old_scrobbler=ak-scrobbler-0.3.25-vc45.apk
+          scrobbler="ak-scrobbler-$VERSION_NAME-vc$VERSION_CODE.apk"
+          cp "$previous/$unify" "$unify"
+          cp scrobbler/build/outputs/apk/release/scrobbler-release.apk "$scrobbler"
+          apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+          test -x "$apksigner"
+          fingerprint() {
+            "$apksigner" verify --print-certs "$1" | awk -F ': ' '/^Signer #1 certificate SHA-256 digest:/ { print $2; exit }'
+          }
+          old_signer=$(fingerprint "$previous/$old_scrobbler")
+          new_signer=$(fingerprint "$scrobbler")
+          test -n "$new_signer"
+          test "$old_signer" = "$new_signer"
+          test "$(fingerprint "$unify")" = "$new_signer"
+          stat -c '%n %s bytes' "$previous/$old_scrobbler" "$scrobbler"
+          echo "unify=$unify" >> "$GITHUB_OUTPUT"
+          echo "scrobbler=$scrobbler" >> "$GITHUB_OUTPUT"
+
+      - name: Confirm release source checkout
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/codex/app-changes" --jq '.object.sha')
+          tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$head" --jq '.tree.sha')
+          test "$tree" = "19f4aa400316ffab54fc4a9880e71df7b71a132e"
 
       - name: Publish GitHub Release
-        if: ${{ !inputs.apk_only }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ inputs.version_name }}
-          name: AK VOD Unify ${{ inputs.version_name }}
-          target_commitish: ${{ github.sha }}
-          prerelease: ${{ inputs.prerelease }}
-          make_latest: ${{ !inputs.prerelease }}
-          generate_release_notes: true
+          tag_name: v0.3.26
+          name: AK Scrobbler 0.3.26 și AK VOD Unify 0.3.25
+          target_commitish: codex/app-changes
+          make_latest: true
+          body: |
+            AK Scrobbler se deschide într-o fereastră compactă, cu setări, jurnal și reconectare manuală.
+            APK-ul AK VOD Unify este același din v0.3.25, păstrat aici pentru instalările mai vechi.
           files: |
-            ${{ steps.apk.outputs.file }}
+            ${{ steps.apk.outputs.unify }}
             ${{ steps.apk.outputs.scrobbler }}
+          fail_on_unmatched_files: true
 
-      - name: Upload signed test APKs
-        if: ${{ inputs.apk_only }}
+      - name: Preserve signed APK if publishing fails
+        if: failure() && steps.apk.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: ak-vod-test-${{ inputs.version_name }}
-          path: |
-            ${{ steps.apk.outputs.file }}
-            ${{ steps.apk.outputs.scrobbler }}
-          if-no-files-found: error
+          name: ak-scrobbler-0.3.26
+          path: ${{ steps.apk.outputs.scrobbler }}
           retention-days: 14
