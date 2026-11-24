@@ -52,6 +52,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
@@ -151,7 +152,6 @@ internal val LocalCalendarNow = compositionLocalOf { Instant.now() }
  */
 @Composable
 internal fun Poster(item: CalendarItem, modifier: Modifier) {
-    val icons = LocalCalendarIcons.current
     Box(modifier.clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surface)) {
         if (item.posterUrl != null) {
             AsyncImage(model = item.posterUrl, contentDescription = item.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -161,34 +161,75 @@ internal fun Poster(item: CalendarItem, modifier: Modifier) {
         CalendarPosterHeader(item, Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(4.dp))
         // Jos, ca pe toate posterele: sigla (aplicația ta sau cinema RO / SUA) lângă episod sau tip.
         PosterBottomRow(Modifier.align(Alignment.BottomStart).padding(4.dp), label = item.posterLabel) {
-            val cinema = item.cinema
-            if (cinema != null) {
-                CinemaBadge(cinema)
-            } else {
-                val pkg = item.watchAppId?.let { icons.apps[it] } ?: icons.player
-                pkg?.let { AppIconBadge(it) }
-            }
+            CalendarPlatformBadge(item, includeDefaultPlayer = true)
         }
     }
 }
 
 @Composable
-private fun CalendarPosterHeader(item: CalendarItem, modifier: Modifier = Modifier) {
+internal fun CalendarPlatformBadge(item: CalendarItem, includeDefaultPlayer: Boolean = false) {
+    val icons = LocalCalendarIcons.current
+    val cinema = item.cinema
+    if (cinema != null) {
+        CinemaBadge(cinema)
+    } else {
+        val pkg = item.watchAppId?.let { icons.apps[it] } ?: icons.player.takeIf { includeDefaultPlayer }
+        pkg?.let { AppIconBadge(it) }
+    }
+}
+
+@Composable
+internal fun CalendarRatings(item: CalendarItem) {
     val episode = item.episode
     val movie = item.movie
     val tmdb = episode?.tmdbRating?.takeIf { episode.tmdbVotes > 0 }
         ?: movie?.tmdbRating?.takeIf { movie.tmdbVotes > 0 }
+    PosterRatingChips(tmdb, episode?.imdb?.rating ?: movie?.imdb?.rating)
+}
+
+@Composable
+private fun CalendarPosterHeader(item: CalendarItem, modifier: Modifier = Modifier) {
     val now = LocalCalendarNow.current
     val time = item.upcomingPosterTime(now)
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
         Box(Modifier.weight(1f)) {
-            PosterRatingChips(tmdb, episode?.imdb?.rating ?: movie?.imdb?.rating)
+            CalendarRatings(item)
         }
         when {
             time.isNotEmpty() -> PosterLabel(time)
             !now.isBefore(item.releaseAt) && (item.watched || item.inProgress) ->
                 ViewingStatusBadge(watched = item.watched)
         }
+    }
+}
+
+/** Aceeași interacțiune cu posterele pe Zi, Săptămână și Următoare. */
+@Composable
+internal fun CalendarPosterCard(
+    item: CalendarItem,
+    restoreKey: String,
+    onFocus: (CalendarItem) -> Unit,
+    onOpen: (CalendarItem) -> Unit,
+    onLongClick: (CalendarItem) -> Unit,
+) {
+    val spec = layoutSpec()
+    PressableCard(
+        onClick = {
+            onFocus(item)
+            onOpen(item)
+        },
+        onLongClick = {
+            onFocus(item)
+            onLongClick(item)
+        },
+        restoreKey = restoreKey,
+        modifier = Modifier
+            .size(spec.posterWidth, spec.posterHeight)
+            .alpha(if (item.passed) 1f else 0.5f)
+            .onFocusChanged { if (it.isFocused) onFocus(item) }
+            .semantics { contentDescription = "${item.title}, ${item.subtitle}, ${item.time}, ${item.where}" },
+    ) {
+        Poster(item, Modifier.fillMaxSize())
     }
 }
 
@@ -200,6 +241,7 @@ fun WeekList(
     listState: LazyListState,
     noun: String,
     actions: CalendarItemActions,
+    onFocus: (CalendarItem) -> Unit,
     /** „Următoare”: zilele fără nimic nu se afișează. */
     skipEmpty: Boolean = false,
 ) {
@@ -231,18 +273,8 @@ fun WeekList(
                         contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 8.dp),
                     ) {
                         items(entries, key = { it.key }) { item ->
-                            PressableCard(
-                                onClick = { actions.open(item) },
-                                onLongClick = {
-                                    if (item.episodeMembers.isEmpty()) actions.watch(item) else menu = item
-                                },
-                                restoreKey = "$rowKey|${item.key}",
-                                modifier = Modifier
-                                    .size(spec.posterWidth, spec.posterHeight)
-                                    .alpha(if (item.passed) 1f else 0.5f)
-                                    .semantics { contentDescription = "${item.title}, ${item.subtitle}, ${item.time}, ${item.where}" },
-                            ) {
-                                Poster(item, Modifier.fillMaxSize())
+                            CalendarPosterCard(item, "$rowKey|${item.key}", onFocus, actions.open) {
+                                if (it.episodeMembers.isEmpty()) actions.watch(it) else menu = it
                             }
                         }
                     }

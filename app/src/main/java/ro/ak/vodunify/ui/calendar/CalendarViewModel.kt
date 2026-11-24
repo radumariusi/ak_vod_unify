@@ -136,6 +136,16 @@ class CalendarViewModel @Inject constructor(
     private val resolver: TargetResolver,
     private val playback: PlaybackPreferences,
 ) : ViewModel() {
+    val logoLanguage = catalogPrefs.settings.map { it.logoLanguage }.distinctUntilChanged()
+
+    suspend fun titleLogo(item: CalendarItem): String? = try {
+        val kind = if (item.isMovie) TitleKind.MOVIE else TitleKind.TV
+        catalog.logoUrl(kind, item.tmdbId, catalogPrefs.settings.first())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
+    }
 
     /**
      * Siglele de pe postere: pachetul aplicației instalate pentru fiecare serviciu din calendar (ex. „netflix”)

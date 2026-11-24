@@ -45,12 +45,15 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import ro.ak.vodunify.core.calendar.time.RomaniaTime
+import ro.ak.vodunify.core.calendar.format.dayLabel
 import ro.ak.vodunify.ui.components.ChoiceDialog
 import ro.ak.vodunify.ui.components.ChoiceOption
-import ro.ak.vodunify.ui.components.TitleBackdrop
+import ro.ak.vodunify.ui.components.TitleHero
+import kotlinx.coroutines.delay
 import ro.ak.vodunify.ui.components.layoutSpec
 import ro.ak.vodunify.ui.components.rowSpacing
 import ro.ak.vodunify.ui.components.returningFocus
@@ -119,89 +122,87 @@ fun CalendarItemMenu(item: CalendarItem, actions: CalendarItemActions, onDismiss
     )
 }
 
-/**
- * Vederea pe zi, ca Acasă: sus, pe fundalul panoramic al titlului cu focus, numele, episodul, ora, unde îl vezi și
- * descrierea; dedesubt, posterele zilei (aceleași ca peste tot). OK = pagina titlului, OK ținut = meniul titlului.
- */
+/** Vederea pe zi, cu aceleași postere verticale ca în Lista mea. */
 @Composable
-fun DayView(items: List<CalendarItem>, gridState: LazyGridState, actions: CalendarItemActions) {
+internal fun DayView(
+    items: List<CalendarItem>,
+    gridState: LazyGridState,
+    actions: CalendarItemActions,
+    onFocus: (CalendarItem) -> Unit,
+) {
     val spec = layoutSpec()
-    var focusedKey by remember { mutableStateOf<String?>(null) }
     var menu by remember { mutableStateOf<CalendarItem?>(null) }
-    val shown = items.firstOrNull { it.key == focusedKey } ?: items.firstOrNull()
-    Box(Modifier.fillMaxSize()) {
-        TitleBackdrop(shown?.backdropUrl, Modifier.fillMaxWidth().height(if (spec.isTv) 230.dp else 200.dp))
-        Column(Modifier.fillMaxSize()) {
-            DayInfo(shown, Modifier.fillMaxWidth().height(if (spec.isTv) 150.dp else 140.dp))
-            LazyVerticalGrid(
-                columns = GridCells.FixedSize(spec.posterWidth),
-                state = gridState,
-                contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
-                verticalArrangement = Arrangement.spacedBy(rowSpacing()),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items(items, key = { it.key }) { item ->
-                    PressableCard(
-                        onClick = { actions.open(item) },
-                        onLongClick = { menu = item },
-                        restoreKey = "calendar-poster|${item.key}",
-                        modifier = Modifier
-                            .size(spec.posterWidth, spec.posterHeight)
-                            .alpha(if (item.passed) 1f else 0.5f)
-                            .onFocusChanged { if (it.hasFocus) focusedKey = item.key }
-                            .semantics { contentDescription = "${item.title}, ${item.subtitle}, ${item.time}, ${item.where}" },
-                    ) {
-                        Poster(item, Modifier.fillMaxSize())
-                    }
-                }
-            }
+    LazyVerticalGrid(
+        columns = GridCells.FixedSize(spec.posterWidth),
+        state = gridState,
+        contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
+        verticalArrangement = Arrangement.spacedBy(rowSpacing()),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        items(items, key = { it.key }) { item ->
+            CalendarPosterCard(item, "calendar-poster|${item.key}", onFocus, actions.open) { menu = it }
         }
     }
     menu?.let { item -> CalendarItemMenu(item, actions) { menu = null } }
 }
 
-/** Panoul de sus din vederea pe zi: titlul cu focus, ca hero-ul din Acasă. */
+/** Sigla și informațiile lansării folosesc același hero și aceeași sursă de sigle ca în Acasă. */
 @Composable
-private fun DayInfo(item: CalendarItem?, modifier: Modifier) {
-    val spec = layoutSpec()
-    Column(
-        modifier
-            .padding(horizontal = spec.screenPadding, vertical = 8.dp)
-            .widthIn(max = 640.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.Bottom),
-    ) {
-        if (item == null) return@Column
-        Text(
-            item.title,
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            listOf(item.subtitle, item.time, item.where).filter { it.isNotBlank() }.joinToString(" · "),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        if (item.details.isNotEmpty()) {
-            Text(
-                item.details.joinToString(" · "),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (item.overview.isNotBlank()) {
-            Text(
-                item.overview,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+internal fun CalendarHero(
+    item: CalendarItem,
+    height: Dp,
+    logoLanguage: String?,
+    showDate: Boolean,
+    loadLogo: suspend (CalendarItem) -> String?,
+) {
+    var logo by remember(item.isMovie, item.tmdbId, logoLanguage) { mutableStateOf<String?>(null) }
+    LaunchedEffect(item.isMovie, item.tmdbId, logoLanguage) {
+        if (logoLanguage == null) return@LaunchedEffect
+        delay(120)
+        logo = loadLogo(item).orEmpty()
+    }
+    Box(Modifier.fillMaxWidth().height(height)) {
+        TitleHero(
+            title = item.title,
+            logoUrl = logo?.ifEmpty { null },
+            pendingLogo = logo == null,
+            heroHeight = height,
+        ) { descriptionLines ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CalendarRatings(item)
+                CalendarPlatformBadge(item)
+                Text(
+                    listOf(item.subtitle, item.time, item.where).filter { it.isNotBlank() }.joinToString(" · "),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            val details = if (showDate) listOf(dayLabel(item.date)) + item.details else item.details
+            if (details.isNotEmpty()) {
+                Text(
+                    details.joinToString(" · "),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (item.overview.isNotBlank()) {
+                Text(
+                    item.overview,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    maxLines = when {
+                        height < 165.dp -> 1
+                        height < 190.dp -> minOf(2, descriptionLines)
+                        else -> descriptionLines
+                    },
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

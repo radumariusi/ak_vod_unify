@@ -4,10 +4,9 @@ import ro.ak.vodunify.core.calendar.format.badges
 import ro.ak.vodunify.core.calendar.format.episodeRange
 import ro.ak.vodunify.core.calendar.format.movieBadges
 import ro.ak.vodunify.core.calendar.format.movieKindLabel
-import ro.ak.vodunify.core.calendar.format.movieRatingLabel
+import ro.ak.vodunify.core.calendar.format.compact
 import ro.ak.vodunify.core.calendar.format.movieTimeLabel
 import ro.ak.vodunify.core.calendar.format.movieWhere
-import ro.ak.vodunify.core.calendar.format.ratingLabel
 import ro.ak.vodunify.core.calendar.format.timeLabel
 import ro.ak.vodunify.core.calendar.format.whereToWatch
 import ro.ak.vodunify.core.calendar.model.EpisodeEntry
@@ -16,6 +15,12 @@ import ro.ak.vodunify.core.calendar.model.MovieReleaseKind
 import ro.ak.vodunify.core.connector.EpisodeNumber
 import java.time.Instant
 import java.time.LocalDate
+
+private fun voteCounts(tmdb: Int, imdb: Int?): String? =
+    listOfNotNull(
+        tmdb.takeIf { it > 0 }?.let { "${compact(it)} voturi TMDb" },
+        imdb?.takeIf { it > 0 }?.let { "${compact(it)} voturi IMDb" },
+    ).joinToString(" · ").ifBlank { null }
 
 /** Un rând din calendar, comun pentru episoade și filme, ca ecranul să fie unul singur. */
 data class CalendarItem(
@@ -104,7 +109,7 @@ fun EpisodeEntry.toItem(watched: Boolean) = CalendarItem(
     posterUrl = posterUrl,
     details = buildList {
         addAll(badges(this@toItem))
-        ratingLabel(this@toItem).takeIf { it.isNotBlank() }?.let { add(it) }
+        voteCounts(tmdbVotes, imdb?.votes)?.let(::add)
         categories.forEach { add(it.label) }
         if (!verdict.passed) add("Filtrat: ${verdict.label}")
     },
@@ -133,7 +138,7 @@ fun MovieEntry.toItem(watched: Boolean) = CalendarItem(
     posterUrl = posterUrl,
     details = buildList {
         addAll(movieBadges(this@toItem))
-        movieRatingLabel(this@toItem).takeIf { it.isNotBlank() }?.let { add(it) }
+        voteCounts(tmdbVotes, imdb?.votes)?.let(::add)
         categories.forEach { add(it.label) }
         if (!verdict.passed) add("Filtrat: ${verdict.movieLabel}")
     },

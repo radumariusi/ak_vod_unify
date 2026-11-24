@@ -2,6 +2,12 @@ package ro.ak.vodunify.ui.calendar
 
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material3.Icon
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Row
@@ -23,6 +29,8 @@ import ro.ak.vodunify.ui.components.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,6 +56,8 @@ import ro.ak.vodunify.core.calendar.format.weekLabel
 import ro.ak.vodunify.core.calendar.model.MovieReleaseKind
 import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.ui.components.ErrorPanel
+import ro.ak.vodunify.ui.components.IconButton
+import ro.ak.vodunify.ui.components.tvTitleHeroHeight
 import ro.ak.vodunify.ui.components.layoutSpec
 import ro.ak.vodunify.ui.components.clearReturningFocus
 import ro.ak.vodunify.ui.navigation.LocalTabTopFocus
@@ -62,6 +72,7 @@ import ro.ak.vodunify.ui.watch.WatchChooserViewModel
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CalendarScreen(
+    onBackdropChange: (String?) -> Unit,
     viewModel: CalendarViewModel = hiltViewModel(),
     chooser: WatchChooserViewModel = hiltViewModel(),
 ) {
@@ -97,6 +108,7 @@ fun CalendarScreen(
     val focusTop = LocalTabTopFocus.current
     val clearFocus = clearReturningFocus()
     val period = "${state.tab}-${state.from}-${state.to}"
+    var focusedTitle by rememberSaveable(period) { mutableStateOf<String?>(null) }
     LaunchedEffect(state.mode, period) {
         when {
             state.mode.isDay -> {
@@ -118,6 +130,7 @@ fun CalendarScreen(
         val origin = viewModel.back()
         focusedDay = origin?.toString()
         if (origin == null) {
+            focusedTitle = null
             scope.launch {
                 dayGrid.scrollToItem(0)
                 focusTop()
@@ -145,69 +158,134 @@ fun CalendarScreen(
             delay(60_000 - value.toEpochMilli() % 60_000)
         }
     }
-    CompositionLocalProvider(LocalCalendarIcons provides icons, LocalCalendarNow provides now) {
-    Column(Modifier.fillMaxSize()) {
-        Column(
-            Modifier.padding(horizontal = spec.screenPadding).fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Dropdown(null, state.tab, CalendarTab.entries, { it.label }, viewModel::setTab, dialogTitle = "Arată")
-                Dropdown(null, state.mode, CalendarMode.entries, { it.label }, viewModel::setMode, dialogTitle = "Perioada")
-                OutlinedButton(onClick = { showFilters = true }) { Text("Filtre") }
-                OutlinedButton(onClick = viewModel::reload) { Text("Reîncarcă") }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(onClick = viewModel::previous) { Text("◀") }
-                Text(
-                    when (state.mode) {
-                        CalendarMode.TODAY, CalendarMode.DAY -> dayLabel(state.from)
-                        CalendarMode.WEEK -> weekLabel(state.from, state.to)
-                        CalendarMode.MONTH -> monthLabel(state.from)
-                        CalendarMode.UPCOMING -> "De la ${dayLabel(state.from)}, $UPCOMING_DAYS zile"
-                    },
-                    style = MaterialTheme.typography.titleLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                OutlinedButton(onClick = viewModel::next) { Text("▶") }
-                OutlinedButton(onClick = viewModel::goToToday) { Text("Azi") }
-            }
-            if (showFilters) CalendarFilters(state, viewModel) { showFilters = false }
-            if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-        }
+    val visible = remember(state) { state.visible }
+    val inMonth = state.mode == CalendarMode.MONTH
+    val grouped = remember(visible, inMonth) { if (inMonth) emptyList() else groupSameDayEpisodes(visible) }
+    val shown = grouped.firstOrNull { it.key == focusedTitle } ?: grouped.firstOrNull()
+    val onFocus: (CalendarItem) -> Unit = { focusedTitle = it.key }
+    SideEffect { onBackdropChange(shown?.backdropUrl) }
+    DisposableEffect(onBackdropChange) {
+        onDispose { onBackdropChange(null) }
+    }
 
-        val error = state.error
-        when {
-            error != null && state.passed == null -> ErrorPanel(error, onRetry = viewModel::reload, modifier = Modifier.padding(spec.screenPadding))
-            state.passed == null -> Info(
-                if (state.mode.isDay) "Se încarcă…" else "Se încarcă perioada…",
-            )
-            else -> {
-                Summary(state)
-                if (!state.hasMyApps) Info("Sfat: aplicațiile tale și biblioteca fiecăreia (RO / US) se iau din Setări → Aplicații și servicii.")
-                val visible = remember(state) { state.visible }
-                val grouped = remember(visible) { groupSameDayEpisodes(visible) }
-                if (error != null) Info("Unele lansări nu s-au putut încărca.")
-                when {
-                    state.mode == CalendarMode.MONTH -> MonthCalendar(
-                        state.from, state.to, visible, monthList, focusedDay,
-                        onFocusRestored = { focusedDay = null },
-                        onOpenDay = viewModel::openDay,
-                    )
-                    grouped.isEmpty() -> Info(if (state.loading) "Se încarcă perioada…" else "Nimic în perioada asta după filtrele tale.")
-                    state.mode.isDay -> DayView(grouped, dayGrid, itemActions)
-                    else -> WeekList(state.days, grouped, weekList, state.tab.noun, itemActions, skipEmpty = state.mode == CalendarMode.UPCOMING)
+    CompositionLocalProvider(LocalCalendarIcons provides icons, LocalCalendarNow provides now) {
+        Column(Modifier.fillMaxSize()) {
+            CalendarToolbar(state, viewModel, showFilters, onFilters = { showFilters = it })
+
+            val error = state.error
+            when {
+                error != null && state.passed == null -> ErrorPanel(error, onRetry = viewModel::reload, modifier = Modifier.padding(spec.screenPadding))
+                state.passed == null -> Info(if (state.mode.isDay) "Se încarcă…" else "Se încarcă perioada…")
+                else -> {
+                    Summary(state)
+                    if (!state.hasMyApps) Info("Sfat: aplicațiile tale și biblioteca fiecăreia (RO / US) se iau din Setări → Aplicații și servicii.")
+                    if (error != null) Info("Unele lansări nu s-au putut încărca.")
+                    when {
+                        inMonth -> MonthCalendar(
+                            state.from, state.to, visible, monthList, focusedDay,
+                            onFocusRestored = { focusedDay = null },
+                            onOpenDay = viewModel::openDay,
+                        )
+                        shown == null -> Info(if (state.loading) "Se încarcă perioada…" else "Nimic în perioada asta după filtrele tale.")
+                        else -> BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+                            // Lasă loc posterelor și când bara se așază pe două rânduri pe un ecran îngust.
+                            val ideal = if (spec.isTv) tvTitleHeroHeight(maxHeight, spec).coerceAtLeast(150.dp) else spec.heroHeight
+                            val heroHeight = ideal.coerceAtMost(maxHeight * 0.55f)
+                            val logoLanguage by viewModel.logoLanguage.collectAsStateWithLifecycle(initialValue = null)
+                            Column(Modifier.fillMaxSize()) {
+                                CalendarHero(shown, heroHeight, logoLanguage, showDate = !state.mode.isDay, loadLogo = viewModel::titleLogo)
+                                if (state.mode.isDay) {
+                                    DayView(grouped, dayGrid, itemActions, onFocus)
+                                } else {
+                                    WeekList(
+                                        state.days, grouped, weekList, state.tab.noun, itemActions, onFocus,
+                                        skipEmpty = state.mode == CalendarMode.UPCOMING,
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
     }
-    }
     WatchChooserHost(chooser)
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CalendarToolbar(
+    state: CalendarUiState,
+    viewModel: CalendarViewModel,
+    showFilters: Boolean,
+    onFilters: (Boolean) -> Unit,
+) {
+    val spec = layoutSpec()
+    val selectors: @Composable () -> Unit = {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            val centered = Modifier.align(Alignment.CenterVertically)
+            Dropdown(null, state.tab, CalendarTab.entries, { it.label }, viewModel::setTab, centered, dialogTitle = "Arată")
+            Dropdown(null, state.mode, CalendarMode.entries, { it.label }, viewModel::setMode, centered, dialogTitle = "Perioada")
+            val padding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+            OutlinedButton(onClick = { onFilters(true) }, modifier = centered, contentPadding = padding) { Text("Filtre") }
+            OutlinedButton(onClick = viewModel::reload, modifier = centered, contentPadding = padding) { Text("Reîncarcă") }
+        }
+    }
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = spec.screenPadding),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            if (maxWidth >= 740.dp) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    selectors()
+                    CalendarDateControls(state, viewModel, Modifier.weight(1f))
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    selectors()
+                    CalendarDateControls(state, viewModel, Modifier.fillMaxWidth())
+                }
+            }
+        }
+        if (showFilters) CalendarFilters(state, viewModel) { onFilters(false) }
+        if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+    }
+}
+
+@Composable
+private fun CalendarDateControls(state: CalendarUiState, viewModel: CalendarViewModel, modifier: Modifier) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = viewModel::previous) {
+            Icon(Icons.Filled.KeyboardArrowLeft, contentDescription = "Perioada anterioară")
+        }
+        Text(
+            when (state.mode) {
+                CalendarMode.TODAY, CalendarMode.DAY -> dayLabel(state.from)
+                CalendarMode.WEEK -> weekLabel(state.from, state.to)
+                CalendarMode.MONTH -> monthLabel(state.from)
+                CalendarMode.UPCOMING -> "De la ${dayLabel(state.from)}, $UPCOMING_DAYS zile"
+            },
+            style = MaterialTheme.typography.titleMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        IconButton(onClick = viewModel::next) {
+            Icon(Icons.Filled.KeyboardArrowRight, contentDescription = "Perioada următoare")
+        }
+        OutlinedButton(
+            onClick = viewModel::goToToday,
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+        ) { Text("Azi") }
+    }
 }
 
 @Composable

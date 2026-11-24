@@ -147,6 +147,9 @@ fun AppNavigation() {
     }
     var exitPrompt by remember { mutableStateOf(false) }
     val onHome = current == TopDestination.HOME.route
+    val onCalendar = current == TopDestination.CALENDAR.route
+    var calendarBackdrop by remember { mutableStateOf<String?>(null) }
+    val showCalendarBackdrop: (String?) -> Unit = remember { { calendarBackdrop = it } }
     SideEffect { restore.show(backStack?.id) }
     ExpireFocusRestore(restore)
 
@@ -199,8 +202,9 @@ fun AppNavigation() {
         LocalTabTopFocus provides focusActiveTab,
     ) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-            // Fundalul panoramic: titlul cu focus din Acasă, peste tot ecranul, sub meniu.
+            // Fundalul panoramic al titlului focalizat, peste tot ecranul, sub meniu.
             if (onHome) TitleBackdrop(backdrop.url, Modifier.matchParentSize())
+            if (onCalendar && calendarBackdrop != null) TitleBackdrop(calendarBackdrop, Modifier.matchParentSize())
             Column(Modifier.fillMaxSize()) {
                 TopBar(
                     current = current,
@@ -213,7 +217,7 @@ fun AppNavigation() {
                     composable(TopDestination.HOME.route) { HomeScreen() }
                     composable(TopDestination.SEARCH.route) { SearchScreen() }
                     composable(TopDestination.DISCOVER.route) { DiscoverScreen() }
-                    composable(TopDestination.CALENDAR.route) { CalendarScreen() }
+                    composable(TopDestination.CALENDAR.route) { CalendarScreen(onBackdropChange = showCalendarBackdrop) }
                     composable(TopDestination.LIBRARY.route) { LibraryScreen() }
                     composable(TopDestination.SETTINGS.route) { SettingsScreen() }
                     composable(Routes.DIAGNOSTICS) { DiagnosticsScreen() }
