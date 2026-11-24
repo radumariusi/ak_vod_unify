@@ -9,6 +9,8 @@ import ro.ak.vodunify.ui.components.PosterBottomRow
 import ro.ak.vodunify.ui.components.PosterRatingChips
 import ro.ak.vodunify.ui.components.ViewingStatusBadge
 import ro.ak.vodunify.ui.components.FocusBorderWidth
+import ro.ak.vodunify.ui.components.restoreCardFocus
+import ro.ak.vodunify.ui.components.rememberRestoringRowState
 import ro.ak.vodunify.ui.theme.FocusBorder
 import ro.ak.vodunify.ui.components.AppIconBadge
 import ro.ak.vodunify.ui.components.CinemaBadge
@@ -90,6 +92,7 @@ fun PressableCard(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
     focusScale: Float = 1.05f,
+    restoreKey: String? = null,
     content: @Composable () -> Unit,
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -101,6 +104,7 @@ fun PressableCard(
     Surface(
         modifier = modifier
             .scale(scale)
+            .restoreCardFocus(restoreKey)
             .semantics(mergeDescendants = true) {
                 role = Role.Button
                 onClick { click(); true }
@@ -195,13 +199,13 @@ fun WeekList(
     items: List<CalendarItem>,
     listState: LazyListState,
     noun: String,
-    onOpen: (CalendarItem) -> Unit,
-    onWatch: (CalendarItem) -> Unit,
+    actions: CalendarItemActions,
     /** „Următoare”: zilele fără nimic nu se afișează. */
     skipEmpty: Boolean = false,
 ) {
     val spec = layoutSpec()
     val byDay = items.groupBy { it.date }
+    var menu by remember { mutableStateOf<CalendarItem?>(null) }
     LazyColumn(
         state = listState,
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -213,21 +217,26 @@ fun WeekList(
             if (skipEmpty && entries.isEmpty()) return@forEach
             item(key = "day-$day") {
                 Text(
-                    dayLabel(day) + if (entries.isEmpty()) " · nimic" else " · ${entries.size} $noun",
+                    dayLabel(day) + if (entries.isEmpty()) " · nimic" else " · ${entries.sumOf { it.episodeMembers.size.coerceAtLeast(1) }} $noun",
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(horizontal = spec.screenPadding).padding(top = 8.dp),
                 )
             }
             if (entries.isNotEmpty()) {
                 item(key = "row-$day") {
+                    val rowKey = "calendar-week|$day"
                     LazyRow(
+                        state = rememberRestoringRowState(rowKey, entries) { it.key },
                         horizontalArrangement = Arrangement.spacedBy(ro.ak.vodunify.ui.components.rowSpacing()),
                         contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 8.dp),
                     ) {
                         items(entries, key = { it.key }) { item ->
                             PressableCard(
-                                onClick = { onOpen(item) },
-                                onLongClick = { onWatch(item) },
+                                onClick = { actions.open(item) },
+                                onLongClick = {
+                                    if (item.episodeMembers.isEmpty()) actions.watch(item) else menu = item
+                                },
+                                restoreKey = "$rowKey|${item.key}",
                                 modifier = Modifier
                                     .size(spec.posterWidth, spec.posterHeight)
                                     .alpha(if (item.passed) 1f else 0.5f)
@@ -241,4 +250,5 @@ fun WeekList(
             }
         }
     }
+    menu?.let { item -> CalendarItemMenu(item, actions) { menu = null } }
 }

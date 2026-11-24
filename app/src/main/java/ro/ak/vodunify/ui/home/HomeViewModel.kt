@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -21,6 +22,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import ro.ak.vodunify.core.catalog.CatalogItem
 import ro.ak.vodunify.core.catalog.CatalogRepository
+import ro.ak.vodunify.core.catalog.EpisodeAir
 import ro.ak.vodunify.core.catalog.HomeCatalog
 import ro.ak.vodunify.core.catalog.ServiceShelf
 import ro.ak.vodunify.core.catalog.ServiceCatalogStatus
@@ -114,7 +116,7 @@ class HomeViewModel @Inject constructor(
 
     private val configured = tracking.trackers.any { it.isConfigured }
 
-    private suspend fun releaseRows(s: ReleaseInput): PersonalRows = coroutineScope {
+    private suspend fun releaseRows(s: ReleaseInput, publish: (PersonalRows) -> Unit) = coroutineScope {
         val followed = async { followed(s) }
         val popular = async {
             if (!catalog.isConfigured) {
@@ -136,6 +138,7 @@ class HomeViewModel @Inject constructor(
         val shows = f.filter { it.releases.item.kind == TitleKind.TV }
         val popularMovies = withReleases(p.filter { it.releases.item.kind == TitleKind.MOVIE })
         val popularShows = p.filter { it.releases.item.kind == TitleKind.TV }
+        val followedIds = shows.mapTo(HashSet()) { it.releases.item.id }
         val apps = packages.await()
         fun List<PersonalItem>.withApps() = map { i ->
             val r = i.release
@@ -144,19 +147,48 @@ class HomeViewModel @Inject constructor(
         }
         // Întâi ce e din Lista mea, apoi ce e popular, ca rândurile să nu fie goale. Un titlu trece singur
         // din „În curând” în „Noutăți” la data lansării (aceleași titluri, altă fereastră de timp).
-        PersonalRows(
+        val rows = PersonalRows(
             PersonalState.CONNECTED,
             newMovies = (HomeSections.newMovies(movies, today) + HomeSections.newMovies(popularMovies, today))
                 .distinctBy { it.key }.take(ROW_LIMIT).withApps(),
             newEpisodes = (
                 HomeSections.newEpisodes(shows, today) +
-                    HomeSections.newEpisodes(popularShows, today, POPULAR_RECENT_EPISODE_DAYS)
+                    HomeSections.newEpisodes(popularShows.filterNot { it.releases.item.id in followedIds }, today, POPULAR_RECENT_EPISODE_DAYS)
                 ).distinctBy { it.key }.take(ROW_LIMIT),
             soonMovies = (HomeSections.soonMovies(movies, today) + HomeSections.soonMovies(popularMovies, today))
                 .distinctBy { it.key }.take(ROW_LIMIT).withApps(),
             soonEpisodes = (HomeSections.soonEpisodes(shows, today) + HomeSections.soonEpisodes(popularShows, today))
                 .distinctBy { it.key }.take(ROW_LIMIT),
         )
+        publish(rows)
+        val showById = (popularShows + shows).associateBy { it.releases.item.id }
+        val enriched = rows.newEpisodes.map { card ->
+            async {
+                val show = showById[card.tmdbId] ?: return@async card
+                val last = show.releases.lastEpisode ?: return@async card
+                val day = last.airDate ?: return@async card
+                val episodes = mutableListOf(last)
+                try {
+                    artGate.withPermit {
+                        var number = last.season
+                        while (number >= 1) {
+                            val season = catalog.season(show.releases.item.id, number, s.settings)
+                            val released = season.episodes.filter { it.airDate == day }
+                            episodes += released.map { EpisodeAir(it.season, it.number, it.name, it.airDate) }
+                            // O lansare poate cuprinde și finalul sezonului precedent.
+                            if (released.none { it.number == 1 }) break
+                            number--
+                        }
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // Păstrăm cel puțin episodul confirmat în fișa serialului.
+                }
+                HomeSections.withEpisodeRange(card, episodes, show.lastSeen)
+            }
+        }.awaitAll()
+        if (enriched != rows.newEpisodes) publish(rows.copy(newEpisodes = enriched))
     }
 
     /**
@@ -379,13 +411,14 @@ class HomeViewModel @Inject constructor(
             combine(tracking.watchlist, tracking.seriesSummaries, prefs.settings, ::ReleaseInput)
                 .distinctUntilChanged()
                 .collectLatest { input ->
-                    val rows = withContext(Dispatchers.Default) { releaseRows(input) }
-                    publishPersonal(_personal.value.copy(
-                        newMovies = rows.newMovies,
-                        newEpisodes = rows.newEpisodes,
-                        soonMovies = rows.soonMovies,
-                        soonEpisodes = rows.soonEpisodes,
-                    ))
+                    releaseRows(input) { rows ->
+                        publishPersonal(_personal.value.copy(
+                            newMovies = rows.newMovies,
+                            newEpisodes = rows.newEpisodes,
+                            soonMovies = rows.soonMovies,
+                            soonEpisodes = rows.soonEpisodes,
+                        ))
+                    }
                 }
         }
     }

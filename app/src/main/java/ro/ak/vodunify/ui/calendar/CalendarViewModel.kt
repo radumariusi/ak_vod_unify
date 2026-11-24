@@ -3,17 +3,20 @@ package ro.ak.vodunify.ui.calendar
 import ro.ak.vodunify.core.calendar.model.CalendarResult
 import ro.ak.vodunify.core.calendar.model.MovieCalendarResult
 import android.content.Context
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
@@ -55,9 +58,18 @@ import ro.ak.vodunify.core.playback.TargetResolver
 /** Pachetele pentru siglele de pe posterele din calendar. */
 data class CalendarIcons(val apps: Map<String, String> = emptyMap(), val player: String? = null)
 
-enum class CalendarTab(val label: String) { SHOWS("Seriale"), MOVIES("Filme") }
+enum class CalendarTab(val label: String, val noun: String) {
+    SHOWS("Seriale", "episoade"), MOVIES("Filme", "lansări"), ALL("Filme și seriale", "lansări");
 
-enum class CalendarMode(val label: String) { DAY("Zi"), WEEK("Săptămână"), MONTH("Lună"), UPCOMING("Următoare") }
+    val includesMovies get() = this != SHOWS
+    val includesEpisodes get() = this != MOVIES
+}
+
+enum class CalendarMode(val label: String) {
+    TODAY("Azi"), DAY("Zi"), WEEK("Săptămână"), MONTH("Lună"), UPCOMING("Următoare");
+
+    val isDay get() = this == DAY || this == TODAY
+}
 
 /** Cât de departe se uită „Următoare” (lansările viitoare). */
 const val UPCOMING_DAYS = 60L
@@ -73,7 +85,7 @@ data class CalendarSummary(
 
 data class CalendarUiState(
     val tab: CalendarTab = CalendarTab.SHOWS,
-    val mode: CalendarMode = CalendarMode.DAY,
+    val mode: CalendarMode = CalendarMode.TODAY,
     val from: LocalDate = RomaniaTime.today(),
     val to: LocalDate = RomaniaTime.today(),
     val loading: Boolean = true,
@@ -100,9 +112,22 @@ data class CalendarUiState(
 
 private data class Query(val tab: CalendarTab, val mode: CalendarMode, val anchor: LocalDate, val settings: CalendarSettings, val refresh: Int)
 
+internal data class CalendarPosition(
+    val mode: CalendarMode,
+    val anchor: LocalDate,
+    val month: LocalDate? = null,
+    val openedDay: LocalDate? = null,
+) {
+    fun openDay(day: LocalDate) = CalendarPosition(CalendarMode.DAY, day, anchor, day)
+
+    fun back(today: LocalDate) = if (month != null) CalendarPosition(CalendarMode.MONTH, month)
+        else CalendarPosition(CalendarMode.TODAY, today)
+}
+
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class CalendarViewModel @Inject constructor(
+    private val savedState: SavedStateHandle,
     @ApplicationContext private val context: Context,
     private val calendar: CalendarRepository,
     private val catalog: CatalogRepository,
@@ -131,15 +156,17 @@ class CalendarViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CalendarIcons())
 
-    private val tab = MutableStateFlow(CalendarTab.SHOWS)
-    private val mode = MutableStateFlow(CalendarMode.DAY)
-    private val anchor = MutableStateFlow(RomaniaTime.today())
+    private val tab = MutableStateFlow(savedState.get<String>("tab")?.let(CalendarTab::valueOf) ?: CalendarTab.SHOWS)
+    private val position = MutableStateFlow(CalendarPosition(
+        savedState.get<String>("mode")?.let(CalendarMode::valueOf) ?: CalendarMode.TODAY,
+        savedDate("anchor") ?: RomaniaTime.today(),
+        savedDate("month"),
+        savedDate("openedDay"),
+    ))
+    private fun savedDate(key: String) = savedState.get<String>(key)?.let(LocalDate::parse)
     private val refresh = MutableStateFlow(0)
     private val showRejected = MutableStateFlow(false)
     private val onlyFollowed = MutableStateFlow(false)
-
-    /** Ultimul rezultat pentru aceeași perioadă: rămâne pe ecran cât se reîncarcă. */
-    @Volatile private var last: Pair<String, CalendarUiState>? = null
 
     /** Ultima apăsare pe „Reîncarcă” deja tratată. */
     @Volatile private var handledRefresh = 0
@@ -151,7 +178,8 @@ class CalendarViewModel @Inject constructor(
     private val _watch = MutableStateFlow<Pair<PlaybackRequest, List<MarketAvailability>>?>(null)
     val watch: StateFlow<Pair<PlaybackRequest, List<MarketAvailability>>?> = _watch.asStateFlow()
 
-    private val loaded = combine(tab, mode, anchor, calendar.settings, refresh) { t, m, a, s, r -> Query(t, m, a, s, r) }
+    private val loaded = combine(tab, position, calendar.settings, refresh) { t, p, s, r -> Query(t, p.mode, p.anchor, s, r) }
+        .distinctUntilChanged()
         .flatMapLatest { load(it) }
 
     private val startedTitles = tracking.reconciled.map { view ->
@@ -189,7 +217,7 @@ class CalendarViewModel @Inject constructor(
     }
 
     private fun range(mode: CalendarMode, anchor: LocalDate): Pair<LocalDate, LocalDate> = when (mode) {
-        CalendarMode.DAY -> anchor to anchor
+        CalendarMode.TODAY, CalendarMode.DAY -> anchor to anchor
         CalendarMode.WEEK -> {
             val monday = anchor.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
             monday to monday.plusDays(6)
@@ -198,7 +226,7 @@ class CalendarViewModel @Inject constructor(
         CalendarMode.UPCOMING -> anchor to anchor.plusDays(UPCOMING_DAYS - 1)
     }
 
-    private fun load(q: Query) = flow {
+    private fun load(q: Query): Flow<CalendarUiState> {
         val (from, to) = range(q.mode, q.anchor)
         val base = CalendarUiState(
             tab = q.tab,
@@ -210,10 +238,8 @@ class CalendarViewModel @Inject constructor(
             movieKinds = q.settings.movieKinds,
         )
         if (!calendar.isConfigured) {
-            emit(base.copy(loading = false, error = CatalogError.NotConfigured))
-            return@flow
+            return kotlinx.coroutines.flow.flowOf(base.copy(loading = false, error = CatalogError.NotConfigured))
         }
-        val periodKey = "${q.tab}-${q.mode}-$from-$to"
         // „Reîncarcă” cere din nou; altfel rezultatul păstrat (de la ultima vizită sau pregătit de Acasă) apare pe loc.
         val force = q.refresh != handledRefresh
         handledRefresh = q.refresh
@@ -229,60 +255,119 @@ class CalendarViewModel @Inject constructor(
             rejected = r.rejected.map { it.toItem(false) },
             summary = CalendarSummary(r.entries.size, r.rejected.size, r.hiddenByCategory, r.hiddenByUser, r.notOnMyApps, r.usedImdb),
         )
-        if (!force) {
-            val cached = when (q.tab) {
-                CalendarTab.SHOWS -> calendar.cachedEpisodes(from, to, q.settings)?.let(::episodesState)
-                CalendarTab.MOVIES -> calendar.cachedMovies(from, to, q.settings)?.let(::moviesState)
-            }
-            if (cached != null) {
-                last = periodKey to cached
-                emit(cached)
+        fun source(
+            cached: suspend () -> CalendarUiState?,
+            preview: suspend () -> CalendarUiState?,
+            fetch: suspend (suspend (CalendarUiState) -> Unit) -> CalendarUiState,
+        ): Flow<CalendarUiState> = flow {
+            val exact = cached()
+            if (exact != null && !force) {
+                emit(exact)
                 return@flow
             }
-        }
-        val previous = last?.takeIf { it.first == periodKey }?.second
-        emit(base.copy(loading = true, passed = previous?.passed, rejected = previous?.rejected.orEmpty(), summary = previous?.summary ?: CalendarSummary()))
-        try {
-            val result = when (q.tab) {
-                CalendarTab.SHOWS -> episodesState(calendar.episodes(from, to, q.settings, force))
-                CalendarTab.MOVIES -> moviesState(calendar.movies(from, to, q.settings, force))
+            var previous = exact ?: preview()
+            emit((previous ?: base).copy(loading = true))
+            try {
+                emit(fetch { partial ->
+                    // Păstrăm lansările deja afișate din cache până sosește lista completă.
+                    val shown = previous
+                    val display = if (shown == null) partial else mergeCalendarStates(base, shown, partial, sameSource = true)
+                    previous = display
+                    if (display.passed.orEmpty().isNotEmpty()) emit(display.copy(loading = true))
+                })
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emit((previous ?: base).copy(loading = false, error = e.toCatalogError()))
             }
-            last = periodKey to result
-            emit(result)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            emit(base.copy(loading = false, passed = previous?.passed, error = e.toCatalogError()))
+        }
+
+        val episodes = source(
+            cached = { calendar.cachedEpisodes(from, to, q.settings)?.let(::episodesState) },
+            preview = { calendar.previewEpisodes(from, to, q.settings)?.let(::episodesState) },
+            fetch = { update -> episodesState(calendar.episodes(from, to, q.settings, force) { update(episodesState(it)) }) },
+        )
+        val movies = source(
+            cached = { calendar.cachedMovies(from, to, q.settings)?.let(::moviesState) },
+            preview = { calendar.previewMovies(from, to, q.settings)?.let(::moviesState) },
+            fetch = { update -> moviesState(calendar.movies(from, to, q.settings, force) { update(moviesState(it)) }) },
+        )
+        return when (q.tab) {
+            CalendarTab.SHOWS -> episodes
+            CalendarTab.MOVIES -> movies
+            CalendarTab.ALL -> combine(episodes, movies) { a, b -> mergeCalendarStates(base, a, b) }
         }
     }
 
-    private fun move(date: LocalDate, forward: Boolean): LocalDate {
+    private fun mergeCalendarStates(
+        base: CalendarUiState, a: CalendarUiState, b: CalendarUiState, sameSource: Boolean = false,
+    ): CalendarUiState {
+        fun ordered(first: List<CalendarItem>, second: List<CalendarItem>) =
+            (second + first).distinctBy { it.key }.sortedWith(compareBy(
+                { it.date }, { it.movie?.hasTime == false }, { it.releaseAt }, { it.title },
+            ))
+        val entries = if (a.passed == null && b.passed == null) null else ordered(a.passed.orEmpty(), b.passed.orEmpty())
+        val visibleKeys = entries.orEmpty().mapTo(HashSet()) { it.key }
+        val rejected = ordered(a.rejected, b.rejected).filterNot { it.key in visibleKeys }
+        val left = a.summary
+        val right = b.summary
+        val summary = if (sameSource) right.copy(count = entries.orEmpty().size, rejected = rejected.size)
+        else CalendarSummary(
+            entries.orEmpty().size, rejected.size, left.hiddenByCategory + right.hiddenByCategory,
+            left.hiddenByUser + right.hiddenByUser, left.notOnMyApps + right.notOnMyApps, left.usedImdb || right.usedImdb,
+        )
+        return base.copy(
+            loading = a.loading || b.loading,
+            passed = entries,
+            rejected = rejected,
+            summary = summary,
+            error = a.error ?: b.error,
+        )
+    }
+
+    private fun move(forward: Boolean) {
+        val current = position.value
         val sign = if (forward) 1L else -1L
-        return when (mode.value) {
-            CalendarMode.DAY -> date.plusDays(sign)
+        val date = current.anchor
+        val moved = when (current.mode) {
+            CalendarMode.TODAY, CalendarMode.DAY -> date.plusDays(sign)
             CalendarMode.WEEK -> date.plusWeeks(sign)
             CalendarMode.MONTH -> date.withDayOfMonth(1).plusMonths(sign)
             CalendarMode.UPCOMING -> date.plusDays(sign * UPCOMING_DAYS)
         }
+        updatePosition(current.copy(mode = if (current.mode == CalendarMode.TODAY) CalendarMode.DAY else current.mode, anchor = moved))
     }
 
-    fun previous() = anchor.update { move(it, forward = false) }
-    fun next() = anchor.update { move(it, forward = true) }
-    fun goToToday() = anchor.update { RomaniaTime.today() }
+    fun previous() = move(forward = false)
+    fun next() = move(forward = true)
+    fun goToToday() = setMode(CalendarMode.TODAY)
+    fun refreshToday() {
+        if (position.value.mode == CalendarMode.TODAY) goToToday()
+    }
     fun setMode(m: CalendarMode) {
-        // „Următoare” pornește mereu de azi.
-        if (m == CalendarMode.UPCOMING && mode.value != m) anchor.value = RomaniaTime.today()
-        mode.value = m
+        val date = if (m == CalendarMode.TODAY || m == CalendarMode.UPCOMING) RomaniaTime.today() else position.value.anchor
+        updatePosition(CalendarPosition(m, date))
     }
     fun setTab(t: CalendarTab) {
-        // Filmele se văd mai bine pe săptămână (cum era în AK VOD Calendar).
-        if (t != tab.value && t == CalendarTab.MOVIES && mode.value == CalendarMode.DAY) mode.value = CalendarMode.WEEK
+        savedState["tab"] = t.name
         tab.value = t
     }
 
-    fun openDay(date: LocalDate) {
-        anchor.value = date
-        mode.value = CalendarMode.DAY
+    fun openDay(date: LocalDate) = updatePosition(position.value.openDay(date))
+
+    /** Un Back din ziua deschisă în lună revine la celula din care ai plecat. */
+    fun back(): LocalDate? {
+        val current = position.value
+        updatePosition(current.back(RomaniaTime.today()))
+        return current.openedDay
+    }
+
+    private fun updatePosition(next: CalendarPosition) {
+        savedState["mode"] = next.mode.name
+        savedState["anchor"] = next.anchor.toString()
+        savedState["month"] = next.month?.toString()
+        savedState["openedDay"] = next.openedDay?.toString()
+        position.value = next
     }
 
     fun toggleShowRejected() = showRejected.update { !it }

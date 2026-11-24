@@ -1,6 +1,7 @@
 package ro.ak.vodunify.ui.calendar
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Row
@@ -27,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -35,7 +37,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.time.Instant
 import ro.ak.vodunify.core.calendar.format.dayLabel
 import ro.ak.vodunify.core.calendar.format.monthLabel
@@ -44,6 +49,8 @@ import ro.ak.vodunify.core.calendar.model.MovieReleaseKind
 import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.ui.components.ErrorPanel
 import ro.ak.vodunify.ui.components.layoutSpec
+import ro.ak.vodunify.ui.components.clearReturningFocus
+import ro.ak.vodunify.ui.navigation.LocalTabTopFocus
 import ro.ak.vodunify.ui.navigation.LocalCatalogActions
 import ro.ak.vodunify.ui.watch.WatchChooserHost
 import ro.ak.vodunify.ui.watch.WatchChooserViewModel
@@ -64,6 +71,7 @@ fun CalendarScreen(
     val actions = LocalCatalogActions.current
     val context = LocalContext.current
     val spec = layoutSpec()
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshToday() }
 
     LaunchedEffect(message) {
         message?.let {
@@ -81,20 +89,43 @@ fun CalendarScreen(
     val dayGrid = rememberLazyGridState()
     val weekList = rememberLazyListState()
     val monthList = rememberLazyListState()
-    var shownPeriod by rememberSaveable { mutableStateOf("") }
-    val period = "${state.tab}-${state.mode}-${state.from}"
-    LaunchedEffect(period) {
-        // Înapoi sus când se schimbă perioada, dar nu la întoarcerea din pagina unui titlu.
-        if (shownPeriod.isNotEmpty() && shownPeriod != period) {
-            dayGrid.scrollToItem(0)
-            weekList.scrollToItem(0)
-            monthList.scrollToItem(0)
+    var shownDay by rememberSaveable { mutableStateOf("") }
+    var shownWeek by rememberSaveable { mutableStateOf("") }
+    var shownMonth by rememberSaveable { mutableStateOf("") }
+    var focusedDay by rememberSaveable { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val focusTop = LocalTabTopFocus.current
+    val clearFocus = clearReturningFocus()
+    val period = "${state.tab}-${state.from}-${state.to}"
+    LaunchedEffect(state.mode, period) {
+        when {
+            state.mode.isDay -> {
+                if (shownDay.isNotEmpty() && shownDay != period) dayGrid.scrollToItem(0)
+                shownDay = period
+            }
+            state.mode == CalendarMode.MONTH -> {
+                if (shownMonth.isNotEmpty() && shownMonth != period) monthList.scrollToItem(0)
+                shownMonth = period
+            }
+            else -> {
+                if (shownWeek.isNotEmpty() && shownWeek != period) weekList.scrollToItem(0)
+                shownWeek = period
+            }
         }
-        shownPeriod = period
+    }
+    BackHandler {
+        clearFocus()
+        val origin = viewModel.back()
+        focusedDay = origin?.toString()
+        if (origin == null) {
+            scope.launch {
+                dayGrid.scrollToItem(0)
+                focusTop()
+            }
+        }
     }
 
     val open: (CalendarItem) -> Unit = { actions.openTitle(if (it.isMovie) TitleKind.MOVIE else TitleKind.TV, it.tmdbId) }
-    val chooseWhere: (CalendarItem) -> Unit = viewModel::chooseWhere
     val itemActions = remember(viewModel) {
         CalendarItemActions(
             open = open,
@@ -133,7 +164,7 @@ fun CalendarScreen(
                 OutlinedButton(onClick = viewModel::previous) { Text("◀") }
                 Text(
                     when (state.mode) {
-                        CalendarMode.DAY -> dayLabel(state.from)
+                        CalendarMode.TODAY, CalendarMode.DAY -> dayLabel(state.from)
                         CalendarMode.WEEK -> weekLabel(state.from, state.to)
                         CalendarMode.MONTH -> monthLabel(state.from)
                         CalendarMode.UPCOMING -> "De la ${dayLabel(state.from)}, $UPCOMING_DAYS zile"
@@ -154,18 +185,23 @@ fun CalendarScreen(
         when {
             error != null && state.passed == null -> ErrorPanel(error, onRetry = viewModel::reload, modifier = Modifier.padding(spec.screenPadding))
             state.passed == null -> Info(
-                if (state.mode == CalendarMode.DAY) "Se încarcă…" else "Se încarcă perioada… (prima dată durează mai mult)",
+                if (state.mode.isDay) "Se încarcă…" else "Se încarcă perioada…",
             )
             else -> {
                 Summary(state)
                 if (!state.hasMyApps) Info("Sfat: aplicațiile tale și biblioteca fiecăreia (RO / US) se iau din Setări → Aplicații și servicii.")
-                val noun = if (state.tab == CalendarTab.MOVIES) "filme" else "episoade"
+                val visible = remember(state) { state.visible }
+                val grouped = remember(visible) { groupSameDayEpisodes(visible) }
+                if (error != null) Info("Unele lansări nu s-au putut încărca.")
                 when {
-                    state.visible.isEmpty() -> Info("Nimic în perioada asta după filtrele tale.")
-                    state.mode == CalendarMode.DAY -> DayView(state.visible, dayGrid, itemActions)
-                    state.mode == CalendarMode.WEEK -> WeekList(state.days, state.visible, weekList, noun, open, chooseWhere)
-                    state.mode == CalendarMode.UPCOMING -> WeekList(state.days, state.visible, weekList, noun, open, chooseWhere, skipEmpty = true)
-                    else -> MonthCalendar(state.from, state.to, state.visible, monthList, viewModel::openDay)
+                    state.mode == CalendarMode.MONTH -> MonthCalendar(
+                        state.from, state.to, visible, monthList, focusedDay,
+                        onFocusRestored = { focusedDay = null },
+                        onOpenDay = viewModel::openDay,
+                    )
+                    grouped.isEmpty() -> Info(if (state.loading) "Se încarcă perioada…" else "Nimic în perioada asta după filtrele tale.")
+                    state.mode.isDay -> DayView(grouped, dayGrid, itemActions)
+                    else -> WeekList(state.days, grouped, weekList, state.tab.noun, itemActions, skipEmpty = state.mode == CalendarMode.UPCOMING)
                 }
             }
         }
@@ -177,9 +213,8 @@ fun CalendarScreen(
 @Composable
 private fun Summary(state: CalendarUiState) {
     val s = state.summary
-    val movies = state.tab == CalendarTab.MOVIES
     val parts = buildList {
-        add(if (movies) "${s.count} lansări" else "${s.count} episoade")
+        add("${s.count} ${state.tab.noun}")
         add("ora României (≈ = estimat)")
         if (s.rejected > 0) add("${s.rejected} sub prag")
         if (s.hiddenByCategory > 0) add("${s.hiddenByCategory} din categorii ascunse")
@@ -211,12 +246,12 @@ private fun Info(text: String) {
 @Composable
 private fun CalendarFilters(state: CalendarUiState, viewModel: CalendarViewModel, onDismiss: () -> Unit) {
     fun onOff(v: Boolean) = if (v) "Pornit" else "Oprit"
-    val kinds = if (state.tab == CalendarTab.MOVIES) MovieReleaseKind.entries else emptyList()
+    val kinds = if (state.tab.includesMovies) MovieReleaseKind.entries else emptyList()
     val options = buildList {
         add(ChoiceOption("Doar ce urmăresc", onOff(state.onlyFollowed)))
         add(
             ChoiceOption(
-                if (state.tab == CalendarTab.MOVIES) "Streaming doar pe aplicațiile mele" else "Doar aplicațiile mele",
+                if (state.tab.includesMovies) "Streaming doar pe aplicațiile mele" else "Doar aplicațiile mele",
                 onOff(state.onlyMyApps),
             ),
         )

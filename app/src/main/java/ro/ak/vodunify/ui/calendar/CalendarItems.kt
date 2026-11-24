@@ -1,6 +1,7 @@
 package ro.ak.vodunify.ui.calendar
 
 import ro.ak.vodunify.core.calendar.format.badges
+import ro.ak.vodunify.core.calendar.format.episodeRange
 import ro.ak.vodunify.core.calendar.format.movieBadges
 import ro.ak.vodunify.core.calendar.format.movieKindLabel
 import ro.ak.vodunify.core.calendar.format.movieRatingLabel
@@ -12,6 +13,7 @@ import ro.ak.vodunify.core.calendar.format.whereToWatch
 import ro.ak.vodunify.core.calendar.model.EpisodeEntry
 import ro.ak.vodunify.core.calendar.model.MovieEntry
 import ro.ak.vodunify.core.calendar.model.MovieReleaseKind
+import ro.ak.vodunify.core.connector.EpisodeNumber
 import java.time.Instant
 import java.time.LocalDate
 
@@ -49,9 +51,47 @@ data class CalendarItem(
     val backdropUrl: String? = null,
     val overview: String = "",
     val inProgress: Boolean = false,
+    val episodeMembers: List<CalendarItem> = emptyList(),
 ) {
-    fun upcomingPosterTime(now: Instant): String = posterTime.takeIf { now.isBefore(releaseAt) }.orEmpty()
+    fun upcomingPosterTime(now: Instant): String =
+        if (episodeMembers.isEmpty()) posterTime.takeIf { now.isBefore(releaseAt) }.orEmpty()
+        else episodeMembers.filter { now.isBefore(it.releaseAt) }.minByOrNull { it.releaseAt }?.posterTime.orEmpty()
 }
+
+/** O singură copertă pe serial și zi. Intrările originale rămân disponibile pentru acțiuni. */
+internal fun groupSameDayEpisodes(items: List<CalendarItem>): List<CalendarItem> =
+    items.groupBy { item ->
+        if (item.episode == null) item.key else "episodes:${item.date}:${item.tmdbId}"
+    }.map { (key, entries) ->
+        val first = entries.first()
+        if (entries.size == 1) return@map first
+        val members = entries.sortedWith(compareBy({ it.episode?.seasonNumber }, { it.episode?.episodeNumber }))
+        val label = episodeRange(members.mapNotNull { it.episode?.let { ep -> EpisodeNumber(ep.seasonNumber, ep.episodeNumber) } })
+        first.copy(
+            key = key,
+            subtitle = label,
+            posterLabel = label,
+            shortLabel = "${first.title} $label",
+            overview = first.episode?.showOverview?.takeIf { it.isNotBlank() } ?: first.overview,
+            episodeMembers = members,
+            passed = members.any { it.passed },
+            followed = members.any { it.followed },
+            watched = members.all { it.watched },
+            inProgress = members.any { it.watched || it.inProgress },
+            releaseAt = members.minOf { it.releaseAt },
+        )
+    }
+
+/** Prioritatea în grila lunară se decide pentru titlu, folosind toate lansările sale din zi. */
+internal fun monthPreview(items: List<CalendarItem>, now: Instant): List<CalendarItem> =
+    items.groupBy { it.isMovie to it.tmdbId }.values
+        .sortedWith(compareBy<List<CalendarItem>>(
+            { entries -> !entries.any { it.followed && !it.watched && !now.isBefore(it.releaseAt) } },
+            { entries -> !entries.any { it.followed } },
+            { entries -> entries.minOf { it.releaseAt } },
+            { entries -> entries.first().title },
+        ))
+        .map { entries -> entries.firstOrNull { it.posterUrl != null } ?: entries.first() }
 
 fun EpisodeEntry.toItem(watched: Boolean) = CalendarItem(
     key = key,

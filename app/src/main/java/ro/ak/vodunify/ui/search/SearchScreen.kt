@@ -17,6 +17,7 @@ import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.ui.components.rowSpacing
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
@@ -32,6 +33,7 @@ import ro.ak.vodunify.ui.components.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import ro.ak.vodunify.ui.navigation.TabBackToStart
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -63,7 +65,11 @@ fun SearchScreen(viewModel: SearchViewModel = hiltViewModel()) {
     val focusManager = LocalFocusManager.current
     val years = remember { (Year.now().value downTo Year.now().value - 40).toList() }
 
+    val grid = rememberLazyGridState()
+    TabBackToStart { grid.scrollToItem(0) }
+
     LazyVerticalGrid(
+        state = grid,
         columns = GridCells.FixedSize(spec.posterWidth),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 12.dp),

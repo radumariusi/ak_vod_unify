@@ -6,7 +6,6 @@ import ro.ak.vodunify.ui.theme.GlassActive
 import ro.ak.vodunify.ui.theme.GlassIdle
 import ro.ak.vodunify.ui.components.Dropdown
 import ro.ak.vodunify.ui.components.OnOffDropdown
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -29,6 +28,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import ro.ak.vodunify.ui.navigation.TabBackToStart
+import ro.ak.vodunify.ui.components.restoreCardFocus
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -86,6 +87,13 @@ fun SettingsScreen(
     val spec = layoutSpec()
     var selectedName by rememberSaveable { mutableStateOf(if (spec.isCompact) null else SettingsCategory.APP.name) }
     val selected = selectedName?.let { n -> SettingsCategory.entries.firstOrNull { it.name == n } }
+    val categoryScroll = rememberScrollState()
+    val contentScroll = rememberScrollState()
+    TabBackToStart {
+        selectedName = if (spec.isCompact) null else SettingsCategory.APP.name
+        categoryScroll.scrollTo(0)
+        contentScroll.scrollTo(0)
+    }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         if (viewModel.update.value is UpdateState.NeedsInstallPermission) viewModel.onReturnedFromPermission()
@@ -94,7 +102,7 @@ fun SettingsScreen(
     if (spec.isCompact) {
         if (selected == null) {
             Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = spec.screenPadding, vertical = 16.dp),
+                Modifier.fillMaxSize().verticalScroll(categoryScroll).padding(horizontal = spec.screenPadding, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 SettingsCategory.visible.forEach { cat ->
@@ -102,8 +110,7 @@ fun SettingsScreen(
                 }
             }
         } else {
-            BackHandler { selectedName = null }
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = spec.screenPadding, vertical = 8.dp)) {
+            Column(Modifier.fillMaxSize().verticalScroll(contentScroll).padding(horizontal = spec.screenPadding, vertical = 8.dp)) {
                 TextButton(onClick = { selectedName = null }) { Text("‹ Setări") }
                 Text(selected.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(12.dp))
@@ -116,7 +123,7 @@ fun SettingsScreen(
     val current = selected ?: SettingsCategory.APP
     Row(Modifier.fillMaxSize().padding(start = spec.screenPadding, top = 16.dp)) {
         Column(
-            Modifier.width(300.dp).fillMaxHeight().verticalScroll(rememberScrollState()),
+            Modifier.width(300.dp).fillMaxHeight().verticalScroll(categoryScroll),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             SettingsCategory.visible.forEach { cat ->
@@ -126,7 +133,7 @@ fun SettingsScreen(
         }
         Spacer(Modifier.width(24.dp))
         Column(
-            Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(end = spec.screenPadding, bottom = 24.dp),
+            Modifier.weight(1f).fillMaxHeight().verticalScroll(contentScroll).padding(end = spec.screenPadding, bottom = 24.dp),
         ) {
             CategoryContent(current, viewModel, accounts)
         }
@@ -146,6 +153,7 @@ private fun CategoryItem(cat: SettingsCategory, selected: Boolean, selectOnFocus
     val fg = if (focused) c.onSecondary else c.onSurface
     Row(
         Modifier
+            .restoreCardFocus("settings|${cat.name}")
             .fillMaxWidth()
             .clip(RowShape)
             .background(bg)

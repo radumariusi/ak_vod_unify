@@ -6,6 +6,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import ro.ak.vodunify.core.net.readResponse
 import java.io.IOException
 import java.time.LocalDate
 
@@ -26,7 +27,7 @@ class CinemaCityRoSource(
     override suspend fun releases(today: LocalDate): List<RoCinemaRelease> {
         val url = "${baseUrl}films/until/${today.plusDays(lookAheadDays)}?attr=&lang=ro_RO"
         val body = withContext(Dispatchers.IO) {
-            http.newCall(Request.Builder().url(url).header("Accept", "application/json").get().build()).execute().use { r ->
+            http.newCall(Request.Builder().url(url).header("Accept", "application/json").get().build()).readResponse { r ->
                 if (!r.isSuccessful) throw IOException("Cinema City: HTTP ${r.code}")
                 r.body?.string().orEmpty()
             }

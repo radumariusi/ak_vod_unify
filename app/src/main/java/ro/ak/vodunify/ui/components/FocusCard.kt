@@ -88,6 +88,7 @@ fun FocusCard(
         .onFocusChanged {
             if (it.isFocused) {
                 position?.let(restore::consume)
+                if (restore.pending?.entry != entry) rememberFocus()
                 onFocused?.invoke()
             }
         }

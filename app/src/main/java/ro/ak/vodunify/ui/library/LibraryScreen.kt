@@ -43,6 +43,7 @@ import ro.ak.vodunify.ui.components.rowSpacing
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.items
 import ro.ak.vodunify.ui.components.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -52,6 +53,10 @@ import androidx.compose.material3.MaterialTheme
 import ro.ak.vodunify.ui.components.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import ro.ak.vodunify.ui.components.returningFocus
+import ro.ak.vodunify.ui.components.rememberRestoringRowState
+import ro.ak.vodunify.ui.navigation.TabBackToStart
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -87,8 +92,12 @@ fun LibraryScreen(viewModel: LibraryViewModel = hiltViewModel()) {
         LibraryRows(state, status, viewModel)
         return
     }
+    val grid = rememberLazyGridState()
+    TabBackToStart { grid.scrollToItem(0) }
+
     KeepFocusedContentVisible(spec.isTv) {
         LazyVerticalGrid(
+            state = grid,
             columns = GridCells.FixedSize(spec.posterWidth),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 12.dp),
@@ -202,6 +211,7 @@ private fun LibraryRows(state: LibraryUiState, status: SyncStatus, viewModel: Li
     val spec = layoutSpec()
     val actions = LocalCatalogActions.current
     val list = rememberLazyListState()
+    TabBackToStart { list.scrollToItem(0) }
     val scope = rememberCoroutineScope()
     val header = ro.ak.vodunify.core.connector.ExternalTrackers.ENABLED
     val rowHeight = spec.posterHeight + 60.dp
@@ -209,6 +219,13 @@ private fun LibraryRows(state: LibraryUiState, status: SyncStatus, viewModel: Li
     val animate by UiPrefs.rowAnimation.collectAsStateWithLifecycle()
     val keys = remember(state.rows, header) {
         (if (header) listOf<String?>(null) else emptyList()) + state.rows.map { row -> row.key.takeIf { row.items.isNotEmpty() } }
+    }
+    val returning = returningFocus()
+    val returnRow = keys.indexOf(returning?.homeRow).takeIf { returning?.homeRow != null }
+    LaunchedEffect(returning, returnRow) {
+        if (returnRow != null && returnRow >= 0 && list.layoutInfo.visibleItemsInfo.none { it.index == returnRow }) {
+            list.scrollToItem(returnRow)
+        }
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val bottom = if (spec.isTv) (maxHeight - rowHeight).coerceAtLeast(24.dp) else 24.dp
@@ -262,6 +279,7 @@ private fun LibraryRows(state: LibraryUiState, status: SyncStatus, viewModel: Li
                                     SectionTitle(row.title)
                                     DefaultScroll {
                                         LazyRow(
+                                            state = rememberRestoringRowState(row.key, row.items) { it.key },
                                             contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 10.dp),
                                             horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
                                         ) {

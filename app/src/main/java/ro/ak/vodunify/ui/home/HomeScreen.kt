@@ -78,6 +78,7 @@ import ro.ak.vodunify.ui.components.LoadingPanel
 import ro.ak.vodunify.ui.components.FocusedTitle
 import ro.ak.vodunify.ui.components.LocalBackdrop
 import ro.ak.vodunify.ui.components.returningFocus
+import ro.ak.vodunify.ui.components.clearReturningFocus
 import ro.ak.vodunify.ui.components.HomeRows
 import ro.ak.vodunify.ui.components.LocalHomeRows
 import ro.ak.vodunify.ui.components.FixedRowsScroll
@@ -164,7 +165,9 @@ private fun HomeContent(
     }
     // Înapoi de pe un rând de jos urcă la primul rând; abia de acolo întreabă dacă ieși din aplicație.
     val scrolled by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 } }
-    BackHandler(enabled = spec.isTv && scrolled) {
+    val clearFocus = clearReturningFocus()
+    BackHandler(enabled = scrolled) {
+        clearFocus()
         scope.launch {
             listState.scrollToItem(0)
             runCatching { listFocus.requestFocus() }

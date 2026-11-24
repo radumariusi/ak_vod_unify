@@ -178,18 +178,59 @@ class CalendarRepository @Inject constructor(
     suspend fun cachedMovies(from: LocalDate, to: LocalDate, s: CalendarSettings): MovieCalendarResult? =
         movieMemo[MemoKey(from, to, s, language())].fresh()
 
-    suspend fun episodes(from: LocalDate, to: LocalDate, s: CalendarSettings, force: Boolean = false): CalendarResult {
+    /** Arată imediat partea deja cunoscută a perioadei; cererea exactă completează apoi rezultatul. */
+    suspend fun previewEpisodes(from: LocalDate, to: LocalDate, s: CalendarSettings): CalendarResult? =
+        episodeMemo.overlapping(MemoKey(from, to, s, language()))?.let { memo ->
+            val entries = memo.entries.filter { it.releaseDate in from..to }
+            val rejected = memo.rejected.filter { it.releaseDate in from..to }
+            CalendarResult(entries = entries, rejected = rejected, usedImdb = memo.usedImdb)
+                .takeIf { entries.isNotEmpty() || rejected.isNotEmpty() }
+        }
+
+    suspend fun previewMovies(from: LocalDate, to: LocalDate, s: CalendarSettings): MovieCalendarResult? =
+        movieMemo.overlapping(MemoKey(from, to, s, language()))?.let { memo ->
+            val entries = memo.entries.filter { it.releaseDate in from..to }
+            val rejected = memo.rejected.filter { it.releaseDate in from..to }
+            MovieCalendarResult(entries = entries, rejected = rejected, usedImdb = memo.usedImdb)
+                .takeIf { entries.isNotEmpty() || rejected.isNotEmpty() }
+        }
+
+    private fun <T> Map<MemoKey, Memo<T>>.overlapping(wanted: MemoKey): T? =
+        entries.asSequence()
+            .filter { (key, _) ->
+                key.settings == wanted.settings && key.language == wanted.language &&
+                    key.from <= wanted.to && key.to >= wanted.from
+            }
+            .filter { it.value.fresh() != null }
+            .maxWithOrNull(compareBy(
+                { (key, _) -> minOf(key.to, wanted.to).toEpochDay() - maxOf(key.from, wanted.from).toEpochDay() },
+                { (_, memo) -> memo.at },
+            ))?.value?.value
+
+    suspend fun episodes(
+        from: LocalDate, to: LocalDate, s: CalendarSettings, force: Boolean = false,
+        onProgress: (suspend (CalendarResult) -> Unit)? = null,
+    ): CalendarResult {
         val key = MemoKey(from, to, s, language())
         if (!force) episodeMemo[key].fresh()?.let { return it }
-        return episodeRepo(key.language).episodesBetween(from, to, s, apiKey = "", omdbKey = omdbKey(s))
-            .also { episodeMemo[key] = Memo(System.currentTimeMillis(), it) }
+        return episodeRepo(key.language).episodesBetween(from, to, s, apiKey = "", omdbKey = omdbKey(s), onProgress = onProgress)
+            .also {
+                episodeMemo.entries.removeIf { entry -> entry.value.fresh() == null }
+                episodeMemo[key] = Memo(System.currentTimeMillis(), it)
+            }
     }
 
-    suspend fun movies(from: LocalDate, to: LocalDate, s: CalendarSettings, force: Boolean = false): MovieCalendarResult {
+    suspend fun movies(
+        from: LocalDate, to: LocalDate, s: CalendarSettings, force: Boolean = false,
+        onProgress: (suspend (MovieCalendarResult) -> Unit)? = null,
+    ): MovieCalendarResult {
         val key = MemoKey(from, to, s, language())
         if (!force) movieMemo[key].fresh()?.let { return it }
-        return movieRepo(key.language).moviesBetween(from, to, s, apiKey = "", omdbKey = omdbKey(s))
-            .also { movieMemo[key] = Memo(System.currentTimeMillis(), it) }
+        return movieRepo(key.language).moviesBetween(from, to, s, apiKey = "", omdbKey = omdbKey(s), onProgress = onProgress)
+            .also {
+                movieMemo.entries.removeIf { entry -> entry.value.fresh() == null }
+                movieMemo[key] = Memo(System.currentTimeMillis(), it)
+            }
     }
 
     /** Pregătește în fundal ziua de azi (seriale), cum o deschide fila Calendar. */

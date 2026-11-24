@@ -63,6 +63,7 @@ class EpisodeCalendarRepository(
         settings: CalendarSettings,
         apiKey: String,
         omdbKey: String = "",
+        onProgress: (suspend (CalendarResult) -> Unit)? = null,
     ): CalendarResult = coroutineScope {
         require(!to.isBefore(from)) { "to < from" }
         val api = apiFactory(apiKey)
@@ -96,60 +97,50 @@ class EpisodeCalendarRepository(
         val anticipated = anticipatedDeferred.await()
         val useImdb = imdbRatings != null && omdbKey.isNotBlank()
 
-        val semaphore = Semaphore(concurrency)
-        // Followed shows are always checked, even when discover ranks them too low.
-        val showIds = (shows.map { it.id } + settings.followedShowIds()).distinct()
-        val results = showIds.map { showId ->
-            async {
-                semaphore.withPermit {
-                    try {
-                        Result.success(episodesForShow(api, showId, windowFrom, windowTo, settings, anticipated, omdbKey.takeIf { useImdb }))
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        Result.failure(e)
-                    }
-                }
+        fun build(entries: List<EpisodeEntry>): CalendarResult {
+            val inRange = entries.filter { !it.releaseDate.isBefore(from) && !it.releaseDate.isAfter(to) }
+                .distinctBy { it.key }
+                .sortedWith(compareBy({ it.releaseAt }, { it.showName }, { it.seasonNumber }, { it.episodeNumber }))
+            val (categoryHidden, visible) = inRange.partition { e ->
+                !e.isFollowed && e.categories.any { it in settings.hiddenCategories }
             }
-        }.awaitAll()
+            val (onMyApps, notOnMyApps) = if (settings.onlyInstalledApps) {
+                visible.partition { it.watchOn != null || it.isFollowed }
+            } else visible to emptyList()
+            val (passed, rejected) = onMyApps.partition { it.verdict.passed }
+            return CalendarResult(
+                entries = passed,
+                rejected = rejected,
+                hiddenByCategory = hiddenByCategory + categoryHidden.distinctBy { it.showId }.size,
+                hiddenByUser = hiddenByUser,
+                notOnMyApps = notOnMyApps.size,
+                usedImdb = useImdb,
+                anticipatedSource = anticipatedSource.label,
+            )
+        }
 
+        val showIds = (settings.followedShowIds() + shows.map { it.id }).distinct()
+        val publish: (suspend (List<EpisodeEntry>) -> Unit)? = onProgress?.let { update ->
+            { entries -> build(entries).takeIf { it.entries.isNotEmpty() }?.let { update(it) }; Unit }
+        }
+        val results = loadCalendarTitles(showIds, concurrency, publish) { showId ->
+            episodesForShow(api, showId, windowFrom, windowTo, settings, anticipated, omdbKey.takeIf { useImdb })
+        }
         if (results.isNotEmpty() && results.all { it.isFailure }) {
             throw results.first().exceptionOrNull() ?: TmdbException("TMDB: eroare necunoscută")
         }
-
-        val inRange = results.flatMap { it.getOrDefault(emptyList()) }
-            .filter { !it.releaseDate.isBefore(from) && !it.releaseDate.isAfter(to) }
-            .distinctBy { it.key }
-            .sortedWith(compareBy({ it.releaseAt }, { it.showName }, { it.seasonNumber }, { it.episodeNumber }))
-
-        // Details can reveal a category discover did not (e.g. TMDB type "Talk Show").
-        val (categoryHidden, visible) = inRange.partition { e ->
-            !e.isFollowed && e.categories.any { it in settings.hiddenCategories }
-        }
-        hiddenByCategory += categoryHidden.distinctBy { it.showId }.size
-
-        val (onMyApps, notOnMyApps) = if (settings.onlyInstalledApps) {
-            visible.partition { it.watchOn != null || it.isFollowed }
-        } else {
-            visible to emptyList()
-        }
-        val (passed, rejected) = onMyApps.partition { it.verdict.passed }
-
-        CalendarResult(
-            entries = passed,
-            rejected = rejected,
-            hiddenByCategory = hiddenByCategory,
-            hiddenByUser = hiddenByUser,
-            notOnMyApps = notOnMyApps.size,
-            usedImdb = useImdb,
-            anticipatedSource = anticipatedSource.label,
-        )
+        build(results.flatMap { it.getOrDefault(emptyList()) })
     }
 
     private suspend fun discoverShows(api: TmdbApi, from: LocalDate, to: LocalDate, maxPages: Int): List<TvSummaryDto> {
         val first = api.discoverTvAiring(from, to, page = 1)
         val lastPage = minOf(first.totalPages, maxPages)
-        val rest = (2..lastPage).flatMap { page -> api.discoverTvAiring(from, to, page).results }
+        val rest = coroutineScope {
+            val permits = Semaphore(4)
+            (2..lastPage).map { page ->
+                async { permits.withPermit { api.discoverTvAiring(from, to, page).results } }
+            }.awaitAll().flatten()
+        }
         return (first.results + rest).distinctBy { it.id }
     }
 

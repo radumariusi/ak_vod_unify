@@ -9,6 +9,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import ro.ak.vodunify.BuildConfig
+import ro.ak.vodunify.core.net.readResponse
 import ro.ak.vodunify.core.db.TmdbCacheDao
 import ro.ak.vodunify.core.db.TmdbCacheEntity
 import java.io.IOException
@@ -63,14 +64,14 @@ class TmdbClient @Inject constructor(
             }
         }
 
-    private fun fetch(url: HttpUrl): String {
+    private suspend fun fetch(url: HttpUrl): String {
         val builder = Request.Builder().url(url).header("Accept", "application/json")
         val current = auth
         if (current is TmdbAuth.Bearer) builder.header("Authorization", "Bearer ${current.token}")
-        http.newCall(builder.build()).execute().use { resp ->
-            if (resp.code == 401) throw TmdbUnauthorizedException()
-            if (!resp.isSuccessful) throw TmdbHttpException(resp.code)
-            return resp.body?.string() ?: throw IOException("Răspuns gol de la TMDb")
+        return http.newCall(builder.build()).readResponse { response ->
+            if (response.code == 401) throw TmdbUnauthorizedException()
+            if (!response.isSuccessful) throw TmdbHttpException(response.code)
+            response.body?.string() ?: throw IOException("Răspuns gol de la TMDb")
         }
     }
 

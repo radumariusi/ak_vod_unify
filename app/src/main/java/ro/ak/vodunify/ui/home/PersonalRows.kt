@@ -2,6 +2,9 @@ package ro.ak.vodunify.ui.home
 
 import kotlinx.serialization.Serializable
 import ro.ak.vodunify.core.catalog.CatalogItem
+import ro.ak.vodunify.core.catalog.EpisodeAir
+import ro.ak.vodunify.core.connector.EpisodeNumber
+import ro.ak.vodunify.core.calendar.format.episodeRange
 import ro.ak.vodunify.core.catalog.MovieReleaseEvent
 import ro.ak.vodunify.core.catalog.ReleaseChannel
 import ro.ak.vodunify.core.catalog.TitleKind
@@ -161,6 +164,16 @@ object HomeSections {
         }
             .sortedByDescending { it.third }
             .map { (f, ep, d) -> item(f, "new", "${ep.code} · ${dayLabel(d)}", date = d, code = ep.code) }
+
+    internal fun withEpisodeRange(card: PersonalItem, aired: List<EpisodeAir>, lastSeen: Pair<Int, Int>?): PersonalItem {
+        val day = date(card.eventDate) ?: return card
+        val episodes = aired.filter { ep ->
+            ep.airDate == card.eventDate && (lastSeen == null || ep.season > lastSeen.first ||
+                (ep.season == lastSeen.first && ep.episode > lastSeen.second))
+        }
+        val code = episodeRange(episodes.map { EpisodeNumber(it.season, it.episode) }).ifEmpty { return card }
+        return card.copy(episodeCode = code, subtitle = "$code · ${dayLabel(day)}")
+    }
 
     /** Seriale cu episodul următor în perioada care vine. */
     fun soonEpisodes(list: List<FollowedTitle>, today: LocalDate): List<PersonalItem> =

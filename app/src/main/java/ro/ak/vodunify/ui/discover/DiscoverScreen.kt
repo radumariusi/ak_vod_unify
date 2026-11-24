@@ -11,10 +11,12 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import ro.ak.vodunify.ui.components.rowSpacing
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import ro.ak.vodunify.ui.navigation.TabBackToStart
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -46,7 +48,11 @@ fun DiscoverScreen(viewModel: DiscoverViewModel = hiltViewModel()) {
     val spec = layoutSpec()
     val periods = remember { DiscoverPeriod.options() }
 
+    val grid = rememberLazyGridState()
+    TabBackToStart { grid.scrollToItem(0) }
+
     LazyVerticalGrid(
+        state = grid,
         columns = if (spec.isTv) GridCells.Adaptive(spec.posterWidth - 8.dp) else GridCells.FixedSize(spec.posterWidth),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 12.dp),
