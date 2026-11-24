@@ -21,6 +21,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import ro.ak.vodunify.ui.calendar.toItem
 import java.time.LocalDate
 import java.time.LocalDateTime
 
@@ -112,6 +113,17 @@ class EpisodeCalendarRepositoryTest {
         assertEquals(QualityVerdict.REJECT_NOT_ANTICIPATED, rejected["New Unknown"])
         assertEquals(QualityVerdict.PASS_ANTICIPATED, result.entries.first { it.showName == "New Hyped" }.verdict)
         assertEquals(1, result.hiddenByCategory) // the anime
+    }
+
+    @Test
+    fun `calendar uses original air time even when the show is on a different service`() = runTest {
+        val s = settings().updateApp("skyshowtime") { it.copy(installed = true, region = Region.RO) }
+        val episode = repo().episodesBetween(day, day, s, "k").entries.first { it.showId == 5 }
+        assertEquals("skyshowtime", episode.watchOn?.id)
+        assertEquals(LocalDateTime.of(2026, 11, 20, 4, 0), episode.releaseAt.toLocalDateTime())
+        val item = episode.toItem(watched = true)
+        assertEquals("≈ 04:00", item.upcomingPosterTime(item.releaseAt.minusSeconds(1)))
+        assertEquals("", item.upcomingPosterTime(item.releaseAt))
     }
 
     @Test
@@ -241,7 +253,8 @@ class EpisodeCalendarRepositoryTest {
             {"id":5,"name":"New Hyped","original_language":"en","origin_country":["US"],
              "genres":[{"id":18,"name":"Drama"}],"networks":[{"id":6,"name":"NBC"}],
              "vote_average":0.0,"vote_count":0,
-             "last_episode_to_air":{"air_date":"2026-11-19","episode_number":2,"season_number":1}}
+             "last_episode_to_air":{"air_date":"2026-11-19","episode_number":2,"season_number":1},
+             "watch/providers":{"results":{"RO":{"flatrate":[{"provider_id":1773,"provider_name":"SkyShowtime"}]}}}}
         """.trimIndent()
 
         val SEASON_NEW_HYPED = """

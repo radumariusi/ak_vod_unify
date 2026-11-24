@@ -13,6 +13,7 @@ import ro.ak.vodunify.core.prefs.UiPrefs
 import ro.ak.vodunify.ui.components.PosterBadgeLookup
 import ro.ak.vodunify.ui.components.LocalPosterActivity
 import ro.ak.vodunify.ui.components.LocalPosterBadge
+import ro.ak.vodunify.ui.components.LocalPosterEpisodeTotal
 import ro.ak.vodunify.ui.components.LocalImdbRating
 import ro.ak.vodunify.ui.components.LocalServiceLogos
 import ro.ak.vodunify.ui.components.ServiceLogoLookup
@@ -170,6 +171,9 @@ fun AppNavigation() {
     val imdbRating = remember(badgesModel) {
         TitleLookup(peek = badgesModel::peekImdbRating, load = { kind, id -> badgesModel.imdbRating(kind, id) })
     }
+    val episodeTotal = remember(badgesModel) {
+        TitleLookup(peek = { _, id -> badgesModel.peekEpisodeTotal(id) }, load = { _, id -> badgesModel.episodeTotal(id) })
+    }
     val serviceLogos = remember(badgesModel) {
         ServiceLogoLookup(
             byPackage = KeyLookup(peek = badgesModel::peekServiceLogoForPackage, load = { badgesModel.serviceLogoForPackage(it) }),
@@ -180,6 +184,7 @@ fun AppNavigation() {
     CompositionLocalProvider(
         LocalPosterBadge provides posterBadge,
         LocalPosterActivity provides posterActivity,
+        LocalPosterEpisodeTotal provides episodeTotal,
         LocalImdbRating provides imdbRating,
         LocalServiceLogos provides serviceLogos,
         LocalCatalogActions provides actions,

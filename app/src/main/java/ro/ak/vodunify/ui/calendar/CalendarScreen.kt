@@ -25,6 +25,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -34,6 +35,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
+import java.time.Instant
 import ro.ak.vodunify.core.calendar.format.dayLabel
 import ro.ak.vodunify.core.calendar.format.monthLabel
 import ro.ak.vodunify.core.calendar.format.weekLabel
@@ -105,7 +108,13 @@ fun CalendarScreen(
     var showFilters by rememberSaveable { mutableStateOf(false) }
 
     val icons by viewModel.icons.collectAsStateWithLifecycle()
-    CompositionLocalProvider(LocalCalendarIcons provides icons) {
+    val now by produceState(Instant.now()) {
+        while (true) {
+            value = Instant.now()
+            delay(60_000 - value.toEpochMilli() % 60_000)
+        }
+    }
+    CompositionLocalProvider(LocalCalendarIcons provides icons, LocalCalendarNow provides now) {
     Column(Modifier.fillMaxSize()) {
         Column(
             Modifier.padding(horizontal = spec.screenPadding).fillMaxWidth(),

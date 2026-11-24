@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import ro.ak.vodunify.ui.components.PlatformBadge
+import ro.ak.vodunify.ui.components.PosterRatings
+import ro.ak.vodunify.ui.components.PosterViewingStatus
 import ro.ak.vodunify.ui.components.Dropdown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -265,7 +267,7 @@ private fun LibraryCard(item: LibraryItem, rowKey: String = "library") {
                         overview = "",
                         posterUrl = item.posterUrl,
                         backdropUrl = null,
-                        rating = null,
+                        rating = item.rating,
                     ),
                 )
             }
@@ -273,6 +275,8 @@ private fun LibraryCard(item: LibraryItem, rowKey: String = "library") {
     ) {
         Box(Modifier.fillMaxSize().semantics { contentDescription = listOf(item.title, item.subtitle).filter { it.isNotBlank() }.joinToString(", ") }) {
             NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
+            PosterRatings(item.kind, item.tmdbId, item.rating, Modifier.align(Alignment.TopStart).padding(4.dp))
+            PosterViewingStatus(item.kind, item.tmdbId, Modifier.align(Alignment.TopEnd).padding(4.dp), stage = item.posterStage)
             // Jos, ca pe toate posterele: sigla aplicației și eticheta (episodul / progresul).
             PlatformBadge(
                 item.kind,

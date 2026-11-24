@@ -66,7 +66,7 @@ class PosterBadges @Inject constructor(
 
     fun peek(request: PosterBadgeRequest, playback: PlaybackSettings, prefs: PosterBadgeSettings): List<PosterBadge>? {
         val installed = apps?.takeIf { it.isCurrent() } ?: return null
-        val stage = request.resolvedStage(request.titleId?.let(episodeTotals::get))
+        val stage = request.resolvedStage(request.titleId?.takeIf { request.kind == TitleKind.TV }?.let(::peekEpisodeTotal))
         val policy = prefs.policy(stage)
         val last = lastBadge(request.lastPackage(stage), installed)
         val cached = key(request)?.let(cache::get)
@@ -78,14 +78,8 @@ class PosterBadges @Inject constructor(
         val id = request.titleId
         val key = key(request)
         val lock = key?.let { titleLocks[(it.hashCode() and Int.MAX_VALUE) % titleLocks.size] }
-        val total = if (id != null && lock != null && request.stage == null && request.activity?.watchedEpisodes != null &&
-            request.kind == TitleKind.TV && catalog.isConfigured
-        ) {
-            lock.withLock {
-                episodeTotals.get(id) ?: cachedRequest {
-                    catalog.basic(request.kind, id, CatalogSettings()).episodeCount?.also { episodeTotals.put(id, it) }
-                }
-            }
+        val total = if (id != null && request.stage == null && request.activity?.watchedEpisodes != null && request.kind == TitleKind.TV) {
+            episodeTotal(id)
         } else null
         val stage = request.resolvedStage(total)
         val policy = prefs.policy(stage)
@@ -105,6 +99,18 @@ class PosterBadges @Inject constructor(
             } ?: previous?.value.orEmpty()
         }
         return select(policy, last, playback, prefs, installed, availability)
+    }
+
+    fun peekEpisodeTotal(id: Long): Int? = episodeTotals.get(id)
+
+    suspend fun episodeTotal(id: Long): Int? {
+        if (!catalog.isConfigured) return null
+        val key = "${TitleKind.TV.path}:$id"
+        return titleLocks[(key.hashCode() and Int.MAX_VALUE) % titleLocks.size].withLock {
+            peekEpisodeTotal(id) ?: cachedRequest {
+                catalog.basic(TitleKind.TV, id, CatalogSettings()).episodeCount?.also { episodeTotals.put(id, it) }
+            }
+        }
     }
 
     private suspend fun <T> cachedRequest(load: suspend () -> T): T? = try {

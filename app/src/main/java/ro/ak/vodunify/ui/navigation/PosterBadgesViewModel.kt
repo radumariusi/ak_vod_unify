@@ -54,7 +54,7 @@ class PosterBadgesViewModel @Inject constructor(
                     else -> PosterStage.UNWATCHED
                 }
                 if (stage != PosterStage.UNWATCHED) {
-                    put(key, PosterActivity(stage, lastPlayback, finished?.appPackage, summary?.watched?.takeIf { resume == null }))
+                    put(key, PosterActivity(stage, lastPlayback, finished?.appPackage, summary?.watched))
                 }
             }
         }
@@ -65,6 +65,10 @@ class PosterBadgesViewModel @Inject constructor(
 
     suspend fun badges(request: PosterBadgeRequest, playback: PlaybackSettings, prefs: PosterBadgeSettings): List<PosterBadge> =
         withContext(Dispatchers.Default) { badges.badges(request, playback, prefs) }
+
+    fun peekEpisodeTotal(id: Long): Int? = badges.peekEpisodeTotal(id)
+
+    suspend fun episodeTotal(id: Long): Int? = withContext(Dispatchers.Default) { badges.episodeTotal(id) }
 
     fun peekImdbRating(kind: TitleKind, id: Long): Double? = imdb.peek(kind, id)
 

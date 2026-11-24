@@ -94,9 +94,9 @@ fun CalendarItemMenu(item: CalendarItem, actions: CalendarItemActions, onDismiss
 @Composable
 fun DayView(items: List<CalendarItem>, gridState: LazyGridState, actions: CalendarItemActions) {
     val spec = layoutSpec()
-    var focused by remember(items) { mutableStateOf(items.firstOrNull()) }
+    var focusedKey by remember { mutableStateOf<String?>(null) }
     var menu by remember { mutableStateOf<CalendarItem?>(null) }
-    val shown = focused
+    val shown = items.firstOrNull { it.key == focusedKey } ?: items.firstOrNull()
     Box(Modifier.fillMaxSize()) {
         TitleBackdrop(shown?.backdropUrl, Modifier.fillMaxWidth().height(if (spec.isTv) 230.dp else 200.dp))
         Column(Modifier.fillMaxSize()) {
@@ -116,7 +116,7 @@ fun DayView(items: List<CalendarItem>, gridState: LazyGridState, actions: Calend
                         modifier = Modifier
                             .size(spec.posterWidth, spec.posterHeight)
                             .alpha(if (item.passed) 1f else 0.5f)
-                            .onFocusChanged { if (it.hasFocus) focused = item }
+                            .onFocusChanged { if (it.hasFocus) focusedKey = item.key }
                             .semantics { contentDescription = "${item.title}, ${item.subtitle}, ${item.time}, ${item.where}" },
                     ) {
                         Poster(item, Modifier.fillMaxSize())

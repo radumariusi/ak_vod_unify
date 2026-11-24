@@ -9,6 +9,8 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.layout.ContentScale
@@ -232,6 +234,7 @@ class PosterBadgeLookup(
 
 val LocalPosterBadge = staticCompositionLocalOf<PosterBadgeLookup?> { null }
 val LocalPosterActivity = compositionLocalOf<Map<String, PosterActivity>> { emptyMap() }
+val LocalPosterEpisodeTotal = staticCompositionLocalOf<TitleLookup<Int>?> { null }
 
 /** O informație despre titlu: ce se știe deja din primul cadru, restul în fundal. */
 @Composable
@@ -242,6 +245,53 @@ private fun <T : Any> rememberTitleLookup(lookup: TitleLookup<T>?, kind: TitleKi
         LaunchedEffect(lookup, kind, id) { value = runCatching { lookup.load(kind, id) }.getOrNull() }
     }
     return value
+}
+
+/** Bifă pentru titluri văzute, ceas pentru seriale începute. */
+@Composable
+fun PosterViewingStatus(
+    kind: TitleKind,
+    id: Long?,
+    modifier: Modifier = Modifier,
+    stage: PosterStage? = null,
+    episodeCount: Int? = null,
+) {
+    val activity = if (stage == null && id != null) LocalPosterActivity.current[mediaKey(kind, id)] else null
+    val total = if (kind == TitleKind.TV && activity?.watchedEpisodes != null) {
+        episodeCount ?: rememberTitleLookup(LocalPosterEpisodeTotal.current, kind, id)
+    } else null
+    val resolved = PosterBadgeRequest(kind, id, stage, activity).resolvedStage(total)
+    when {
+        resolved == PosterStage.WATCHED -> ViewingStatusBadge(watched = true, modifier)
+        kind == TitleKind.TV && resolved == PosterStage.IN_PROGRESS -> ViewingStatusBadge(watched = false, modifier)
+    }
+}
+
+/** Desenat ca simbol, independent de fontul instalat pe televizor. */
+@Composable
+fun ViewingStatusBadge(watched: Boolean, modifier: Modifier = Modifier) {
+    val ink = if (watched) Color(0xFF9CF5CE) else Color(0xFFFFCF76)
+    val background = if (watched) Color(0xF210362E) else Color(0xF2332713)
+    Canvas(
+        modifier
+            .size(BadgeHeight)
+            .background(background, BadgeShape)
+            .semantics { contentDescription = if (watched) "Văzut" else "Văzut parțial" },
+    ) {
+        if (watched) {
+            val start = Offset(size.width * .24f, size.height * .51f)
+            val bend = Offset(size.width * .43f, size.height * .69f)
+            val end = Offset(size.width * .77f, size.height * .32f)
+            drawLine(ink, start, bend, 1.8.dp.toPx(), StrokeCap.Round)
+            drawLine(ink, bend, end, 1.8.dp.toPx(), StrokeCap.Round)
+        } else {
+            drawCircle(ink, radius = size.minDimension * .32f, style = Stroke(1.4.dp.toPx()))
+            val top = center - Offset(0f, size.height * .18f)
+            val end = center + Offset(size.width * .12f, size.height * .07f)
+            drawLine(ink, top, center, 1.3.dp.toPx(), StrokeCap.Round)
+            drawLine(ink, center, end, 1.3.dp.toPx(), StrokeCap.Round)
+        }
+    }
 }
 
 /** Iconițele și eticheta intră pe rânduri suplimentare când posterul este îngust. */
@@ -369,10 +419,16 @@ val LocalImdbRating = staticCompositionLocalOf<TitleLookup<Double>?> { null }
 @Composable
 fun PosterRatings(kind: TitleKind, id: Long?, tmdb: Double?, modifier: Modifier = Modifier) {
     val imdb = rememberTitleLookup(LocalImdbRating.current, kind, id)
+    PosterRatingChips(tmdb, imdb, modifier)
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+fun PosterRatingChips(tmdb: Double?, imdb: Double?, modifier: Modifier = Modifier) {
     val t = tmdb?.takeIf { it > 0 }
     val i = imdb?.takeIf { it > 0 }
     if (t == null && i == null) return
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+    FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(3.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         t?.let { RatingChip(it) }
         i?.let { ImdbChip(it) }
     }

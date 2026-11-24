@@ -30,7 +30,7 @@ fun weekLabel(from: LocalDate, to: LocalDate): String =
     "${from.format(shortDayFormat)} – ${to.format(shortDayFormat)} ${to.year}"
 
 fun timeLabel(entry: EpisodeEntry): String =
-    (if (entry.timeIsApproximate) "≈ " else "") + entry.releaseAt.format(timeFormat)
+    if (entry.hasTime) (if (entry.timeIsApproximate) "≈ " else "") + entry.releaseAt.format(timeFormat) else ""
 
 fun whereToWatch(entry: EpisodeEntry): String {
     val app = entry.watchOn

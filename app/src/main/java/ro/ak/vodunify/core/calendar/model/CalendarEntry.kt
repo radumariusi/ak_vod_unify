@@ -49,8 +49,8 @@ data class EpisodeEntry(
     val isAnticipated: Boolean = false,
     val isFollowed: Boolean = false,
     val verdict: QualityVerdict = QualityVerdict.PASS_RATING,
-    /** True when the user's app gets the episode later than the original airing (licensed show). */
-    val delayedOnApp: Boolean = false,
+    /** False when only the date of the first airing is known. */
+    val hasTime: Boolean = true,
     /** Wikidata item of the show, used to find its id on each streaming service. */
     val wikidataId: String? = null,
 ) {

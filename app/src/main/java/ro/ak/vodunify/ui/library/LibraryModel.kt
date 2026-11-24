@@ -14,7 +14,7 @@ import ro.ak.vodunify.ui.home.PersonalMapper
 /** Filele din Lista mea. */
 enum class LibraryTab(val label: String, val status: LibraryStatus?) {
     ALL("Toate", null),
-    WATCHLIST("De văzut", LibraryStatus.WATCHLIST),
+    WATCHLIST("Vreau să văd", LibraryStatus.WATCHLIST),
     IN_PROGRESS("În curs", LibraryStatus.IN_PROGRESS),
     UP_NEXT("Următorul episod", LibraryStatus.UP_NEXT),
     WATCHED("Văzute", LibraryStatus.WATCHED),
@@ -48,6 +48,7 @@ data class LibraryItem(
     val showsProgress: Boolean,
     val sources: List<String>,
     val posterStage: PosterStage? = null,
+    val rating: Double? = null,
 )
 
 /** Logica pură a bibliotecii (testabilă fără Android). */
@@ -111,6 +112,7 @@ object LibraryLogic {
 
     fun filter(entries: List<LibraryEntry>, f: LibraryFilter): List<LibraryEntry> = entries.filter { e ->
         val status = f.tab.status
+        if (f.tab == LibraryTab.WATCHLIST && posterStage(e, LibraryTab.ALL) != PosterStage.UNWATCHED) return@filter false
         when {
             status == null && f.source == null -> true
             status == null -> f.source in e.sources
@@ -143,7 +145,7 @@ object LibraryLogic {
             (tab == LibraryTab.UP_NEXT || tab == LibraryTab.ALL) && next != null ->
                 PersonalMapper.episodeLabel(next.ref.season, next.ref.episode)?.let { parts += "Urmează $it" }
             tab == LibraryTab.WATCHLIST || (tab == LibraryTab.ALL && LibraryStatus.WATCHLIST in e.statuses && LibraryStatus.WATCHED !in e.statuses) ->
-                parts += "De văzut"
+                parts += "Vreau să văd"
             LibraryStatus.WATCHED in e.statuses -> parts += if (e.ref.type == "MOVIE") "Văzut" else "Început"
         }
         if (parts.isEmpty()) e.ref.year?.let { parts += it.toString() }

@@ -43,6 +43,8 @@ import ro.ak.vodunify.ui.components.BadgeSpec
 import ro.ak.vodunify.ui.components.TitleBadge
 import ro.ak.vodunify.core.calendar.android.CALENDAR_TO_SERVICE
 import ro.ak.vodunify.ui.components.PosterRatings
+import ro.ak.vodunify.ui.components.PosterViewingStatus
+import ro.ak.vodunify.core.playback.PosterStage
 import ro.ak.vodunify.ui.components.AppIconBadge
 import ro.ak.vodunify.ui.components.CinemaBadge
 import ro.ak.vodunify.core.catalog.ReleaseChannel
@@ -215,6 +217,10 @@ private fun WideCard(item: PersonalItem, rowKey: String) {
             )
             // Aplicația redării, episodul și procentul stau pe card.
             PosterRatings(item.kind, item.tmdbId, item.rating, Modifier.align(Alignment.TopStart).padding(6.dp))
+            PosterViewingStatus(
+                item.kind, item.tmdbId, Modifier.align(Alignment.TopEnd).padding(6.dp),
+                stage = PosterStage.IN_PROGRESS.takeIf { item.tmdbId == null && item.showsProgress },
+            )
             TitleBadge(
                 wideBadge(item), item.kind, item.tmdbId,
                 Modifier.align(Alignment.BottomStart).padding(start = 6.dp, end = 6.dp, bottom = 10.dp),
@@ -276,6 +282,7 @@ private fun PersonalPoster(item: PersonalItem, rowKey: String) {
         Box(Modifier.fillMaxSize().semantics { contentDescription = listOfNotNull(item.title, item.subtitle).joinToString(", ") }) {
             NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
             PosterRatings(item.kind, item.tmdbId, item.rating, Modifier.align(Alignment.TopStart).padding(4.dp))
+            PosterViewingStatus(item.kind, item.tmdbId, Modifier.align(Alignment.TopEnd).padding(4.dp))
             // Jos: unde apare (aplicația, cinema RO / SUA) lângă dată.
             TitleBadge(
                 releaseBadge(item), item.kind, item.tmdbId,

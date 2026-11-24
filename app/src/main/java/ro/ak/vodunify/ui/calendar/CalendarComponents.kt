@@ -1,10 +1,13 @@
 package ro.ak.vodunify.ui.calendar
 
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.semantics.contentDescription
 import ro.ak.vodunify.ui.components.PosterLabel
 import ro.ak.vodunify.ui.components.PosterBottomRow
+import ro.ak.vodunify.ui.components.PosterRatingChips
+import ro.ak.vodunify.ui.components.ViewingStatusBadge
 import ro.ak.vodunify.ui.components.FocusBorderWidth
 import ro.ak.vodunify.ui.theme.FocusBorder
 import ro.ak.vodunify.ui.components.AppIconBadge
@@ -72,6 +75,7 @@ import ro.ak.vodunify.core.calendar.time.RomaniaTime
 import ro.ak.vodunify.ui.components.layoutSpec
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.Instant
 import java.time.temporal.TemporalAdjusters
 
 private val confirmKeys = setOf(Key.DirectionCenter, Key.Enter, Key.NumPadEnter)
@@ -136,11 +140,10 @@ fun PressableCard(
 
 /** Siglele de pe postere (pachetele aplicațiilor instalate), date de ecranul Calendar. */
 val LocalCalendarIcons = staticCompositionLocalOf { CalendarIcons() }
+internal val LocalCalendarNow = compositionLocalOf { Instant.now() }
 
 /**
- * Posterul din calendar, ca restul posterelor din aplicație: fără titlu scris. Sus, sigla platformei tale pe care
- * îl găsești (sau a playerului standard, dacă nu e pe platformele tale) ori sigla de cinema US / RO; jos, episodul
- * și ora României (la filme, ora sau tipul lansării). „✓” = văzut.
+ * Sus sunt notele și ora primei apariții sau starea vizionării. Jos sunt sigla și episodul sau tipul lansării.
  */
 @Composable
 internal fun Poster(item: CalendarItem, modifier: Modifier) {
@@ -151,14 +154,8 @@ internal fun Poster(item: CalendarItem, modifier: Modifier) {
         } else {
             Text(item.title, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(6.dp))
         }
-        if (item.watched) {
-            PosterLabel("✓", Modifier.align(Alignment.TopStart).padding(4.dp))
-        }
-        // Ora, separat, sus în dreapta: jos, lângă siglă și episod, nu încăpea întreagă.
-        if (item.posterTime.isNotBlank()) {
-            PosterLabel(item.posterTime, Modifier.align(Alignment.TopEnd).padding(4.dp))
-        }
-        // Jos, ca pe toate posterele: sigla (aplicația ta sau cinema RO / SUA) lângă episod / oră.
+        CalendarPosterHeader(item, Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(4.dp))
+        // Jos, ca pe toate posterele: sigla (aplicația ta sau cinema RO / SUA) lângă episod sau tip.
         PosterBottomRow(Modifier.align(Alignment.BottomStart).padding(4.dp), label = item.posterLabel) {
             val cinema = item.cinema
             if (cinema != null) {
@@ -167,6 +164,26 @@ internal fun Poster(item: CalendarItem, modifier: Modifier) {
                 val pkg = item.watchAppId?.let { icons.apps[it] } ?: icons.player
                 pkg?.let { AppIconBadge(it) }
             }
+        }
+    }
+}
+
+@Composable
+private fun CalendarPosterHeader(item: CalendarItem, modifier: Modifier = Modifier) {
+    val episode = item.episode
+    val movie = item.movie
+    val tmdb = episode?.tmdbRating?.takeIf { episode.tmdbVotes > 0 }
+        ?: movie?.tmdbRating?.takeIf { movie.tmdbVotes > 0 }
+    val now = LocalCalendarNow.current
+    val time = item.upcomingPosterTime(now)
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        Box(Modifier.weight(1f)) {
+            PosterRatingChips(tmdb, episode?.imdb?.rating ?: movie?.imdb?.rating)
+        }
+        when {
+            time.isNotEmpty() -> PosterLabel(time)
+            !now.isBefore(item.releaseAt) && (item.watched || item.inProgress) ->
+                ViewingStatusBadge(watched = item.watched)
         }
     }
 }

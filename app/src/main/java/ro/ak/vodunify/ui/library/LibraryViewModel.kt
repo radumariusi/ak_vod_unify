@@ -46,7 +46,7 @@ data class LibraryUiState(
     val total: Int = 0,
     /** Aspectul ales în Setări → Interfață. */
     val layout: LibraryLayout = LibraryLayout.ROWS,
-    /** La aspectul pe rânduri: câte un rând pe categorie și tip (ex. „De văzut · Filme”). */
+    /** La aspectul pe rânduri: câte un rând pe categorie și tip. */
     val rows: List<LibraryRow> = emptyList(),
 )
 
@@ -115,18 +115,22 @@ class LibraryViewModel @Inject constructor(
                             showsProgress = seriesProgress != null || LibraryLogic.showsProgress(e, tab),
                             sources = e.sources.sorted().map { names[it] ?: it },
                             posterStage = stage,
+                            rating = art?.rating,
                         )
                     }
                 }.awaitAll()
             }
             val filtered = LibraryLogic.filter(input.entries, input.filter)
             val rows = if (input.layout == LibraryLayout.ROWS) {
-                // Câte un rând pe categorie (De văzut, În curs, Văzute…) și tip, ca în Acasă.
+                // Câte un rând pe categorie și tip, ca în Acasă.
                 LibraryTab.visible.filter { it != LibraryTab.ALL }.flatMap { tab ->
                     val inTab = LibraryLogic.filter(input.entries, LibraryFilter(tab, null))
                     listOf(TitleKind.MOVIE to "Filme", TitleKind.TV to "Seriale").mapNotNull { (kind, label) ->
                         val part = inTab.filter { (it.ref.type == "MOVIE") == (kind == TitleKind.MOVIE) }
-                        if (part.isEmpty()) null else LibraryRow("${tab.label} · $label (${part.size})", toItems(part.take(ROW_ITEMS), tab))
+                        if (part.isEmpty()) null else {
+                            val title = if (tab == LibraryTab.WATCHLIST) "${tab.label} $label" else "${tab.label} · $label"
+                            LibraryRow("$title (${part.size})", toItems(part.take(ROW_ITEMS), tab))
+                        }
                     }
                 }
             } else {

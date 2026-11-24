@@ -16,6 +16,7 @@ import ro.ak.vodunify.core.calendar.quality.QualityGate
 import ro.ak.vodunify.core.calendar.quality.QualityInput
 import ro.ak.vodunify.core.calendar.quality.QualityVerdict
 import ro.ak.vodunify.core.calendar.time.ReleaseTimeResolver
+import ro.ak.vodunify.core.calendar.time.ResolvedRelease
 import ro.ak.vodunify.core.calendar.time.RomaniaTime
 import ro.ak.vodunify.core.calendar.tmdb.EpisodeDto
 import ro.ak.vodunify.core.calendar.tmdb.TmdbApi
@@ -30,7 +31,6 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import java.time.LocalDate
-import java.time.ZonedDateTime
 import java.time.format.DateTimeParseException
 import java.time.temporal.ChronoUnit
 
@@ -42,8 +42,7 @@ import java.time.temporal.ChronoUnit
  *    before any extra request.
  * 3. For each show: details + watch providers, then the seasons of the last/next
  *    episode to get every episode in the window, plus the IMDb rating (OMDb).
- * 4. Each episode gets the user's matching app (and its RO/US region) and a release
- *    moment in Romania time that depends on that app and region.
+ * 4. Match the user's app and estimate the original broadcast in Romania time.
  * 5. The quality gate keeps returning shows above the rating thresholds and new
  *    shows from the anticipated list.
  */
@@ -67,8 +66,7 @@ class EpisodeCalendarRepository(
     ): CalendarResult = coroutineScope {
         require(!to.isBefore(from)) { "to < from" }
         val api = apiFactory(apiKey)
-        // Widen by a day: a US evening airing lands on the next day in Romania, and a
-        // licensed show can land a day after its original airing.
+        // The first airing can move to the adjacent date when converted to Bucharest time.
         val windowFrom = from.minusDays(1)
         val windowTo = to.plusDays(1)
 
@@ -200,13 +198,14 @@ class EpisodeCalendarRepository(
         val (app, region) = matchInstalledApp(details, settings)
         val availability = availability(details)
         val networkIds = details.networks.map { it.id }.toSet()
+        val originCountries = details.networks.mapNotNull { it.originCountry } + details.originCountry
         val lastEpisodeOfSeason = episodes.groupBy { it.seasonNumber }.mapValues { (_, list) -> list.maxOf { it.episodeNumber } }
         val imdbId = details.externalIds?.imdbId?.takeIf { it.isNotBlank() }
         val imdb = if (omdbKey != null && imdbId != null) imdbRatings?.rating(imdbId, omdbKey) else null
         val followed = settings.isFollowed(details.id)
 
         return dated.map { (episode, date) ->
-            val release = resolver.resolve(date, details.originCountry, networkIds, app, region)
+            val release = resolver.original(date, originCountries, networkIds)
             val isNewShow = episode.seasonNumber == 1
             val isAnticipated = details.id in anticipated
             val verdict = QualityGate.evaluate(
@@ -221,7 +220,7 @@ class EpisodeCalendarRepository(
                 settings.thresholds,
             )
             toEntry(
-                details, episode, release.at, release.approximate, app, region, availability, categories,
+                details, episode, release, app, region, availability, categories,
                 isFinale = episode.episodeType == "finale" ||
                     (details.status == "Ended" && lastEpisodeOfSeason[episode.seasonNumber] == episode.episodeNumber),
                 imdb = imdb,
@@ -229,7 +228,6 @@ class EpisodeCalendarRepository(
                 isAnticipated = isAnticipated,
                 followed = followed,
                 verdict = verdict,
-                delayed = release.delayed,
             )
         }
     }
@@ -237,8 +235,7 @@ class EpisodeCalendarRepository(
     private fun toEntry(
         details: TvDetailsDto,
         episode: EpisodeDto,
-        at: ZonedDateTime,
-        approximate: Boolean,
+        release: ResolvedRelease,
         app: StreamingApp?,
         region: Region?,
         availability: List<ProviderAvailability>,
@@ -249,7 +246,6 @@ class EpisodeCalendarRepository(
         isAnticipated: Boolean,
         followed: Boolean,
         verdict: QualityVerdict,
-        delayed: Boolean,
     ) = EpisodeEntry(
         showId = details.id,
         showName = details.name,
@@ -259,8 +255,8 @@ class EpisodeCalendarRepository(
         episodeNumber = episode.episodeNumber,
         episodeTitle = episode.name,
         overview = ro.ak.vodunify.core.catalog.TmdbMappers.cleanOverview(episode.overview),
-        releaseAt = at,
-        timeIsApproximate = approximate,
+        releaseAt = release.at,
+        timeIsApproximate = release.approximate,
         watchOn = app,
         watchRegion = region,
         availability = availability,
@@ -280,7 +276,7 @@ class EpisodeCalendarRepository(
         isAnticipated = isAnticipated,
         isFollowed = followed,
         verdict = verdict,
-        delayedOnApp = delayed,
+        hasTime = release.hasTime,
         wikidataId = details.externalIds?.wikidataId?.takeIf { it.isNotBlank() },
     )
 

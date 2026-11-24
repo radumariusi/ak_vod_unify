@@ -12,6 +12,7 @@ import ro.ak.vodunify.core.calendar.format.whereToWatch
 import ro.ak.vodunify.core.calendar.model.EpisodeEntry
 import ro.ak.vodunify.core.calendar.model.MovieEntry
 import ro.ak.vodunify.core.calendar.model.MovieReleaseKind
+import java.time.Instant
 import java.time.LocalDate
 
 /** Un rând din calendar, comun pentru episoade și filme, ca ecranul să fie unul singur. */
@@ -31,11 +32,12 @@ data class CalendarItem(
     val passed: Boolean,
     val followed: Boolean,
     val watched: Boolean,
+    val releaseAt: Instant,
     /** Pentru grila pe lună: „Serial S01E02” / „Film (Streaming RO)”. */
     val shortLabel: String,
     val episode: EpisodeEntry? = null,
     val movie: MovieEntry? = null,
-    /** Eticheta de jos de pe poster: „S02E05 · 21:00” (ora României) sau ora / tipul la filme. */
+    /** Eticheta de jos de pe poster: codul episodului sau tipul lansării. */
     val posterLabel: String = "",
     /** Ora României („≈ 04:00”), arătată separat, sus în dreapta posterului, ca să încapă întreagă. */
     val posterTime: String = "",
@@ -46,7 +48,10 @@ data class CalendarItem(
     /** Imaginea panoramică și descrierea, pentru panoul de sus din vederea pe zi. */
     val backdropUrl: String? = null,
     val overview: String = "",
-)
+    val inProgress: Boolean = false,
+) {
+    fun upcomingPosterTime(now: Instant): String = posterTime.takeIf { now.isBefore(releaseAt) }.orEmpty()
+}
 
 fun EpisodeEntry.toItem(watched: Boolean) = CalendarItem(
     key = key,
@@ -67,6 +72,7 @@ fun EpisodeEntry.toItem(watched: Boolean) = CalendarItem(
     passed = verdict.passed,
     followed = isFollowed,
     watched = watched,
+    releaseAt = releaseAt.toInstant(),
     shortLabel = "$showName $code",
     episode = this,
     posterLabel = code,
@@ -95,13 +101,15 @@ fun MovieEntry.toItem(watched: Boolean) = CalendarItem(
     passed = verdict.passed,
     followed = isFollowed,
     watched = watched,
+    releaseAt = releaseAt.toInstant(),
     shortLabel = "$title (${movieKindLabel(this)})",
     movie = this,
     posterLabel = when (kind) {
         MovieReleaseKind.CINEMA_US, MovieReleaseKind.CINEMA_RO -> if (limited) "Limitat" else ""
         MovieReleaseKind.DIGITAL -> "Digital ${region.code}"
-        MovieReleaseKind.STREAMING -> movieTimeLabel(this)
+        MovieReleaseKind.STREAMING -> ""
     },
+    posterTime = if (hasTime) movieTimeLabel(this) else "",
     watchAppId = watchOn?.id,
     cinema = when (kind) {
         MovieReleaseKind.CINEMA_US -> "US"

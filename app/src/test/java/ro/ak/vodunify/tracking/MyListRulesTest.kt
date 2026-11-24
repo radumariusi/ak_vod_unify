@@ -5,11 +5,41 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ro.ak.vodunify.core.catalog.Episode
+import ro.ak.vodunify.core.db.TrackedRef
+import ro.ak.vodunify.core.reconcile.LibraryEntry
+import ro.ak.vodunify.core.reconcile.LibraryStatus
 import ro.ak.vodunify.core.tracking.HiddenTitles
 import ro.ak.vodunify.core.tracking.SeriesMarker
+import ro.ak.vodunify.ui.library.LibraryFilter
+import ro.ak.vodunify.ui.library.LibraryLogic
+import ro.ak.vodunify.ui.library.LibraryTab
 import java.time.LocalDate
 
 class MyListRulesTest {
+    @Test
+    fun savedRowsOnlyContainUnstartedTitles() {
+        fun saved(id: Long, type: String, vararg activity: LibraryStatus): LibraryEntry {
+            val key = "$type:$id"
+            val statuses = setOf(LibraryStatus.WATCHLIST, *activity)
+            return LibraryEntry(
+                titleKey = key,
+                ref = TrackedRef(key, type, key, null, null, null, null, id, null, null, null),
+                statuses = statuses,
+                sources = setOf("local"),
+                sourcesByStatus = statuses.associateWith { setOf("local") },
+                lastActivityAt = id,
+                resume = null,
+                upNext = null,
+            )
+        }
+        val movie = saved(1, "MOVIE")
+        val show = saved(2, "SHOW")
+        val all = listOf(movie, show, saved(3, "SHOW", LibraryStatus.IN_PROGRESS),
+            saved(4, "MOVIE", LibraryStatus.WATCHED), saved(5, "SHOW", LibraryStatus.UP_NEXT))
+        assertEquals(listOf(movie, show), LibraryLogic.filter(all, LibraryFilter(LibraryTab.WATCHLIST)))
+        assertEquals(mapOf(null to 2, "local" to 2), LibraryLogic.countsBySource(all, LibraryTab.WATCHLIST))
+    }
+
     @Test
     fun hiddenUntilWatchedAgain() {
         val hidden = mapOf("tv:tmdb:1" to 1_000L)

@@ -213,6 +213,7 @@ fun PosterCard(item: CatalogItem, modifier: Modifier = Modifier, rowKey: String 
         Box(Modifier.fillMaxSize().semantics { contentDescription = item.title }) {
             NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
             PosterRatings(item.kind, item.id, item.rating, Modifier.align(Alignment.TopStart).padding(4.dp))
+            PosterViewingStatus(item.kind, item.id, Modifier.align(Alignment.TopEnd).padding(4.dp), episodeCount = item.episodeCount)
             PlatformBadge(item.kind, item.id, Modifier.align(Alignment.BottomStart).padding(4.dp))
         }
     }
