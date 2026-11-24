@@ -52,7 +52,8 @@
 
         <activity
             android:name=".StatusActivity"
-            android:exported="true">
+            android:exported="true"
+            android:theme="@style/Theme.AkScrobbler.Window">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -64,6 +65,7 @@
             android:name=".NetflixLoginActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode"
             android:exported="false"
+            android:theme="@style/Theme.AkScrobbler.Window"
             android:windowSoftInputMode="adjustResize" />
 
         <receiver

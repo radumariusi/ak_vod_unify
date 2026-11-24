@@ -11,11 +11,43 @@ data class LiveSession(
     val playedMs: Long = 0L,
 )
 
-/** Starea curentă, în memorie (serviciul și ecranul rulează în același proces). */
+/** Starea curentă, în memorie. Ecranele și serviciile o actualizează pe firul principal. */
 object ScrobblerState {
-    @Volatile var listenerConnected: Boolean = false
+    private val statusListeners = LinkedHashSet<() -> Unit>()
 
-    @Volatile var live: List<LiveSession> = emptyList()
+    var listenerConnected: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            notifyStatusChanged()
+        }
 
-    @Volatile var keepAliveRunning: Boolean = false
+    var live: List<LiveSession> = emptyList()
+        set(value) {
+            val previousApp = playingApp
+            field = value
+            if (previousApp != playingApp) notifyStatusChanged()
+        }
+
+    var keepAliveRunning: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            notifyStatusChanged()
+        }
+
+    val playingApp: String?
+        get() = live.firstOrNull { it.state == PlayState.PLAYING }?.appLabel
+
+    fun observeStatus(listener: () -> Unit) {
+        statusListeners.add(listener)
+    }
+
+    fun stopObservingStatus(listener: () -> Unit) {
+        statusListeners.remove(listener)
+    }
+
+    private fun notifyStatusChanged() {
+        statusListeners.toList().forEach { it() }
+    }
 }

@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
@@ -19,6 +20,16 @@ import ro.ak.vodimport.WebLoginActivity
 
 class NetflixLoginActivity : WebLoginActivity() {
     override val recentOnly = true
+
+    override fun onStart() {
+        super.onStart()
+        sizeScrobblerWindow()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        sizeScrobblerWindow()
+    }
 
     override fun saveHistory(service: String, payload: JSONObject): String {
         val items = payload.getJSONArray("items")

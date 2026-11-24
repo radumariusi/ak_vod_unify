@@ -94,9 +94,12 @@ class ScreenReaderService : AccessibilityService() {
 
     /** Pachetul ferestrei de aplicație din față (null dacă nu se poate afla). */
     private fun frontApp(): String? = runCatching {
-        val apps = windows.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
-        val front = apps.firstOrNull { it.isFocused } ?: apps.firstOrNull { it.isActive } ?: apps.firstOrNull()
-        front?.root?.packageName?.toString()
+        windows.asSequence()
+            .filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+            .sortedBy { if (it.isFocused) 0 else if (it.isActive) 1 else 2 }
+            .firstNotNullOfOrNull { window ->
+                window.root?.packageName?.toString()?.takeUnless { it == packageName }
+            }
     }.getOrNull()
 
     /**

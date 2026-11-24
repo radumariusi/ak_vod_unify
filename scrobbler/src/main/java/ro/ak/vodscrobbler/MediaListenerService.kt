@@ -71,14 +71,20 @@ class MediaListenerService : NotificationListenerService() {
         refreshSessions(l)
     }
 
-    private val ticker = object : Runnable {
-        override fun run() {
-            val now = SystemClock.elapsedRealtime()
-            tracked.values.toList().forEach { t -> dispatch(t.tracker.onTick(now)) }
-            tickScreenOnly(now)
-            publishLive()
-            handler.postDelayed(this, TICK_CHECK_MS)
-        }
+    private var tickScheduled = false
+    private val ticker = Runnable {
+        tickScheduled = false
+        val now = SystemClock.elapsedRealtime()
+        tracked.values.toList().forEach { t -> dispatch(t.tracker.onTick(now)) }
+        tickScreenOnly(now)
+        publishLive()
+    }
+
+    private fun updateTicker() {
+        val needsTick = ScrobblerState.listenerConnected && (tracked.isNotEmpty() || screenOnly.isNotEmpty())
+        if (tickScheduled == needsTick) return
+        tickScheduled = needsTick
+        if (needsTick) handler.postDelayed(ticker, TICK_CHECK_MS) else handler.removeCallbacks(ticker)
     }
 
     override fun onCreate() {
@@ -97,6 +103,7 @@ class MediaListenerService : NotificationListenerService() {
         try {
             msm.addOnActiveSessionsChangedListener(sessionsListener, me, handler)
             val list = msm.getActiveSessions(me)
+            activeListener = this
             DiagLog.add("Ascultător pornit. Sesiuni active: ${if (list.isEmpty()) "niciuna" else list.joinToString { it.packageName }}")
             refreshSessions(list)
         } catch (e: SecurityException) {
@@ -105,8 +112,7 @@ class MediaListenerService : NotificationListenerService() {
             ScrobblerState.listenerConnected = false
         }
         runCatching { activeNotifications?.forEach(::rememberNotification) }
-        handler.removeCallbacks(ticker)
-        handler.postDelayed(ticker, TICK_CHECK_MS)
+        updateTicker()
         Forwarder.get(this).flushPending()
         KeepAliveService.start(this)
     }
@@ -120,7 +126,8 @@ class MediaListenerService : NotificationListenerService() {
         }
         tracked.clear()
         sessionManager?.removeOnActiveSessionsChangedListener(sessionsListener)
-        handler.removeCallbacks(ticker)
+        sessionManager = null
+        if (activeListener === this) activeListener = null
         ScrobblerState.listenerConnected = false
         publishLive()
         // Cerem sistemului să ne lege din nou (de ex. după o actualizare).
@@ -134,8 +141,26 @@ class MediaListenerService : NotificationListenerService() {
 
     override fun onDestroy() {
         if (ScreenState.listener == ::onScreen) ScreenState.listener = null
+        sessionManager?.removeOnActiveSessionsChangedListener(sessionsListener)
+        tracked.values.forEach { it.controller.unregisterCallback(it.callback) }
+        if (activeListener === this) {
+            activeListener = null
+            ScrobblerState.listenerConnected = false
+            ScrobblerState.live = emptyList()
+        }
         handler.removeCallbacksAndMessages(null)
         super.onDestroy()
+    }
+
+    private fun refreshNow(): Boolean {
+        val manager = sessionManager ?: return false
+        return runCatching {
+            refreshSessions(manager.getActiveSessions(Access.component(this)))
+            tracked.values.toList().forEach { entry ->
+                applyState(entry, entry.controller.playbackState)
+            }
+            publishLive()
+        }.isSuccess
     }
 
     /** Păstrăm doar notificările de player (cu sesiune media) sau ale aplicațiilor care redau acum. */
@@ -376,6 +401,7 @@ class MediaListenerService : NotificationListenerService() {
         val before = p.guess
         dispatch(p.onScreen(snap.guess, snap.times, now, details))
         if (p.guess != before) DiagLog.add("${p.appLabel}#ecran: titlu de pe ecran: ${p.guess?.title} · ${p.guess?.subtitle ?: "-"}")
+        updateTicker()
     }
 
     private fun tickScreenOnly(now: Long) {
@@ -480,6 +506,7 @@ class MediaListenerService : NotificationListenerService() {
     }.getOrNull()
 
     private fun publishLive() {
+        updateTicker()
         val now = SystemClock.elapsedRealtime()
         ScrobblerState.live = tracked.values.map { t ->
             LiveSession(
@@ -501,6 +528,14 @@ class MediaListenerService : NotificationListenerService() {
     }
 
     companion object {
+        private var activeListener: MediaListenerService? = null
+
+        fun reconnect(context: Context) {
+            if (!Access.isListenerEnabled(context) || activeListener?.refreshNow() == true) return
+            runCatching { NotificationListenerService.requestRebind(Access.component(context)) }
+                .onFailure { Log.w(TAG, "Nu pot cere reconectarea ascultătorului acum", it) }
+        }
+
         private const val TAG = "AKScrobbler"
         private const val TICK_CHECK_MS = 15_000L
 

@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import ro.ak.vodimport.AkWidgets
@@ -22,8 +23,7 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Singurul ecran: dacă scrobblerul are acces, ce vede acum de la fiecare aplicație
- * și ce a trimis recent către AK VOD Unify. Construit fără XML ca aplicația să rămână mică.
+ * Fereastra de stare: acces, sesiuni active, ce a trimis recent către AK VOD Unify și setările de diagnostic.
  * Merge cu telecomanda (D-pad) și cu touch.
  */
 class StatusActivity : Activity() {
@@ -54,13 +54,24 @@ class StatusActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val pad = dp(24)
+        val pad = dp(16)
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
-            setBackgroundColor(AkWidgets.background)
         }
         column.addView(AkWidgets.heading(this, "AK Scrobbler"))
+        val reconnect = button("Reconectează") {
+            KeepAliveService.reconnect(this)
+            render()
+        }
+        val close = button("Închide fereastra") { finish() }
+        column.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(reconnect, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(close, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginStart = dp(8)
+            })
+        })
         column.addView(
             text(
                 "Vede ce redă orice aplicație (Netflix, Prime Video, SkyShowtime, HBO Max, Disney+, Stremio…) " +
@@ -132,8 +143,23 @@ class StatusActivity : Activity() {
         })
         diag = focusableText().also { it.textSize = 12f }.also(column::addView)
 
-        setContentView(ScrollView(this).apply { addView(column); keepClearOfSystemBars() })
-        accessButton.requestFocus()
+        setContentView(ScrollView(this).apply {
+            background = GradientDrawable().apply {
+                setColor(AkWidgets.background)
+                cornerRadius = dp(14).toFloat()
+                setStroke(dp(1), 0x44FFFFFF)
+            }
+            clipToOutline = true
+            isFillViewport = true
+            addView(column)
+            keepClearOfSystemBars()
+        })
+        reconnect.requestFocus()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        sizeScrobblerWindow()
     }
 
     override fun onResume() {
