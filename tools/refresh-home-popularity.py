@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 from pathlib import Path
+import re
 import unicodedata
 from urllib.request import Request, urlopen
 
@@ -11,6 +12,11 @@ from urllib.request import Request, urlopen
 SOURCE = "https://www.netflix.com/tudum/top10/data/all-weeks-countries.tsv"
 MARKETS = {"RO", "US", "GB", "FR", "DE"}
 TYPES = {"Films": "movie", "TV": "tv"}
+DUB_SUFFIX = re.compile(
+    r"\s*\((?:Hindi|Tamil|Telugu|Kannada|Malayalam|Bengali|English|French|German|"
+    r"Mandarin|Cantonese|Korean|Japanese|Turkish|Spanish|Portuguese)\)\s*$",
+    re.IGNORECASE,
+)
 
 
 def normalized(title):
@@ -28,7 +34,7 @@ def index(lines):
         market = row.get("country_iso2")
         if market not in MARKETS or not kind or not row.get("weekly_rank", "").isdigit():
             continue
-        name = normalized(row["show_title"])
+        name = normalized(DUB_SUFFIX.sub("", row["show_title"]))
         rank = int(row["weekly_rank"])
         if not name or not 1 <= rank <= 10:
             continue
