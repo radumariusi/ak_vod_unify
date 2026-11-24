@@ -1,10 +1,7 @@
 name: Release APK
 
-# Release-ul 0.3.25 pornește și de la commitul de publicare de pe codex/app-changes.
+# Rulează DOAR manual: Actions → Release APK → Run workflow.
 on:
-  push:
-    branches: [codex/app-changes]
-    paths: ['.github/workflows/release.yml']
   workflow_dispatch:
     inputs:
       version_name:
@@ -24,11 +21,10 @@ permissions:
 
 jobs:
   release:
-    if: github.event_name != 'push' || github.event.head_commit.message == 'Build signed APKs for v0.3.25'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      VERSION_NAME: ${{ inputs.version_name || '0.3.25' }}
+      VERSION_NAME: ${{ inputs.version_name }}
       VERSION_CODE: ${{ github.run_number }}
       TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
       TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
@@ -44,8 +40,6 @@ jobs:
       SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'push' && '1b031fd358ca61c4e24376891a2fb4348393b850' || github.sha }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -107,23 +101,14 @@ jobs:
           cp "$SCR" "$SOUT"
           echo "scrobbler=$SOUT" >> "$GITHUB_OUTPUT"
 
-      - name: Confirm release source checkout
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/codex/app-changes" --jq '.object.sha')
-          tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$head" --jq '.tree.sha')
-          test "$tree" = "743dd362cb4027b0e36664b947041a71272e8f64"
-
       - name: Publish GitHub Release
         if: ${{ !inputs.apk_only }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.VERSION_NAME }}
-          name: AK VOD Unify ${{ env.VERSION_NAME }}
-          target_commitish: ${{ github.event_name == 'push' && 'codex/app-changes' || github.sha }}
-          prerelease: ${{ inputs.prerelease == true }}
+          tag_name: v${{ inputs.version_name }}
+          name: AK VOD Unify ${{ inputs.version_name }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ inputs.prerelease }}
           make_latest: ${{ !inputs.prerelease }}
           generate_release_notes: true
           files: |
@@ -131,10 +116,10 @@ jobs:
             ${{ steps.apk.outputs.scrobbler }}
 
       - name: Upload signed test APKs
-        if: ${{ inputs.apk_only || (failure() && steps.apk.outcome == 'success') }}
+        if: ${{ inputs.apk_only }}
         uses: actions/upload-artifact@v4
         with:
-          name: ak-vod-test-${{ env.VERSION_NAME }}
+          name: ak-vod-test-${{ inputs.version_name }}
           path: |
             ${{ steps.apk.outputs.file }}
             ${{ steps.apk.outputs.scrobbler }}
