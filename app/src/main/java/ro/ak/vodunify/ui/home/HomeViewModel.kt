@@ -89,7 +89,7 @@ class HomeViewModel @Inject constructor(
     // Acasă apare pe loc cu ultimul ecran știut (din memorie sau de pe disc), apoi se reîmprospătează în fundal.
     // Fără „Se încarcă…” la fiecare revenire pe filă: rândurile rămân pe ecran cât se cer datele noi.
     private val _state = MutableStateFlow<LoadState<HomeCatalog>>(
-        snapshots.memory?.catalog?.let { LoadState.Data(it) } ?: LoadState.Loading,
+        snapshots.memory?.catalog?.let { LoadState.Data(it.withoutServiceRows()) } ?: LoadState.Loading,
     )
     val state: StateFlow<LoadState<HomeCatalog>> = _state.asStateFlow()
 
@@ -290,7 +290,7 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch { AppRegistry.version.collectLatest { refreshApps() } }
         val initialSnapshot = viewModelScope.launch {
             snapshots.load()?.let { snap ->
-                if (_state.value is LoadState.Loading) snap.catalog?.let { _state.value = LoadState.Data(it) }
+                if (_state.value is LoadState.Loading) snap.catalog?.let { _state.value = LoadState.Data(it.withoutServiceRows()) }
                 if (_personal.value.state == PersonalState.LOADING) snap.personal?.let { _personal.value = it }
             }
         }
@@ -304,7 +304,7 @@ class HomeViewModel @Inject constructor(
                 s to shelves
             }.collectLatest { (settings, shelves) ->
                 val previous = (_state.value as? LoadState.Data)?.value
-                val pending = (previous ?: HomeCatalog(emptyList(), emptyList()))
+                val pending = (snapshots.memory?.catalog ?: previous ?: HomeCatalog(emptyList(), emptyList()))
                     .withInstalledServices(shelves, ServiceCatalogStatus.CHECKING)
                 if (previous != null || pending.rows.isNotEmpty()) _state.value = LoadState.Data(pending)
 

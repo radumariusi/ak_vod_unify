@@ -205,7 +205,7 @@ private fun HomeContent(
                             itemsIndexed(allRows, key = { _, row -> row.key }) { index, row ->
                                 if (row.focusable) HomeRowFocus(row.key, index, row.content) else row.content()
                             }
-                            item(key = "attribution") { AttributionNote() }
+                            item(key = "attribution") { HomeAttribution(catalog) }
                         }
                     }
                 }
@@ -223,9 +223,14 @@ private fun HomeContent(
             }
             items(personalRows, key = { it.key }) { it.content() }
             items(catalog.rows, key = { it.id }) { row -> CatalogHomeRow(row, viewModel::openService) }
-            item(key = "attribution") { AttributionNote() }
+            item(key = "attribution") { HomeAttribution(catalog) }
         }
     }
+}
+
+@Composable
+private fun HomeAttribution(catalog: HomeCatalog) {
+    AttributionNote(includeWhatToWatch = catalog.rows.any { it.id == "service_voyo_RO" && it.items.isNotEmpty() })
 }
 
 @Composable
@@ -254,8 +259,8 @@ private fun CatalogHomeRow(row: CatalogRow, openService: (String) -> Boolean) {
             }
             val status = when (fallback.reason) {
                 ServiceCatalogStatus.CHECKING -> "Se verifică disponibilitatea titlurilor…"
-                ServiceCatalogStatus.NO_PROVIDER -> "TMDb nu listează serviciul în această bibliotecă."
-                ServiceCatalogStatus.NO_TITLES -> "TMDb nu listează momentan titluri pentru această bibliotecă."
+                ServiceCatalogStatus.NO_PROVIDER -> "Sursa de catalog nu acoperă această bibliotecă."
+                ServiceCatalogStatus.NO_TITLES -> "Nu sunt listate momentan titluri pentru această bibliotecă."
                 ServiceCatalogStatus.UNAVAILABLE -> "Catalogul nu s-a putut încărca acum."
             }
             Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant)

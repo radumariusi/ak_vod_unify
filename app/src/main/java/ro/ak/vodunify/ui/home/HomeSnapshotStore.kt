@@ -155,7 +155,11 @@ internal fun mergeSavedCatalog(current: HomeCatalog, saved: HomeCatalog?): HomeC
 }
 
 
-/** Inventarul local hotărăște ce rânduri de servicii apar. TMDb completează numai titlurile lor. */
+/** Până când verificăm inventarul, afișăm numai rândurile generale din instantaneu. */
+internal fun HomeCatalog.withoutServiceRows(): HomeCatalog =
+    copy(rows = rows.filterNot { it.id.startsWith("service_") })
+
+/** Inventarul local hotărăște ce rânduri de servicii apar. */
 internal fun HomeCatalog.withInstalledServices(shelves: List<ServiceShelf>, status: ServiceCatalogStatus): HomeCatalog {
     val saved = rows.associateBy { it.id }
     val services = shelves.map { shelf ->

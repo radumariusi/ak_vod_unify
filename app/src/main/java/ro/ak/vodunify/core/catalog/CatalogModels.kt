@@ -153,14 +153,22 @@ data class TitleDetails(
     val lastAiredEpisode: EpisodeAir? = null,
 )
 
-/** Un rând „Pe Netflix (RO)” din Acasă: serviciul tău, în biblioteca lui. */
+/** Biblioteca unui serviciu, independent de aplicațiile instalate. */
+data class ServiceLibrary(val service: StreamingService, val market: Market) {
+    val region: String get() = if (service == StreamingService.ARTE) "FR" else market.code
+}
+
+/** Un rând „Pe Netflix (RO)” din Acasă pentru o aplicație instalată. */
 data class ServiceShelf(val service: StreamingService, val packageName: String, val market: Market) {
-    val rowId: String get() = "service_${service.id}_${market.code}"
-    val rowTitle: String get() = "Pe ${service.displayName} (${market.code})"
+    val library: ServiceLibrary get() = ServiceLibrary(service, market)
+    val rowId: String get() = "service_${service.id}_${library.region}"
+    val rowTitle: String get() = "Pe ${service.displayName} (${library.region})"
 
     fun row(items: List<CatalogItem> = emptyList(), status: ServiceCatalogStatus? = null) =
         CatalogRow(rowId, rowTitle, items, status?.let { ServiceFallback(packageName, it) })
 }
+
+data class ServiceCatalogPage(val items: List<CatalogItem>, val status: ServiceCatalogStatus? = null)
 
 /** Lista furnizorilor pentru tipul de titlu și piața cerută are prioritate peste ID-urile de rezervă. */
 internal fun homeProviderIds(service: StreamingService, directory: List<ProviderInfo>?): Set<Int> =

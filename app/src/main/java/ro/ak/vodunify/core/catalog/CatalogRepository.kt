@@ -4,6 +4,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.supervisorScope
 import ro.ak.vodunify.core.playback.StreamingService
 import ro.ak.vodunify.core.db.AvailabilityDao
@@ -36,6 +38,7 @@ class CatalogRepository @Inject constructor(
     private val tmdb: TmdbClient,
     private val mediaDao: MediaDao,
     private val availabilityDao: AvailabilityDao,
+    private val voyo: VoyoCatalogSource,
 ) {
     val isConfigured: Boolean get() = tmdb.isConfigured
 
@@ -70,11 +73,7 @@ class CatalogRepository @Inject constructor(
             null
         }
 
-        val directories = shelves.map { it.market }.distinct().associateWith { market ->
-            TitleKind.entries.associateWith { kind ->
-                async { safe { serviceDirectory(market, kind) } }
-            }
-        }
+        val serviceCatalogs = async { streamingCatalogs(shelves.map { it.library }, settings) }
 
         // Fără „În tendințe”: amesteca filme apărute cu filme care încă nu au apărut.
         val rows = mutableListOf<CatalogRow>()
@@ -84,31 +83,11 @@ class CatalogRepository @Inject constructor(
         popularShows?.let { rows += CatalogRow("shows", "Seriale populare", it) }
         safe { TmdbMappers.items(topMovies.await().results, l, TitleKind.MOVIE) }?.let { rows += CatalogRow("top_movies", "Filme apreciate", it) }
 
+        val catalogs = serviceCatalogs.await()
         val serviceRows = shelves.map { shelf ->
-            async {
-                val parts = TitleKind.entries.map { kind ->
-                    async {
-                        val directory = directories.getValue(shelf.market).getValue(kind).await()
-                        val ids = homeProviderIds(shelf.service, directory)
-                        val items = if (ids.isEmpty()) emptyList() else safe { serviceCatalog(shelf.market, kind, ids, settings) }
-                        val status = when {
-                            items == null || ids.isEmpty() && directory == null -> ServiceCatalogStatus.UNAVAILABLE
-                            ids.isEmpty() -> ServiceCatalogStatus.NO_PROVIDER
-                            else -> ServiceCatalogStatus.NO_TITLES
-                        }
-                        items.orEmpty() to status
-                    }
-                }.awaitAll()
-                val items = TmdbMappers.interleave(parts[0].first, parts[1].first)
-                val status = when {
-                    items.isNotEmpty() -> null
-                    parts.any { it.second == ServiceCatalogStatus.UNAVAILABLE } -> ServiceCatalogStatus.UNAVAILABLE
-                    parts.any { it.second == ServiceCatalogStatus.NO_TITLES } -> ServiceCatalogStatus.NO_TITLES
-                    else -> ServiceCatalogStatus.NO_PROVIDER
-                }
-                shelf.row(items, status)
-            }
-        }.awaitAll()
+            val page = catalogs.getValue(shelf.library)
+            shelf.row(page.items, page.status)
+        }
 
         val nonEmpty = rows.filter { it.items.isNotEmpty() } + serviceRows
         if (nonEmpty.isEmpty() && errors.isNotEmpty()) throw errors.first()
@@ -118,19 +97,89 @@ class CatalogRepository @Inject constructor(
         )
     }
 
-    private suspend fun serviceDirectory(market: Market, kind: TitleKind): List<ProviderInfo> =
+    /** Can load any configured service. Home supplies only installed services. */
+    suspend fun streamingCatalogs(
+        libraries: List<ServiceLibrary>,
+        settings: CatalogSettings,
+        page: Int = 1,
+    ): Map<ServiceLibrary, ServiceCatalogPage> = coroutineScope {
+        require(page > 0)
+        val gate = Semaphore(6)
+        suspend fun <T> fetch(block: suspend () -> T): T? = try {
+            gate.withPermit { block() }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+
+        val directories = libraries.filter { it.service != StreamingService.VOYO }.map { it.region }.distinct()
+            .associateWith { region ->
+                TitleKind.entries.associateWith { kind -> async { fetch { serviceDirectory(region, kind) } } }
+            }
+        libraries.distinct().map { library ->
+            async {
+                val (movies, shows) = TitleKind.entries.map { kind ->
+                    async part@{
+                        if (library.service == StreamingService.VOYO) {
+                            if (library.region != "RO") return@part ServiceCatalogPage(emptyList(), ServiceCatalogStatus.NO_PROVIDER)
+                            val ids = fetch { voyo.ids(kind, page) }
+                                ?: return@part ServiceCatalogPage(emptyList(), ServiceCatalogStatus.UNAVAILABLE)
+                            val items = ids.map { id -> async { fetch { basic(kind, id, settings) } } }
+                                .awaitAll().filterNotNull()
+                            val status = when {
+                                items.isNotEmpty() -> null
+                                ids.isNotEmpty() -> ServiceCatalogStatus.UNAVAILABLE
+                                else -> ServiceCatalogStatus.NO_TITLES
+                            }
+                            return@part ServiceCatalogPage(items, status)
+                        }
+                        val directory = directories.getValue(library.region).getValue(kind).await()
+                        val ids = homeProviderIds(library.service, directory)
+                        val items = if (ids.isEmpty()) emptyList() else fetch {
+                            serviceCatalog(library.region, kind, ids, settings, page)
+                        }
+                        val status = when {
+                            !items.isNullOrEmpty() -> null
+                            items == null || ids.isEmpty() && directory == null -> ServiceCatalogStatus.UNAVAILABLE
+                            ids.isEmpty() -> ServiceCatalogStatus.NO_PROVIDER
+                            else -> ServiceCatalogStatus.NO_TITLES
+                        }
+                        ServiceCatalogPage(items.orEmpty(), status)
+                    }
+                }.awaitAll()
+                val items = TmdbMappers.interleave(movies.items, shows.items)
+                val status = when {
+                    items.isNotEmpty() -> null
+                    ServiceCatalogStatus.UNAVAILABLE in listOf(movies.status, shows.status) -> ServiceCatalogStatus.UNAVAILABLE
+                    ServiceCatalogStatus.NO_TITLES in listOf(movies.status, shows.status) -> ServiceCatalogStatus.NO_TITLES
+                    else -> ServiceCatalogStatus.NO_PROVIDER
+                }
+                library to ServiceCatalogPage(items, status)
+            }
+        }.awaitAll().toMap()
+    }
+
+    private suspend fun serviceDirectory(region: String, kind: TitleKind): List<ProviderInfo> =
         tmdb.get(
-            "watch/providers/${kind.path}", mapOf("watch_region" to market.code),
+            "watch/providers/${kind.path}", mapOf("watch_region" to region),
             TmdbProviderList.serializer(), TmdbClient.LONG_TTL,
         ).results.map(TmdbMappers::provider)
 
-    private suspend fun serviceCatalog(market: Market, kind: TitleKind, ids: Set<Int>, settings: CatalogSettings): List<CatalogItem> {
+    private suspend fun serviceCatalog(
+        region: String,
+        kind: TitleKind,
+        ids: Set<Int>,
+        settings: CatalogSettings,
+        page: Int,
+    ): List<CatalogItem> {
         val params = mapOf(
             "language" to settings.apiLanguage,
-            "watch_region" to market.code,
+            "watch_region" to region,
             "with_watch_providers" to ids.sorted().joinToString("|"),
             "with_watch_monetization_types" to "flatrate|free|ads",
             "sort_by" to "popularity.desc",
+            "page" to page.takeIf { it > 1 }?.toString(),
         )
         return TmdbMappers.items(list("discover/${kind.path}", params).results, settings.language, kind)
     }

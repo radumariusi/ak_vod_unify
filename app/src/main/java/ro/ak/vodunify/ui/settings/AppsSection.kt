@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import ro.ak.vodunify.core.playback.InstalledApp
 import ro.ak.vodunify.core.playback.PlaybackSettings
 import ro.ak.vodunify.core.playback.StreamingService
+import ro.ak.vodunify.core.catalog.ServiceLibrary
 import ro.ak.vodunify.core.playback.TargetApp
 import ro.ak.vodunify.core.prefs.Market
 import ro.ak.vodunify.core.scrobble.AppProof
@@ -91,13 +92,10 @@ fun AppsSection(viewModel: PlaybackSettingsViewModel = hiltViewModel()) {
         collapsible = true,
         summary = StreamingService.active
             .filter { s -> TargetApp.byId(s.appId)?.let { it in installed } == true }
-            .joinToString(", ") { "${it.displayName} (${settings.marketOf(it).code})" }
+            .joinToString(", ") { "${it.displayName} (${ServiceLibrary(it, settings.marketOf(it)).region})" }
             .ifEmpty { "Niciun serviciu instalat" },
     ) {
-        SettingHint(
-            "Fiecare titlu se caută doar în biblioteca serviciului: dacă treci Disney+ pe RO, verificăm catalogul " +
-                "Disney+ din România (date TMDb / JustWatch). Serviciile tale sunt cele instalate.",
-        )
+        SettingHint("Pe Acasă apar serviciile instalate. Folosim biblioteca aleasă pentru fiecare serviciu, iar pentru ARTE folosim catalogul JustWatch Franța.")
         val (mine, others) = StreamingService.active.filter { s -> TargetApp.byId(s.appId)?.isActive == true }.partition { s -> TargetApp.byId(s.appId)?.let { it in installed } == true }
         Text("Serviciile tale (instalate)", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
         if (mine.isEmpty()) SettingHint("Niciun serviciu instalat.")
@@ -186,6 +184,12 @@ private fun ServiceRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.readable(),
             )
+            val source = when (service) {
+                StreamingService.ARTE -> "Catalog Franța · JustWatch"
+                StreamingService.VOYO -> "Catalog România · WhatToWatch.ro"
+                else -> null
+            }
+            source?.let { SettingHint(it) }
         }
         Dropdown(
             label = null,
@@ -194,7 +198,14 @@ private fun ServiceRow(
             optionLabel = { if (it == Market.US) "US (VPN)" else "RO" },
             onSelect = { viewModel.setServiceMarket(service, it) },
             dialogTitle = "Biblioteca pentru ${service.displayName}",
-            optionDetail = { if (it == Market.US) "Cauți titlurile în catalogul american, prin VPN" else "Catalogul din România" },
+            optionDetail = { market ->
+                when {
+                    service == StreamingService.ARTE -> "Rândul de pe Acasă folosește catalogul din Franța"
+                    service == StreamingService.VOYO && market == Market.US -> "Sursa VOYO are catalog pentru România"
+                    market == Market.US -> "Catalogul din SUA"
+                    else -> "Catalogul din România"
+                }
+            },
         )
         if (app != null) {
             Spacer(Modifier.width(8.dp))

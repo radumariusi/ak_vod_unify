@@ -370,11 +370,12 @@ fun PlaceholderRow(title: String, message: String) {
 
 /** Atribuirea cerută de TMDb și JustWatch. */
 @Composable
-fun AttributionNote(modifier: Modifier = Modifier, includeJustWatch: Boolean = true) {
+fun AttributionNote(modifier: Modifier = Modifier, includeJustWatch: Boolean = true, includeWhatToWatch: Boolean = false) {
     Text(
         buildString {
             append("Date despre titluri: TMDb. Acest produs folosește API-ul TMDb, dar nu este aprobat sau certificat de TMDb.")
             if (includeJustWatch) append(" Disponibilitatea pe servicii este furnizată de JustWatch.")
+            if (includeWhatToWatch) append(" Catalog VOYO România: WhatToWatch.ro.")
         },
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,

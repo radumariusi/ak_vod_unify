@@ -92,7 +92,7 @@ enum class StreamingService(
                 "fandango" in n || "vudu" in n -> FANDANGO
                 word("pbs") -> PBS
                 "sling" in n -> SLING
-                word("arte") -> ARTE
+                n == "arte" || n == "arte.tv" -> ARTE
                 "magellan" in n -> MAGELLAN
                 "curiosity" in n -> CURIOSITY
                 else -> null
