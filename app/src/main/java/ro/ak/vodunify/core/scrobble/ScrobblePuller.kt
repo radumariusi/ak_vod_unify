@@ -6,9 +6,11 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -36,63 +38,113 @@ class ScrobblePuller @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val pullMutex = Mutex()
     private val eventsSerializer = ListSerializer(ScrobbleEvent.serializer())
+    @Volatile private var foregroundActive = false
+    private var delayedNetflixJob: kotlinx.coroutines.Job? = null
+
+    fun onForegroundChanged(active: Boolean) {
+        foregroundActive = active
+        if (!active) {
+            delayedNetflixJob?.cancel()
+            delayedNetflixJob = null
+        } else {
+            pullInForegroundAsync()
+        }
+    }
 
     fun pullInForegroundAsync(forceRetryUnresolved: Boolean = false) {
         scope.launch {
-            pullInForeground(forceRetryUnresolved)
+            try {
+                pullInForeground(forceRetryUnresolved)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                AppDiagLog.add("ScrobblePuller EROARE: ${e.javaClass.simpleName}: ${e.message}")
+            }
         }
     }
 
     suspend fun pullInForeground(forceRetryUnresolved: Boolean = false): Int = pullMutex.withLock {
         withContext(Dispatchers.IO) {
-            if (!repository.isScrobblerInstalled()) {
-                if (forceRetryUnresolved) {
-                    repository.retryUnresolved()
-                    scanNetflixInForeground()
-                }
-                return@withContext 0
-            }
+            val scrobblerInstalled = repository.isScrobblerInstalled()
             val auth = "${repository.scrobblerPackage}.diag"
             var totalAcked = 0
-            for (round in 0 until MAX_BATCHES) {
-                val batch = queryQueue(auth, BATCH_SIZE) ?: break
-                if (batch.isEmpty()) break
-                val confirmedIds = repository.importBatch(batch)
-                if (confirmedIds.isNotEmpty()) {
-                    val acked = ackQueue(auth, confirmedIds)
-                    totalAcked += acked
-                    AppDiagLog.add("ScrobblePuller: lot ${batch.size} -> confirmate=${confirmedIds.size}, șterse din Scrobbler=$acked")
+            if (scrobblerInstalled) {
+                for (round in 0 until MAX_BATCHES) {
+                    val batch = queryQueue(auth, BATCH_SIZE) ?: break
+                    if (batch.isEmpty()) break
+                    val confirmedIds = repository.importBatch(batch)
+                    if (confirmedIds.isNotEmpty()) {
+                        val acked = ackQueue(auth, confirmedIds)
+                        totalAcked += acked
+                        AppDiagLog.add("ScrobblePuller: lot ${batch.size} -> confirmate=${confirmedIds.size}, șterse din Scrobbler=$acked")
+                    }
+                    if (batch.size < BATCH_SIZE || confirmedIds.isEmpty()) break
                 }
-                if (batch.size < BATCH_SIZE || confirmedIds.isEmpty()) break
             }
             if (forceRetryUnresolved || repository.unresolved.value > 0) {
-                repository.retryUnresolved()
-                scanNetflixInForeground(auth)
+                if (repository.hasRecentUnresolvedNetflix()) {
+                    runCatching { scanNetflixInForeground(auth) }
+                        .onFailure { AppDiagLog.add("Netflix scan eroare: ${it.javaClass.simpleName}: ${it.message}") }
+                    // Dacă abia ai închis Netflix TV, serverul Netflix poate actualiza activitatea după 20–40s.
+                    if (foregroundActive && repository.hasRecentUnresolvedNetflix()) {
+                        scheduleForegroundNetflixRecheck(auth)
+                    }
+                }
+                runCatching { repository.retryUnresolved() }
+                    .onFailure { AppDiagLog.add("retryUnresolved eroare: ${it.javaClass.simpleName}: ${it.message}") }
             }
             totalAcked
+        }
+    }
+
+    private fun scheduleForegroundNetflixRecheck(auth: String) {
+        if (delayedNetflixJob?.isActive == true) return
+        delayedNetflixJob = scope.launch {
+            delay(30_000L)
+            if (!foregroundActive || !repository.hasRecentUnresolvedNetflix()) return@launch
+            pullMutex.withLock {
+                withContext(Dispatchers.IO) {
+                    if (foregroundActive && repository.hasRecentUnresolvedNetflix()) {
+                        runCatching { scanNetflixInForeground(auth) }
+                    }
+                }
+            }
         }
     }
 
     private suspend fun scanNetflixInForeground(auth: String = "${repository.scrobblerPackage}.diag") {
         if (!repository.hasRecentUnresolvedNetflix()) return
         val hasLocalSession = NetflixRecent.hasSession()
-        val local = if (hasLocalSession) {
+        var source = "Unify"
+        var payload = if (hasLocalSession) {
             AppDiagLog.add("Netflix scan: pornesc din sesiunea Unify")
             NetflixRecent.scan(context)
         } else {
-            AppDiagLog.add("Netflix scan: Unify fără cookie Netflix, întreb AK Scrobbler")
-            queryNetflixFromScrobbler(auth) ?: run {
+            null
+        }
+        val localOk = payload?.optString("status") == "ok" && (payload.optJSONArray("items")?.length() ?: 0) > 0
+        if (!localOk && repository.isScrobblerInstalled()) {
+            AppDiagLog.add(
+                if (hasLocalSession) "Netflix scan: Unify nu a adus titluri (${payload?.optString("status")}), încerc sesiunea AK Scrobbler"
+                else "Netflix scan: Unify fără cookie Netflix, întreb AK Scrobbler",
+            )
+            val fromScrobbler = queryNetflixFromScrobbler(auth)
+            if (fromScrobbler != null) {
+                payload = fromScrobbler
+                source = "Scrobbler"
+            } else if (payload == null) {
                 AppDiagLog.add("Netflix scan: AK Scrobbler nu a răspuns la /netflix_recent")
                 return
             }
         }
+        val finalJson = payload ?: return
         val parsed = runCatching {
-            json.decodeFromString(NetflixRecentResult.serializer(), local.toString())
+            json.decodeFromString(NetflixRecentResult.serializer(), finalJson.toString())
         }.onFailure {
             AppDiagLog.add("Netflix scan: JSON invalid: ${it.message}")
         }.getOrNull() ?: return
         AppDiagLog.add(
-            "Netflix scan (${if (hasLocalSession) "Unify" else "Scrobbler"}): status=${parsed.status} · items=${parsed.items.size} · msg=${parsed.message ?: "-"}",
+            "Netflix scan ($source): status=${parsed.status} · items=${parsed.items.size} · msg=${parsed.message ?: "-"}",
         )
         repository.applyNetflixRecent(parsed)
     }

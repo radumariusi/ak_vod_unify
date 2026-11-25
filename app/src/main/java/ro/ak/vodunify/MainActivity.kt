@@ -27,7 +27,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        scrobblePuller.pullInForegroundAsync()
+        scrobblePuller.onForegroundChanged(true)
+    }
+
+    override fun onPause() {
+        scrobblePuller.onForegroundChanged(false)
+        super.onPause()
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

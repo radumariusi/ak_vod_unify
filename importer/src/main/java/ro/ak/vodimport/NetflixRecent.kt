@@ -25,7 +25,10 @@ object NetflixRecent {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
     fun hasSession(): Boolean = runCatching {
-        CookieManager.getInstance().getCookie(BASE).orEmpty().split(';').any { it.trimStart().startsWith("NetflixId=") }
+        val cm = CookieManager.getInstance()
+        val c1 = cm.getCookie(BASE).orEmpty()
+        val c2 = cm.getCookie("https://netflix.com").orEmpty()
+        "$c1;$c2".split(';').any { it.trimStart().startsWith("NetflixId=") }
     }.getOrDefault(false)
 
     fun result(status: String, message: String? = null, items: JSONArray? = null): JSONObject =
