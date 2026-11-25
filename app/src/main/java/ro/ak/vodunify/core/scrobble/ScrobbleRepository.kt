@@ -240,9 +240,9 @@ class ScrobbleRepository @Inject constructor(
         ensureLoaded()
         var matched = 0
         if (result.status == "ok") {
-            val pending = mutex.withLock { readUnresolved() }
+            val (pending, initialClaims) = mutex.withLock { readUnresolved() to readNetflixClaims().toMutableMap() }
             for (e in pending.filter { NetflixActivity.isNetflix(it.pkg) }.sortedBy { it.at }) {
-                val item = NetflixActivity.match(e, result.items) ?: continue
+                val item = NetflixActivity.match(e, result.items, initialClaims) ?: continue
                 val bookmark = item.bookmark?.takeIf { it > 0 && e.estimated }?.times(1_000)
                 val recovered = e.copy(
                     fields = NetflixActivity.fields(item),
@@ -255,6 +255,10 @@ class ScrobbleRepository @Inject constructor(
                     val r = process(recovered, fromQueue = true)
                     if (r == ScrobbleResult.SAVED || r == ScrobbleResult.WATCHED || r == ScrobbleResult.IGNORED || r == ScrobbleResult.TOO_SHORT) {
                         matched++
+                        val key = NetflixActivity.viewedKey(item)
+                        val claim = NetflixClaim(key, item.watchedAt ?: item.date, e.at, e.playId)
+                        initialClaims[key] = claim
+                        writeNetflixClaims(initialClaims)
                         writeUnresolved(readUnresolved().filterNot { unresolvedKey(it) == unresolvedKey(e) })
                     } else {
                         keepUnresolved(recovered)
@@ -281,6 +285,15 @@ class ScrobbleRepository @Inject constructor(
     }
 
     private fun readNetflixStatus(): List<String> = listOfNotNull(prefs.getString(KEY_NETFLIX_STATUS + "RO", null))
+
+    private fun readNetflixClaims(): Map<String, NetflixClaim> = runCatching {
+        prefs.getString(KEY_NETFLIX_CLAIMS, null)?.let { json.decodeFromString(claimsSerializer, it) }
+    }.getOrNull().orEmpty()
+
+    private fun writeNetflixClaims(claims: Map<String, NetflixClaim>) {
+        val trimmed = if (claims.size <= 100) claims else claims.entries.sortedBy { it.value.eventAt }.takeLast(100).associate { it.toPair() }
+        prefs.edit().putString(KEY_NETFLIX_CLAIMS, json.encodeToString(claimsSerializer, trimmed)).apply()
+    }
 
     private suspend fun knownPosition(media: MediaRef): Long? =
         trackingDao.resumeById("$LOCAL_SOURCE|${media.itemKey}")?.positionMs
@@ -499,12 +512,14 @@ class ScrobbleRepository @Inject constructor(
         const val KEY_UNRESOLVED = "unresolved"
         const val KEY_LAST_RETRY = "unresolved_last_retry"
         const val KEY_NETFLIX_STATUS = "netflix_status_"
+        const val KEY_NETFLIX_CLAIMS = "netflix_claims"
         const val KEY_PROOFS = "proofs"
         const val KEY_PROCESSED_IDS = "processed_ids"
         const val MAX_UNRESOLVED = 2_000
         const val MAX_APP_HISTORY = 2_000
         const val MAX_PROCESSED_IDS = 500
         val eventsSerializer = ListSerializer(ScrobbleEvent.serializer())
+        val claimsSerializer = MapSerializer(String.serializer(), NetflixClaim.serializer())
         const val MAX_LOG = 400
     }
 }

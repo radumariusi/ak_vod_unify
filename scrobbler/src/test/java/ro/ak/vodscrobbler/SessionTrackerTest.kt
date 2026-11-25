@@ -229,4 +229,22 @@ class SessionTrackerTest {
         assertTrue(t.onPlaybackState(PlayState.PAUSED, 35_000, 35_000, 0f, 35_000).isEmpty())
         assertTrue(t.onMetadata(movie, 40_000).isEmpty())
     }
+
+    @Test
+    fun metadataClearedBeforeStopDoesNotEmitPhantomUntitledEvents() {
+        val nobody = MediaInfo(mapOf("title" to "Nobody"), durationMs = 5_502_000L)
+        val t = SessionTracker("com.skyshowtime.skyshowtime.google", "SkyShowtime")
+        t.onMetadata(nobody, 0)
+        t.onPlaybackState(PlayState.PLAYING, 580_000, 0, 1f, 0)
+
+        // SkyShowtime golește metadatele cu o secundă înainte de STOPPED.
+        val stopOut = t.onMetadata(MediaInfo(emptyMap(), null), 1_000)
+        assertEquals(1, stopOut.size)
+        assertEquals(SendReason.STOP, stopOut[0].reason)
+        assertEquals("Nobody", stopOut[0].media.fields["title"])
+
+        // Evenimentele STOPPED / tick imediat următoare fără titlu sunt ignorate (nu mai apar „(fără titlu)”).
+        assertTrue(t.onTick(1_500).isEmpty())
+        assertTrue(t.onPlaybackState(PlayState.STOPPED, 580_001, 2_000, 0f, 2_000).isEmpty())
+    }
 }

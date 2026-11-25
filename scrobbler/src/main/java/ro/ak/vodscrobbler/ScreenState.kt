@@ -42,6 +42,13 @@ object ScreenState {
     /** Ascultătorul de sesiuni media se abonează aici. */
     var listener: ((ScreenSnapshot) -> Unit)? = null
 
+    /** Serviciul de accesibilitate se abonează aici pentru citiri la cerere (ex. la pauză fără titlu). */
+    var onSnapshotRequest: ((String) -> Unit)? = null
+
+    fun requestSnapshot(pkg: String) {
+        main.post { onSnapshotRequest?.invoke(pkg) }
+    }
+
     private const val PREFS = "screen"
     private const val KEY_MEDIA_APPS = "media_apps"
 

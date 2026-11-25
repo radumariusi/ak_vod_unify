@@ -31,6 +31,15 @@ data class NetflixRecentResult(
     val items: List<NetflixViewedItem> = emptyList(),
 )
 
+/** O potrivire Netflix deja folosită de o sesiune anterioară (previne atribuirea aceluiași film la redarea următoare). */
+@Serializable
+data class NetflixClaim(
+    val itemKey: String,
+    val watchedAt: Long,
+    val eventAt: Long,
+    val playId: String,
+)
+
 /**
  * Aplicația Netflix de pe TV nu spune nimănui ce rulează, dar AK Scrobbler îi prinde minutul.
  * Netflix ține în „Activitate de vizionare” titlul și minutul la care te-ai oprit, deci o vizionare
@@ -53,12 +62,36 @@ object NetflixActivity {
      * Rândul din activitate care se potrivește vizionării, sau null dacă nu e unul singur clar.
      * Întâi după ora vizionării (pagina „Watched” are ora exactă), apoi după minut (API-ul vechi).
      */
-    fun match(event: ScrobbleEvent, items: List<NetflixViewedItem>): NetflixViewedItem? {
+    fun match(
+        event: ScrobbleEvent,
+        items: List<NetflixViewedItem>,
+        claims: Map<String, NetflixClaim> = emptyMap(),
+    ): NetflixViewedItem? {
         val id = event.fields["netflix_id"]?.takeIf { it.isNotBlank() }
         if (id != null) return items.filter { it.id == id && it.title.isNotBlank() }
             .minByOrNull { abs((it.watchedAt ?: it.date) - event.at) }
+        // Când avem minutul exact din „Continue Watching” (`/browse`) pentru titluri din aceeași fereastră de timp,
+        // potrivirea după secundă separă sigur 3–4 filme schimbate rapid unul după altul.
         val timed = items.filter { it.watchedAt != null }
-        return matchByTime(event, timed) ?: matchByBookmark(event, items.filter { it.watchedAt == null })
+        val recentWithBookmark = items.filter {
+            it.bookmark != null &&
+                it.title.isNotBlank() &&
+                !isClaimedByEarlierSession(it, event, claims) &&
+                ((it.watchedAt ?: it.date) - event.at) in -BEFORE_MS..AFTER_MS
+        }
+        if (!event.estimated && event.positionMs >= 30_000L && recentWithBookmark.isNotEmpty()) {
+            matchByBookmark(event, recentWithBookmark)?.let { return it }
+        }
+        return matchByTime(event, timed, claims)
+            ?: matchByBookmark(event, items.filter { it.watchedAt == null && !isClaimedByEarlierSession(it, event, claims) })
+    }
+
+    private fun isClaimedByEarlierSession(item: NetflixViewedItem, event: ScrobbleEvent, claims: Map<String, NetflixClaim>): Boolean {
+        val claim = claims[item.key()] ?: return false
+        if (event.playId.isNotEmpty() && claim.playId == event.playId) return false
+        if (claim.eventAt >= event.at - 60_000L) return false
+        val itemAt = item.watchedAt ?: item.date
+        return itemAt <= claim.watchedAt + 60_000L
     }
 
     /**
@@ -67,9 +100,16 @@ object NetflixActivity {
      * cel mult [AFTER_MS] după (ceasuri, întârzieri Netflix) și cel mult [BEFORE_MS] înainte
      * (dacă Netflix notează ora la pornire). Două titluri la fel de aproape → nu ghicim.
      */
-    private fun matchByTime(event: ScrobbleEvent, items: List<NetflixViewedItem>): NetflixViewedItem? {
+    private fun matchByTime(
+        event: ScrobbleEvent,
+        items: List<NetflixViewedItem>,
+        claims: Map<String, NetflixClaim>,
+    ): NetflixViewedItem? {
         val candidates = items
-            .filter { it.watchedAt != null && it.title.isNotBlank() && compatibleDuration(event, it) }
+            .filter {
+                it.watchedAt != null && it.title.isNotBlank() &&
+                    compatibleDuration(event, it) && !isClaimedByEarlierSession(it, event, claims)
+            }
             .map { it to it.watchedAt!! - event.at }
             .filter { (_, diff) -> diff in -BEFORE_MS..AFTER_MS }
             .map { (item, diff) -> item to abs(diff) }
@@ -157,5 +197,6 @@ object NetflixActivity {
     const val NF_EPISODE = "nf_episode"
     const val NF_SEASON = "nf_season"
     const val NF_EPISODE_NUMBER = "nf_episode_number"
+    fun viewedKey(item: NetflixViewedItem): String = item.key()
     private fun NetflixViewedItem.key() = id.ifBlank { title }
 }

@@ -21,6 +21,7 @@ object NetflixRecent {
     const val ACTION = "ro.ak.vodscrobbler.action.NETFLIX_RECENT"
     const val BASE = "https://www.netflix.com"
     const val HISTORY_URL = "$BASE/viewingactivity"
+    const val BROWSE_URL = "$BASE/browse"
     internal const val UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
@@ -58,6 +59,8 @@ object NetflixRecent {
         suspendCancellableCoroutine { continuation ->
             val main = Handler(Looper.getMainLooper())
             var finished = false
+            var stage = 0 // 0 = viewingactivity, 1 = browse (Continue Watching bookmarks)
+            var historyItems: JSONArray? = null
             var lastDiag = "pagina nu s-a încărcat"
             fun close() {
                 if (finished) return
@@ -71,17 +74,42 @@ object NetflixRecent {
                 close()
                 if (continuation.isActive) continuation.resume(value)
             }
-            fun poll() {
+            fun completeMerged(browseItems: JSONArray?) {
+                val merged = mergeItems(historyItems, browseItems)
+                if (merged.length() > 0) {
+                    finish(result("ok", items = merged))
+                } else {
+                    finish(result("error", "Activitate de vizionare: ${lastDiag.take(180)}"))
+                }
+            }
+            fun pollBrowse(triesLeft: Int) {
                 if (finished || !Service.NETFLIX.trusted(web.url.orEmpty())) return
-                web.evaluateJavascript(Scripts.NETFLIX_HISTORY_COLLECT) { raw ->
+                web.evaluateJavascript(Scripts.NETFLIX_BROWSE_COLLECT) { raw ->
                     if (finished) return@evaluateJavascript
+                    val parsed = parse(raw)
+                    val bItems = parsed?.optJSONArray("items")
+                    if ((bItems != null && bItems.length() > 0) || triesLeft <= 0) {
+                        completeMerged(bItems)
+                    } else {
+                        main.postDelayed({ pollBrowse(triesLeft - 1) }, 1_500L)
+                    }
+                }
+            }
+            fun startBrowseStage() {
+                if (finished || stage == 1) return
+                stage = 1
+                web.loadUrl(BROWSE_URL)
+            }
+            fun poll() {
+                if (finished || stage != 0 || !Service.NETFLIX.trusted(web.url.orEmpty())) return
+                web.evaluateJavascript(Scripts.NETFLIX_HISTORY_COLLECT) { raw ->
+                    if (finished || stage != 0) return@evaluateJavascript
                     val parsed = parse(raw)
                     val items = parsed?.optJSONArray("items")
                     lastDiag = parsed?.optString("diag") ?: "răspuns gol din pagină"
                     if (items != null && items.length() > 0) {
-                        val bounded = JSONArray()
-                        for (i in 0 until minOf(items.length(), 200)) bounded.put(items.get(i))
-                        finish(result("ok", items = bounded))
+                        historyItems = items
+                        startBrowseStage()
                     } else {
                         main.postDelayed({ poll() }, 2_000L)
                     }
@@ -100,22 +128,70 @@ object NetflixRecent {
             web.webViewClient = object : WebViewClient() {
                 override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
                     generation++
-                    if (!atDocumentStart && Service.NETFLIX.trusted(url)) view.evaluateJavascript(Scripts.NETFLIX_CAPTURE_HOOK, null)
+                    if (stage == 0 && !atDocumentStart && Service.NETFLIX.trusted(url)) view.evaluateJavascript(Scripts.NETFLIX_CAPTURE_HOOK, null)
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {
                     if (!Service.NETFLIX.trusted(url) || finished) return
                     if (Service.NETFLIX.isLogin(url)) {
-                        finish(result("not_logged_in", "Sesiunea Netflix a expirat."))
+                        if (historyItems != null) completeMerged(null)
+                        else finish(result("not_logged_in", "Sesiunea Netflix a expirat."))
                         return
                     }
-                    if (!atDocumentStart) view.evaluateJavascript(Scripts.NETFLIX_CAPTURE_HOOK, null)
-                    val page = ++generation
-                    main.postDelayed({ if (page == generation) poll() }, 2_000L)
+                    if (stage == 0) {
+                        if (!atDocumentStart) view.evaluateJavascript(Scripts.NETFLIX_CAPTURE_HOOK, null)
+                        val page = ++generation
+                        main.postDelayed({ if (page == generation && stage == 0) poll() }, 2_000L)
+                    } else {
+                        val page = ++generation
+                        main.postDelayed({ if (page == generation && stage == 1) pollBrowse(3) }, 1_800L)
+                    }
                 }
             }
-            main.postDelayed({ finish(result("error", "Activitate de vizionare: ${lastDiag.take(180)}")) }, 40_000L)
+            // Dacă /viewingactivity nu a prins nimic în 20s, încercăm măcar `/browse` înainte de timeout.
+            main.postDelayed({ if (stage == 0 && historyItems == null) startBrowseStage() }, 20_000L)
+            main.postDelayed({ completeMerged(null) }, 38_000L)
             web.loadUrl(HISTORY_URL)
         }
+    }
+
+    /** Combină istoricul (`/viewingactivity`) cu pozițiile exacte în secunde (`/browse`). */
+    internal fun mergeItems(history: JSONArray?, browse: JSONArray?, maxItems: Int = 200): JSONArray {
+        val byId = LinkedHashMap<String, JSONObject>()
+        val extra = mutableListOf<JSONObject>()
+        if (history != null) {
+            for (i in 0 until history.length()) {
+                val obj = history.optJSONObject(i) ?: continue
+                val id = obj.optString("id")
+                if (id.isNotBlank()) byId.putIfAbsent(id, obj) else extra += obj
+            }
+        }
+        if (browse != null) {
+            for (i in 0 until browse.length()) {
+                val b = browse.optJSONObject(i) ?: continue
+                val id = b.optString("id")
+                val existing = if (id.isNotBlank()) byId[id] else null
+                if (existing != null) {
+                    val copy = JSONObject(existing.toString())
+                    if (b.optLong("bookmark", 0) > 0) {
+                        copy.put("bookmark", b.optLong("bookmark"))
+                        if (b.optLong("duration", 0) > 0) copy.put("duration", b.optLong("duration"))
+                    }
+                    val bAt = b.optLong("watchedAt", 0)
+                    val eAt = copy.optLong("watchedAt", 0)
+                    if (bAt > eAt) copy.put("watchedAt", bAt)
+                    byId[id] = copy
+                } else if (id.isNotBlank()) {
+                    byId[id] = b
+                } else {
+                    extra += b
+                }
+            }
+        }
+        val out = JSONArray()
+        for (obj in (byId.values + extra).sortedByDescending { it.optLong("watchedAt", it.optLong("date", 0)) }.take(maxItems)) {
+            out.put(obj)
+        }
+        return out
     }
 }

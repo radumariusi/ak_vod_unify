@@ -79,6 +79,9 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
     private var savedMovieMedia: MediaInfo? = null
     private var savedPlayId: String? = null
 
+    /** Playerul tocmai a golit metadatele la oprire: ignorăm evenimentele `STOPPED` fără titlu imediat după. */
+    private var clearedAtStop = false
+
     /** Redare urmărită doar de pe ecran (fără sesiune media): durata de pe ecran se poate corecta. */
     var screenOnly = false
 
@@ -175,14 +178,16 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
             return emptyList()
         }
         val out = mutableListOf<Outgoing>()
-        if (previous != null && previous.hasTitle && state != PlayState.STOPPED) {
+        val hadRealTitle = previous != null && previous.hasTitle && state != PlayState.STOPPED
+        if (hadRealTitle) {
             emit(SendReason.STOP, bestPosition(now), now, previous)?.let(out::add)
         }
+        clearedAtStop = hadRealTitle && (info == null || !info.hasTitle)
         media = info
         basePositionMs = null
         positionFromSession = false
         playedMs = 0L
-        playingSince = if (state == PlayState.PLAYING) now else null
+        playingSince = if (state == PlayState.PLAYING && !clearedAtStop) now else null
         playId = "$sessionKey-${++playCounter}"
         lastSentAt = Long.MIN_VALUE
         lastSentPositionMs = null
@@ -234,6 +239,18 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
             }
             return emptyList()
         }
+        if (clearedAtStop) {
+            if (newState == PlayState.PLAYING && media?.hasTitle == true) {
+                clearedAtStop = false
+            } else if (newState == PlayState.STOPPED || media?.hasTitle != true) {
+                state = newState
+                playingSince = null
+                if (newState == PlayState.STOPPED) clearedAtStop = false
+                return emptyList()
+            } else {
+                clearedAtStop = false
+            }
+        }
         val before = state
         val positionBefore = bestPosition(now)
         val realBefore = position(now)
@@ -270,7 +287,7 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
     }
 
     fun onTick(now: Long): List<Outgoing> {
-        if (inAdBreak) return emptyList()
+        if (inAdBreak || clearedAtStop) return emptyList()
         if (state != PlayState.PLAYING) return emptyList()
         if (lastSentAt != Long.MIN_VALUE && now - lastSentAt < TICK_INTERVAL_MS) return emptyList()
         if (lastSentAt == Long.MIN_VALUE) {

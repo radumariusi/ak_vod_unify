@@ -296,7 +296,8 @@ class MediaListenerService : NotificationListenerService() {
         if (s == PlayState.PAUSED && t.tracker.state == PlayState.PLAYING) {
             probeLogcat(t)
             if (!hasTextTitle(t) && t.screenGuess == null) {
-                handler.postDelayed({ recheckScreenPause(t) }, 1_000L)
+                ScreenState.requestSnapshot(t.tracker.packageName)
+                handler.postDelayed({ recheckScreenPause(t) }, 1_200L)
             }
         }
         extractGtiFromBundle(state?.extras, t.extraFields)

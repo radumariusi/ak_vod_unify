@@ -63,6 +63,13 @@ class ScreenReaderService : AccessibilityService() {
         if (tv) updateReaderMode(frontApp())
         handler.removeCallbacks(pollRunnable)
         handler.postDelayed(pollRunnable, POLL_MS)
+        ScreenState.onSnapshotRequest = { pkg ->
+            if (isInteresting(pkg)) {
+                handler.removeCallbacks(snapshotRunnable)
+                pendingPackage = pkg
+                handler.postDelayed(snapshotRunnable, SETTLE_MS)
+            }
+        }
         DiagLog.add("Citirea ecranului (accesibilitate) a pornit" + if (tv) " · mod cititor de ecran (TV)" else "")
         KeepAliveService.start(this)
     }
@@ -145,6 +152,7 @@ class ScreenReaderService : AccessibilityService() {
 
     override fun onDestroy() {
         ScreenState.serviceConnected = false
+        ScreenState.onSnapshotRequest = null
         handler.removeCallbacksAndMessages(null)
         DiagLog.add("Citirea ecranului (accesibilitate) s-a oprit")
         super.onDestroy()
