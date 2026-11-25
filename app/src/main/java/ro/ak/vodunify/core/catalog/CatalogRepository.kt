@@ -51,8 +51,8 @@ class CatalogRepository @Inject constructor(
 
     // ---------- Acasă ----------
 
-    /** [shelves]: serviciile tale (instalate), fiecare cu biblioteca lui: un rând „Pe Netflix (RO)” pentru fiecare. */
-    suspend fun home(settings: CatalogSettings, shelves: List<ServiceShelf>): HomeCatalog = supervisorScope {
+    /** Rândurile generale, disponibile independent de cataloagele serviciilor instalate. */
+    suspend fun home(settings: CatalogSettings): HomeCatalog = supervisorScope {
         val lang = settings.apiLanguage
         val l = settings.language
         val region = Market.RO.code
@@ -76,8 +76,6 @@ class CatalogRepository @Inject constructor(
             null
         }
 
-        val serviceCatalogs = async { streamingCatalogs(shelves.map { it.library }, settings) }
-
         val rows = mutableListOf<CatalogRow>()
         val popularMovies = safe { TmdbMappers.items(movies.await().results, l, TitleKind.MOVIE) }
         val popularShows = safe { TmdbMappers.items(shows.await().results, l, TitleKind.TV) }
@@ -91,13 +89,7 @@ class CatalogRepository @Inject constructor(
             TmdbMappers.items(trendingShows.await().results.filter { !it.adult && isReleased(it.firstAirDate, today) }, l, TitleKind.TV)
         }?.let { rows += CatalogRow("trending_shows", "Seriale în tendințe", it) }
 
-        val catalogs = serviceCatalogs.await()
-        val serviceRows = shelves.map { shelf ->
-            val page = catalogs.getValue(shelf.library)
-            shelf.row(page.items, page.status)
-        }
-
-        val nonEmpty = rows.filter { it.items.isNotEmpty() } + serviceRows
+        val nonEmpty = rows.filter { it.items.isNotEmpty() }
         if (nonEmpty.isEmpty() && errors.isNotEmpty()) throw errors.first()
         HomeCatalog(
             hero = TmdbMappers.interleave(popularMovies.orEmpty(), popularShows.orEmpty()).filter { it.backdropUrl != null }.take(6),

@@ -28,7 +28,11 @@ import javax.inject.Singleton
 data class HomeSnapshot(
     val catalog: HomeCatalog? = null,
     val personal: PersonalRows? = null,
+    val releaseRefresh: HomeReleaseRefresh? = null,
 )
+
+@Serializable
+data class HomeReleaseRefresh(val key: String, val at: Long)
 
 /**
  * Memoria filei Acasă, cât trăiește aplicația și pe disc:
@@ -61,9 +65,20 @@ class HomeSnapshotStore @Inject constructor(@ApplicationContext context: Context
 
     fun saveCatalog(catalog: HomeCatalog) = save { it.copy(catalog = catalog) }
 
+    fun releasesAreFresh(key: String): Boolean = memory?.releaseRefresh?.let {
+        it.key == key && System.currentTimeMillis() - it.at in 0 until RELEASES_TTL
+    } == true
+
+    fun markReleasesRefreshed(key: String) = save { it.copy(releaseRefresh = HomeReleaseRefresh(key, System.currentTimeMillis())) }
+
     fun savePersonal(rows: PersonalRows) {
         if (rows.state == PersonalState.LOADING) return
-        save { it.copy(personal = rows) }
+        save { snapshot ->
+            val previous = snapshot.personal
+            val sameReleases = previous != null && previous.newMovies == rows.newMovies && previous.newEpisodes == rows.newEpisodes &&
+                previous.soonMovies == rows.soonMovies && previous.soonEpisodes == rows.soonEpisodes
+            snapshot.copy(personal = rows, releaseRefresh = snapshot.releaseRefresh.takeIf { sameReleases })
+        }
     }
 
     private fun save(change: (HomeSnapshot) -> HomeSnapshot) {
@@ -132,6 +147,7 @@ class HomeSnapshotStore @Inject constructor(@ApplicationContext context: Context
         movieReleases.clear()
         popular = null
         packages = null
+        if (memory?.releaseRefresh != null) save { it.copy(releaseRefresh = null) }
     }
 
     private companion object {

@@ -101,32 +101,22 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
     val personal by viewModel.personal.collectAsStateWithLifecycle()
     val sync by viewModel.syncStatus.collectAsStateWithLifecycle()
     val personalRows = remember(personal, sync, viewModel) { personalHomeRows(personal, sync, viewModel::syncNow) }
-    // Siglele titlurilor din rândurile personale (Continuă, Noutăți, În curând) se pregătesc din timp, ca hero-ul
-    // să le arate pe loc la focus.
-    LaunchedEffect(personal) {
-        val p = personal
-        viewModel.prefetchLogos(
-            (p.continueMovies + p.continueShows + p.newMovies + p.newEpisodes + p.soonMovies + p.soonEpisodes)
-                .mapNotNull { item -> item.tmdbId?.let { item.kind to it } },
-        )
+    val catalog = (state as? LoadState.Data)?.value ?: EmptyCatalog
+    val statusRow = when (val current = state) {
+        LoadState.Loading -> HomeRow("home-loading", false) { LoadingPanel() }
+        is LoadState.Failed -> HomeRow("home-error", true) { ErrorPanel(current.error, onRetry = viewModel::retry) }
+        is LoadState.Data -> null
     }
-    when (val s = state) {
-        LoadState.Loading -> LazyColumn(Modifier.fillMaxSize()) {
-            items(personalRows, key = { it.key }) { it.content() }
-            item { LoadingPanel() }
-        }
-        is LoadState.Failed -> LazyColumn(Modifier.fillMaxSize()) {
-            item { ErrorPanel(s.error, onRetry = viewModel::retry) }
-            items(personalRows, key = { it.key }) { it.content() }
-        }
-        is LoadState.Data -> HomeContent(s.value, personalRows, viewModel, personalReady = personal.state != PersonalState.LOADING)
-    }
+    HomeContent(catalog, personalRows, statusRow, viewModel, personalReady = personal.state != PersonalState.LOADING)
 }
+
+private val EmptyCatalog = HomeCatalog(emptyList(), emptyList())
 
 @Composable
 private fun HomeContent(
     catalog: HomeCatalog,
     personalRows: List<HomeRow>,
+    statusRow: HomeRow?,
     viewModel: HomeViewModel,
     personalReady: Boolean,
 ) {
@@ -136,23 +126,20 @@ private fun HomeContent(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
-    // Siglele titlurilor din rânduri se pregătesc din timp (adresa + imaginea în cache).
-    LaunchedEffect(catalog) {
-        viewModel.prefetchLogos((catalog.hero + catalog.rows.flatMap { it.items.take(12) }).map { it.kind to it.id })
-    }
-
     // Pe TV focusul pornește pe primul poster (nu mai e buton „Detalii”: OK pe orice poster deschide fișa);
     // la întoarcerea dintr-o fișă focusul revine pe cardul deschis (vezi FocusRestore).
     // Acasă pornește mereu de sus, de la Continuă vizionarea: focusul se pune abia după ce rândurile personale
     // sunt pe ecran (altfel ar cădea pe primul rând din catalog, iar rândurile apărute deasupra l-ar lăsa jos).
     if (spec.isTv) {
         var started by rememberSaveable { mutableStateOf(false) }
-        LaunchedEffect(personalReady, returning) {
+        val hasRows = personalRows.any { it.focusable } || catalog.rows.isNotEmpty() || statusRow?.focusable == true
+        LaunchedEffect(personalReady, hasRows, returning) {
             if (started) return@LaunchedEffect
             if (returning != null) {
                 started = true
                 return@LaunchedEffect
             }
+            if (!hasRows) return@LaunchedEffect
             if (!personalReady) delay(PERSONAL_WAIT_MS)
             if (listState.firstVisibleItemIndex != 0) {
                 started = true
@@ -190,7 +177,7 @@ private fun HomeContent(
                 HomeRow(row.id, row.items.isNotEmpty() || row.serviceFallback != null) {
                     CatalogHomeRow(row, viewModel::openService)
                 }
-            }
+            } + listOfNotNull(statusRow)
             val keys = allRows.map { row -> row.key.takeIf { row.focusable } }
             val returningRow = keys.indexOf(returning?.homeRow).takeIf { returning?.homeRow != null }
             LaunchedEffect(returning, returningRow) {
@@ -241,6 +228,7 @@ private fun HomeContent(
             }
             items(personalRows, key = { it.key }) { it.content() }
             items(catalog.rows, key = { it.id }) { row -> CatalogHomeRow(row, viewModel::openService) }
+            statusRow?.let { item(key = it.key) { it.content() } }
             item(key = "attribution") { HomeAttribution(catalog) }
         }
     }
@@ -320,7 +308,7 @@ private fun Hero(
     LaunchedEffect(promoted?.id) {
         if (backdrop != null && backdrop.focused == null) backdrop.url = promoted?.backdropUrl
     }
-    // Sigla: pe loc dacă e deja știută (pregătită din timp), fără să apară întâi numele; altfel se cere după
+    // Sigla: pe loc dacă e deja în cache; altfel se cere după
     // un focus scurt stabil (nu la fiecare poster peste care treci). Numele apare doar dacă titlul n-are siglă.
     val cached = remember(shown.kind, shown.id) { viewModel.cachedLogo(shown.kind, shown.id) }
     var fetched by remember(shown.kind, shown.id) { mutableStateOf<String?>(null) }

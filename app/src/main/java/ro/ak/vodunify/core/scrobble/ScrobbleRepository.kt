@@ -44,7 +44,7 @@ class ScrobbleRepository @Inject constructor(
     private val serviceTitles: ServiceTitleResolver,
     private val json: Json,
 ) {
-    private val prefs = context.getSharedPreferences("scrobbler", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences(SCROBBLE_PREFS, Context.MODE_PRIVATE)
     private val mutex = Mutex()
     private val logSerializer = ListSerializer(ScrobbleLogEntry.serializer())
 
@@ -83,7 +83,7 @@ class ScrobbleRepository @Inject constructor(
     }
 
     fun clearLog() {
-        prefs.edit().remove(KEY_LOG).apply()
+        prefs.edit().remove(SCROBBLE_LOG).apply()
         _log.value = emptyList()
     }
 
@@ -354,6 +354,7 @@ class ScrobbleRepository @Inject constructor(
         positionMs = position,
         durationMs = duration,
         result = result.wire,
+        itemKey = media?.itemKey,
     )
 
     private fun appendLog(e: ScrobbleLogEntry) {
@@ -370,16 +371,15 @@ class ScrobbleRepository @Inject constructor(
 
     private fun writeLog(list: List<ScrobbleLogEntry>) {
         _log.value = list
-        prefs.edit().putString(KEY_LOG, json.encodeToString(logSerializer, list)).apply()
+        prefs.edit().putString(SCROBBLE_LOG, json.encodeToString(logSerializer, list)).apply()
     }
 
     private fun readLog(): List<ScrobbleLogEntry> = runCatching {
-        prefs.getString(KEY_LOG, null)?.let { json.decodeFromString(logSerializer, it) }
+        prefs.getString(SCROBBLE_LOG, null)?.let { json.decodeFromString(logSerializer, it) }
     }.getOrNull().orEmpty()
 
     private companion object {
         const val KEY_ENABLED = "enabled"
-        const val KEY_LOG = "log"
         const val KEY_WATCHED_PCT = "watched_percent"
         const val KEY_UNRESOLVED = "unresolved"
         const val KEY_LAST_RETRY = "unresolved_last_retry"

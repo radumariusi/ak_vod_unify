@@ -239,14 +239,6 @@ class CalendarRepository @Inject constructor(
             .joinToString("") { it.toUByte().toString(16).padStart(2, '0') }
     }
 
-    /** Pregătește în fundal ziua de azi (seriale), cum o deschide fila Calendar. */
-    suspend fun prewarmToday() {
-        if (!isConfigured) return
-        val s = settings.first()
-        val today = RomaniaTime.today()
-        episodes(today, today, s)
-    }
-
     /** Notele IMDb ale episoadelor unui sezon (episod → notă); gol fără cheie OMDb. */
     suspend fun episodeImdbRatings(seriesImdbId: String, season: Int): Map<Int, Double> =
         omdb.seasonRatings(seriesImdbId, season, omdbKey(prefs.settings.first()))

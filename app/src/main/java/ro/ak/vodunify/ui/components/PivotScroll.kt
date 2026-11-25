@@ -123,7 +123,8 @@ class HomeRows(
                 if (animate) state.animateScrollToItem(next) else state.scrollToItem(next)
                 repeat(3) {
                     withFrameNanos { }
-                    requesters[target]?.requestFocus()
+                    // Rândul se poate schimba între derulare și următorul cadru, la încărcarea datelor.
+                    runCatching { requesters[target]?.requestFocus() }
                     if (focused == target) return@launch
                 }
             } finally {

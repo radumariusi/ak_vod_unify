@@ -57,14 +57,13 @@ import ro.ak.vodunify.core.prefs.CatalogPreferences
 import ro.ak.vodunify.core.prefs.CatalogSettings
 import ro.ak.vodunify.core.tracking.SyncStatus
 import ro.ak.vodunify.core.tracking.TrackingRepository
+import ro.ak.vodunify.core.scrobble.PlaybackSourceRecovery
 import ro.ak.vodunify.ui.components.LoadState
 import ro.ak.vodunify.ui.components.loadCatching
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import kotlinx.serialization.json.Json
 import android.content.Context
-import coil.imageLoader
-import coil.request.ImageRequest
 import dagger.hilt.android.qualifiers.ApplicationContext
 
 /** Ecranul principal: rânduri personale (baza locală, AK Scrobbler) + rânduri din TMDb pentru piața și limba din Setări. */
@@ -72,6 +71,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 class HomeViewModel @Inject constructor(
     private val catalog: CatalogRepository,
     private val tracking: TrackingRepository,
+    private val playbackSources: PlaybackSourceRecovery,
     private val prefs: CatalogPreferences,
     playbackPrefs: PlaybackPreferences,
     private val resolver: TargetResolver,
@@ -113,14 +113,16 @@ class HomeViewModel @Inject constructor(
         if (state is LoadState.Data) LoadState.Data(filter.catalog(state.value)) else state
 
     val state: StateFlow<LoadState<HomeCatalog>> = combine(_state, contentFilter, ::filtered)
+        .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.Eagerly, filtered(_state.value, contentFilter.value))
 
     private val releaseViewing = tracking.reconciled.map(::newReleaseViewing)
         .distinctUntilChanged().flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val personal: StateFlow<PersonalRows> = combine(_personal, contentFilter, releaseViewing) { rows, filter, viewing ->
-        filter.personal(viewing.hideWatched(rows))
-    }.stateIn(
+        filter.personal(viewing?.hideWatched(rows) ?: rows.copy(newMovies = emptyList(), newEpisodes = emptyList()))
+    }.flowOn(Dispatchers.Default).stateIn(
         viewModelScope, SharingStarted.Eagerly,
         contentFilter.value.personal(_personal.value.copy(newMovies = emptyList(), newEpisodes = emptyList())),
     )
@@ -148,7 +150,7 @@ class HomeViewModel @Inject constructor(
 
     private val configured = tracking.trackers.any { it.isConfigured }
 
-    private suspend fun releaseRows(s: ReleaseInput, publish: (PersonalRows) -> Unit) = coroutineScope {
+    private suspend fun releaseRows(s: ReleaseInput, publish: suspend (PersonalRows) -> Unit): Boolean = coroutineScope {
         val followed = async { followed(s) }
         val popular = async {
             if (!catalog.isConfigured) {
@@ -221,26 +223,31 @@ class HomeViewModel @Inject constructor(
             }
         }.awaitAll()
         if (enriched != rows.newEpisodes) publish(rows.copy(newEpisodes = enriched))
+        listOf(rows.newMovies, rows.newEpisodes, rows.soonMovies, rows.soonEpisodes).any { it.isNotEmpty() }
     }
 
     /**
      * Lista mea pentru „Noutăți” și „În curând”: titlurile din De văzut plus serialele pe care le-ai început
      * (din istoricul local), fiecare cu datele lui de lansare din TMDb.
      */
-    private suspend fun followed(s: ReleaseInput): List<FollowedTitle> {
-        if (!catalog.isConfigured) return emptyList()
+    private fun followedTitles(list: List<WatchlistEntity>, series: Map<String, SeriesSummary>): List<Pair<TitleKind, Long>> {
         val wanted = LinkedHashMap<String, Pair<TitleKind, Long>>()
-        s.series.values.sortedByDescending { it.lastAt }.forEach { sum ->
+        series.values.sortedByDescending { it.lastAt }.forEach { sum ->
             val id = sum.tmdbId ?: return@forEach
             wanted.getOrPut("tv:$id") { TitleKind.TV to id }
         }
-        s.list.forEach { w ->
+        list.forEach { w ->
             val id = w.ref.tmdbId ?: return@forEach
             val kind = PersonalMapper.kind(w.ref)
             wanted.getOrPut("${kind.path}:$id") { kind to id }
         }
+        return wanted.values.take(FOLLOW_LIMIT)
+    }
+
+    private suspend fun followed(s: ReleaseInput): List<FollowedTitle> {
+        if (!catalog.isConfigured) return emptyList()
         return coroutineScope {
-            wanted.values.take(FOLLOW_LIMIT).map { (kind, id) ->
+            s.followed.map { (kind, id) ->
                 async {
                     snapshots.releases("${kind.path}:$id:${s.settings.apiLanguage}") {
                         artGate.withPermit { runCatching { catalog.releases(kind, id, s.settings) }.getOrNull() }
@@ -287,10 +294,11 @@ class HomeViewModel @Inject constructor(
     val syncStatus: StateFlow<SyncStatus> = tracking.status
 
     private data class ReleaseInput(
-        val list: List<WatchlistEntity>,
-        val series: Map<String, SeriesSummary>,
+        val followed: List<Pair<TitleKind, Long>>,
         val settings: CatalogSettings,
-    )
+    ) {
+        val cacheKey: String get() = "$settings|${LocalDate.now()}|" + followed.joinToString(",") { (kind, id) -> "${kind.path}:$id" }
+    }
 
     // Imagini și titluri localizate din TMDb, ținute în memorie cât trăiește ecranul.
     private val artCache = ConcurrentHashMap<String, CatalogItem>()
@@ -321,12 +329,7 @@ class HomeViewModel @Inject constructor(
                 }.getOrNull()
             }?.let { chart.value = it }
         }
-        viewModelScope.launch { tracking.syncIfStale() }
-        // Calendarul de azi se pregătește în fundal, ca fila Calendar să apară pe loc.
-        viewModelScope.launch {
-            delay(CALENDAR_PREWARM_DELAY_MS)
-            runCatching { calendar.prewarmToday() }
-        }
+        viewModelScope.launch(Dispatchers.IO) { tracking.syncIfStale() }
     }
 
     private val logoCache = ConcurrentHashMap<String, String>()
@@ -339,31 +342,16 @@ class HomeViewModel @Inject constructor(
         logoLanguage = settings.logoLanguage
         val key = "${kind.path}:$id:${settings.logoLanguage}"
         logoCache[key]?.let { return it.ifEmpty { null } }
-        val url = runCatching { catalog.logoUrl(kind, id, settings) }.getOrNull()
+        val url = when (val result = loadCatching { catalog.logoUrl(kind, id, settings) }) {
+            is LoadState.Data -> result.value
+            else -> return null
+        }
         logoCache[key] = url.orEmpty()
         return url
     }
 
     /** Sigla deja știută (fără așteptare): null = încă necerută, "" = titlul nu are siglă. */
     fun cachedLogo(kind: TitleKind, id: Long): String? = logoCache["${kind.path}:$id:$logoLanguage"]
-
-    private val prefetched = ConcurrentHashMap.newKeySet<String>()
-
-    /**
-     * Sigle pregătite din timp pentru titlurile din rânduri: adresa (păstrată 7 zile în baza locală) și imaginea
-     * (în cache-ul de imagini pe disc), ca hero-ul să le arate pe loc, nu să le încarce de fiecare dată.
-     */
-    fun prefetchLogos(titles: List<Pair<TitleKind, Long>>) {
-        val todo = titles.filter { prefetched.add("${it.first.path}:${it.second}") }
-        if (todo.isEmpty()) return
-        viewModelScope.launch(Dispatchers.IO) {
-            val loader = context.imageLoader
-            todo.forEach { (kind, id) ->
-                val url = logo(kind, id) ?: return@forEach
-                loader.enqueue(ImageRequest.Builder(context).data(url).build())
-            }
-        }
-    }
 
     fun syncNow() {
         viewModelScope.launch { tracking.sync() }
@@ -397,16 +385,29 @@ class HomeViewModel @Inject constructor(
                     .withInstalledServices(shelves, ServiceCatalogStatus.CHECKING)
                 if (previous != null || pending.rows.isNotEmpty()) _state.value = LoadState.Data(pending)
 
-                val result = loadCatching { catalog.home(settings, shelves) }
-                if (result is LoadState.Data) {
-                    val visible = mergeSavedCatalog(result.value, pending)
-                        .withInstalledServices(shelves, ServiceCatalogStatus.UNAVAILABLE)
-                    _state.value = LoadState.Data(visible)
-                    snapshots.saveCatalog(visible)
-                } else {
-                    val fallback = pending.withInstalledServices(shelves, ServiceCatalogStatus.UNAVAILABLE)
-                    _state.value = if (fallback.rows.isNotEmpty() || fallback.hero.isNotEmpty()) LoadState.Data(fallback) else result
+                val result = withContext(Dispatchers.Default) { loadCatching { catalog.home(settings) } }
+                val general = if (result is LoadState.Data) mergeSavedCatalog(result.value, pending) else pending.withoutServiceRows()
+                val serviceRows = pending.rows.filter { it.id.startsWith("service_") }
+                if (general.rows.isNotEmpty() || general.hero.isNotEmpty()) {
+                    _state.value = LoadState.Data(general.copy(rows = general.rows + serviceRows))
                 }
+                val services = withContext(Dispatchers.Default) {
+                    loadCatching {
+                        val catalogs = catalog.streamingCatalogs(shelves.map { it.library }, settings)
+                        shelves.map { shelf ->
+                            val page = catalogs.getValue(shelf.library)
+                            shelf.row(page.items, page.status)
+                        }
+                    }
+                }
+                val visible = if (services is LoadState.Data) {
+                    mergeSavedCatalog(general.copy(rows = general.rows + services.value), pending)
+                } else general.copy(rows = general.rows + serviceRows)
+                val complete = visible.withInstalledServices(shelves, ServiceCatalogStatus.UNAVAILABLE)
+                if (complete.rows.isNotEmpty() || complete.hero.isNotEmpty()) {
+                    _state.value = LoadState.Data(complete)
+                    snapshots.saveCatalog(complete)
+                } else _state.value = result
             }
         }
         viewModelScope.launch {
@@ -420,7 +421,7 @@ class HomeViewModel @Inject constructor(
                         !connected -> PersonalState.DISCONNECTED
                         else -> PersonalState.CONNECTED
                     }
-                    val entries = resume.take(ROW_LIMIT * 2)
+                    val entries = playbackSources.restore(resume.take(ROW_LIMIT * 2))
                     val previous = (_personal.value.continueMovies + _personal.value.continueShows).associateBy { it.key }
                     val ready = entries.map { item ->
                         val art = cachedArt(item, settings) ?: previous["resume:${item.id}"]?.asCatalogItem()
@@ -440,17 +441,28 @@ class HomeViewModel @Inject constructor(
         }
         viewModelScope.launch {
             initialSnapshot.join()
-            combine(tracking.watchlist, tracking.seriesSummaries, prefs.settings, ::ReleaseInput)
+            combine(tracking.watchlist, tracking.seriesSummaries, prefs.settings) { list, series, settings ->
+                ReleaseInput(followedTitles(list, series), settings)
+            }.flowOn(Dispatchers.Default)
                 .distinctUntilChanged()
-                .collectLatest { input ->
-                    releaseRows(input) { rows ->
-                        publishPersonal(_personal.value.copy(
-                            newMovies = rows.newMovies,
-                            newEpisodes = rows.newEpisodes,
-                            soonMovies = rows.soonMovies,
-                            soonEpisodes = rows.soonEpisodes,
-                        ))
+                .combine(reload) { input, generation -> input to generation }
+                .collectLatest { (input, _) ->
+                    val key = input.cacheKey
+                    if (snapshots.releasesAreFresh(key)) return@collectLatest
+                    delay(RELEASE_REFRESH_DELAY_MS)
+                    val refreshed = withContext(Dispatchers.Default) {
+                        releaseRows(input) { rows ->
+                            withContext(Dispatchers.Main.immediate) {
+                                publishPersonal(_personal.value.copy(
+                                    newMovies = rows.newMovies,
+                                    newEpisodes = rows.newEpisodes,
+                                    soonMovies = rows.soonMovies,
+                                    soonEpisodes = rows.soonEpisodes,
+                                ))
+                            }
+                        }
                     }
+                    if (refreshed) snapshots.markReleasesRefreshed(key)
                 }
         }
     }
@@ -483,6 +495,6 @@ class HomeViewModel @Inject constructor(
         /** Câte filme primesc lansările detaliate (cinema / streaming / digital). */
         const val RELEASES_LIMIT = 80
 
-        const val CALENDAR_PREWARM_DELAY_MS = 6_000L
+        const val RELEASE_REFRESH_DELAY_MS = 2_000L
     }
 }

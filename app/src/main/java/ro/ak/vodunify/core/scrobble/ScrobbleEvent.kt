@@ -49,4 +49,8 @@ data class ScrobbleLogEntry(
     val positionMs: Long,
     val durationMs: Long? = null,
     val result: String,
+    val itemKey: String? = null,
 )
+
+internal const val SCROBBLE_PREFS = "scrobbler"
+internal const val SCROBBLE_LOG = "log"

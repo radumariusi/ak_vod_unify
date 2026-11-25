@@ -316,17 +316,18 @@ class HistoryImportRepository @Inject constructor(
         /** La pornirea aplicației: dacă a rămas ceva în coadă (aplicația a fost oprită), îl reluăm. */
         fun resumeIfPending(context: Context) {
             val left = File(context.filesDir, "import_queue").listFiles { f -> f.isFile && f.name.endsWith(".json") }.orEmpty()
-            if (left.isNotEmpty()) start(context)
+            if (left.isNotEmpty()) enqueue(context, ExistingWorkPolicy.KEEP)
         }
 
-        fun start(context: Context) {
+        // Un import cerut acum poate reporni o încercare aflată în așteptare după o eroare.
+        fun start(context: Context) = enqueue(context, ExistingWorkPolicy.REPLACE)
+
+        private fun enqueue(context: Context, policy: ExistingWorkPolicy) {
             val request = OneTimeWorkRequestBuilder<HistoryImportWorker>()
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                 .setBackoffCriteria(BackoffPolicy.LINEAR, 30, TimeUnit.SECONDS)
                 .build()
-            // REPLACE, nu APPEND: o încercare veche aflată în așteptare (reîncercare după o eroare, cu pauze
-            // tot mai lungi) nu mai blochează importul nou. Progresul e salvat pe bucăți, deci nu pierdem nimic.
-            WorkManager.getInstance(context).enqueueUniqueWork(WORK, ExistingWorkPolicy.REPLACE, request)
+            WorkManager.getInstance(context).enqueueUniqueWork(WORK, policy, request)
         }
     }
 }

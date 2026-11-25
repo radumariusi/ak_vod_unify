@@ -51,6 +51,10 @@ import android.content.Context
 import android.util.LruCache
 import androidx.compose.ui.graphics.painter.Painter
 import coil.compose.AsyncImage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import ro.ak.vodunify.core.playback.AppRole
 import ro.ak.vodunify.core.playback.TargetApp
 import ro.ak.vodunify.core.catalog.TitleKind
@@ -132,28 +136,24 @@ private fun rememberKeyLookup(lookup: KeyLookup?, key: String?): Pair<String?, B
 }
 
 /**
- * Iconițele aplicațiilor, citite o singură dată din sistem (citirea e lentă și se făcea la fiecare poster
- * desenat, pe firul interfeței: derularea sacada).
+ * Iconițele aplicațiilor, citite din sistem în fundal și partajate între postere.
  */
 private object AppIcons {
-    private val icons = LruCache<String, Any>(64)
-    private val labels = LruCache<String, String>(64)
-    private val NONE = Any()
+    data class InstalledIcon(val bitmap: ImageBitmap?, val label: String?)
 
-    fun icon(context: Context, packageName: String): ImageBitmap? {
-        icons.get(packageName)?.let { return it as? ImageBitmap }
-        val bitmap = runCatching { context.packageManager.getApplicationIcon(packageName).toBitmap(96, 96).asImageBitmap() }.getOrNull()
-        icons.put(packageName, bitmap ?: NONE)
-        return bitmap
-    }
+    private val cache = LruCache<String, InstalledIcon>(64)
+    private val lock = Mutex()
 
-    fun label(context: Context, packageName: String): String? {
-        labels.get(packageName)?.let { return it.ifEmpty { null } }
-        val label = runCatching {
-            context.packageManager.let { pm -> pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString() }
-        }.getOrNull()
-        labels.put(packageName, label.orEmpty())
-        return label
+    fun peek(packageName: String): InstalledIcon? = cache.get(packageName)
+
+    suspend fun load(context: Context, packageName: String): InstalledIcon = lock.withLock {
+        peek(packageName) ?: withContext(Dispatchers.IO) {
+            val pm = context.packageManager
+            val app = runCatching { pm.getApplicationInfo(packageName, 0) }.getOrNull()
+            val bitmap = app?.let { runCatching { pm.getApplicationIcon(it).toBitmap(96, 96).asImageBitmap() }.getOrNull() }
+            val label = app?.let { runCatching { pm.getApplicationLabel(it).toString() }.getOrNull() }
+            InstalledIcon(bitmap, label).also { cache.put(packageName, it) }
+        }
     }
 }
 
@@ -195,13 +195,22 @@ private fun LetterLogo(name: String, modifier: Modifier = Modifier) {
  * sau bannerul lat al aplicației.
  */
 @Composable
-fun AppIconBadge(packageName: String, modifier: Modifier = Modifier, fallbackLabel: String? = null) {
+fun AppIconBadge(
+    packageName: String,
+    modifier: Modifier = Modifier,
+    fallbackLabel: String? = null,
+    preferInstalledIcon: Boolean = false,
+) {
     val context = LocalContext.current
+    var installed by remember(packageName) { mutableStateOf(AppIcons.peek(packageName)) }
+    if (installed == null) LaunchedEffect(packageName) { installed = AppIcons.load(context, packageName) }
+    val icon = installed?.bitmap
     val isService = remember(packageName) { TargetApp.byPackage(packageName)?.role == AppRole.OFFICIAL }
-    val (logoUrl, ready) = rememberKeyLookup(LocalServiceLogos.current?.byPackage, packageName.takeIf { isService })
+    val lookupOnline = isService && (!preferInstalledIcon || installed != null && icon == null)
+    val (logoUrl, _) = rememberKeyLookup(LocalServiceLogos.current?.byPackage, packageName.takeIf { lookupOnline })
     var logoFailed by remember(logoUrl, packageName) { mutableStateOf(false) }
-    val icon = remember(packageName) { AppIcons.icon(context, packageName) }
     val iconPainter = remember(icon) { icon?.let { BitmapPainter(it) } }
+    val name = fallbackLabel ?: installed?.label
     when {
         logoUrl != null && !logoFailed -> SquareLogo(logoUrl, iconPainter, modifier) { logoFailed = true }
         icon != null -> Image(
@@ -210,12 +219,8 @@ fun AppIconBadge(packageName: String, modifier: Modifier = Modifier, fallbackLab
             contentScale = ContentScale.Crop,
             modifier = modifier.size(BadgeHeight).clip(BadgeShape),
         )
-        fallbackLabel != null -> LetterLogo(fallbackLabel, modifier)
-        !ready -> Box(modifier.size(BadgeHeight))
-        else -> {
-            val label = remember(packageName) { AppIcons.label(context, packageName) }
-            label?.takeIf { it.isNotBlank() }?.let { LetterLogo(it, modifier) }
-        }
+        !name.isNullOrBlank() -> LetterLogo(name, modifier)
+        else -> Box(modifier.size(BadgeHeight))
     }
 }
 
@@ -359,7 +364,7 @@ fun TitleBadge(spec: BadgeSpec?, kind: TitleKind, id: Long?, modifier: Modifier 
                     val pkg = spec.packageName?.takeIf { it.isNotBlank() }
                     if (pkg != null) {
                         val app = TargetApp.byPackage(pkg)?.displayName ?: pkg.substringAfterLast('.')
-                        AppIconBadge(pkg, Modifier.semantics { contentDescription = app }, fallbackLabel = app)
+                        AppIconBadge(pkg, Modifier.semantics { contentDescription = app }, fallbackLabel = app, preferInstalledIcon = true)
                     } else {
                         PosterLabel("▶", Modifier.semantics { contentDescription = "Aplicația de redare necunoscută" })
                     }

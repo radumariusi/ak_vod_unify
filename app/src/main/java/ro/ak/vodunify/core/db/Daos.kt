@@ -37,6 +37,9 @@ interface TrackingDao {
     @Query("SELECT * FROM resume_points WHERE id = :id")
     suspend fun resumeById(id: String): ResumePointEntity?
 
+    @Query("UPDATE resume_points SET appPackage = :pkg WHERE id = :id AND updatedAt = :at AND positionMs = :positionMs AND (appPackage IS NULL OR TRIM(appPackage) = '')")
+    suspend fun restoreResumePackage(id: String, at: Long, positionMs: Long, pkg: String): Int
+
     @Transaction
     suspend fun upsertResumeIfNewer(item: ResumePointEntity): Boolean {
         val current = resumeById(item.id)
