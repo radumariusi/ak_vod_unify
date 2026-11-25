@@ -2,6 +2,9 @@ package ro.ak.vodunify.core.scrobble
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.Collections
@@ -20,6 +23,9 @@ data class ServiceTitle(val show: String, val season: Int? = null, val episode: 
 object ServicePages {
     val PRIME_GTI = Regex("""amzn1\.dv\.gti\.[0-9a-fA-F-]{36}""")
     val NETFLIX_ID = Regex("""^\d{6,9}$""")
+    val ARTE_ID = Regex("""^\d{6}-\d{3}-[A-Z]$""")
+
+    private val ARTE_JSON = Json { ignoreUnknownKeys = true }
 
     private val OG_TITLE = Regex("""<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
     private val OG_TITLE_REV = Regex("""<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']""", RegexOption.IGNORE_CASE)
@@ -99,6 +105,17 @@ object ServicePages {
         return ServiceTitle(show)
     }
 
+    /** API public ARTE (`v2/config/{lang}/{programId}`): titlu + subtitlu într-o limbă internațională. */
+    fun arteConfig(body: String): ServiceTitle? = runCatching {
+        val meta = ARTE_JSON.parseToJsonElement(body).jsonObject["data"]?.jsonObject
+            ?.get("attributes")?.jsonObject?.get("metadata")?.jsonObject ?: return null
+        val title = meta["title"]?.jsonPrimitive?.content?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val subtitle = meta["subtitle"]?.jsonPrimitive?.content?.trim()?.takeIf {
+            it.isNotEmpty() && !it.equals(title, ignoreCase = true)
+        }
+        ServiceTitle(show = title, episodeTitle = subtitle)
+    }.getOrNull()
+
     private fun unescape(s: String) = s.replace("&amp;", "&").replace("&#39;", "'").replace("&#x27;", "'")
         .replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">")
 
@@ -138,9 +155,11 @@ class ServiceTitleResolver @Inject constructor(http: OkHttpClient) {
     private fun keyFor(event: ScrobbleEvent): String? {
         val gti = event.fields.values.firstNotNullOfOrNull { ServicePages.PRIME_GTI.find(it)?.value }
         val netflixId = event.fields["netflix_id"]?.takeIf { ServicePages.NETFLIX_ID.matches(it) }
+        val arteId = event.fields["media_id"]?.takeIf { event.pkg.startsWith("tv.arte.") && ServicePages.ARTE_ID.matches(it) }
         return when {
             gti != null -> "prime:$gti"
             netflixId != null -> "netflix:$netflixId"
+            arteId != null -> "arte:$arteId"
             else -> null
         }
     }
@@ -149,6 +168,33 @@ class ServiceTitleResolver @Inject constructor(http: OkHttpClient) {
     suspend fun fieldsFor(event: ScrobbleEvent): Map<String, String> {
         val gti = event.fields.values.firstNotNullOfOrNull { ServicePages.PRIME_GTI.find(it)?.value }
         val netflixId = event.fields["netflix_id"]?.takeIf { ServicePages.NETFLIX_ID.matches(it) }
+        val arteId = event.fields["media_id"]?.takeIf { event.pkg.startsWith("tv.arte.") && ServicePages.ARTE_ID.matches(it) }
+        if (arteId != null) {
+            val title = cached("arte:$arteId") {
+                var parsed: ServiceTitle? = null
+                var lastNote = ""
+                for (lang in listOf("en", "fr", "de")) {
+                    val (body, note) = get("https://api.arte.tv/api/player/v2/config/$lang/$arteId")
+                    lastNote = note
+                    parsed = body?.let(ServicePages::arteConfig)
+                    if (parsed != null) break
+                }
+                parsed to lastNote
+            } ?: return emptyMap()
+            return buildMap {
+                val nativeTitle = event.fields["title"].orEmpty()
+                val nativeSub = event.fields["display_subtitle"].orEmpty()
+                if (nativeTitle.isBlank()) {
+                    put("title", title.show)
+                } else if (!title.show.equals(nativeTitle, ignoreCase = true)) {
+                    put("alt_title", title.show)
+                }
+                title.episodeTitle?.takeIf { it.isNotBlank() && !it.equals(nativeSub, ignoreCase = true) }?.let { ep ->
+                    if (nativeSub.isBlank() && nativeTitle.isBlank()) put("display_subtitle", ep)
+                    else put("alt_subtitle", ep)
+                }
+            }
+        }
         val title = when {
             gti != null -> cached("prime:$gti") {
                 val (html, httpNote) = get("https://www.primevideo.com/detail/$gti/")

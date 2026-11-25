@@ -25,8 +25,8 @@ object TitleParser {
 
     /** Ordinea în care ne uităm la câmpuri (nume scurte, ca în AK Scrobbler). */
     val FIELD_ORDER = listOf(
-        "display_title", "title", "display_subtitle", "subtitle", "artist", "album", "album_artist",
-        "display_description", "description", "writer", "author",
+        "display_title", "title", "display_subtitle", "subtitle", "screen_title", "artist", "album", "album_artist",
+        "alt_title", "alt_subtitle", "display_description", "description", "writer", "author",
     )
 
     private val SEASON_EPISODE = listOf(
@@ -83,8 +83,26 @@ object TitleParser {
         for (a in firstThree) for (b in firstThree) {
             if (a != b) out += TitleGuess.NamedEpisode(show = stripYear(b), episodeTitle = stripYear(a))
         }
+        val altTitle = fields["alt_title"]?.trim()?.takeIf { it.length > 1 && !isNoise(it) }
+        val altSubtitle = fields["alt_subtitle"]?.trim()?.takeIf { it.length > 1 && !isNoise(it) }
+        if (altTitle != null && altSubtitle != null && !altTitle.equals(altSubtitle, ignoreCase = true)) {
+            out += TitleGuess.NamedEpisode(show = stripYear(altTitle), episodeTitle = stripYear(altSubtitle))
+        }
+        val isConfirmedMovie = fields["title_source"] == "netflix_activity"
         if ("season_hint" !in fields) {
-            texts.take(2).forEach { t -> out += TitleGuess.Movie(stripYear(t), year(t)) }
+            texts.take(2).forEach { t ->
+                val clean = stripYear(t)
+                if (!isGenericEpisodeTitle(clean) || isConfirmedMovie) out += TitleGuess.Movie(clean, year(t))
+            }
+            if (altTitle != null && !isGenericEpisodeTitle(stripYear(altTitle))) {
+                out += TitleGuess.Movie(stripYear(altTitle), year(altTitle))
+            }
+        }
+        // Documentare / seriale formatate într-un singur câmp („Serial: Nume episod” / „Serial - Nume episod”).
+        texts.take(2).forEach { t ->
+            splitColonEpisode(stripYear(t))?.let { (show, ep) ->
+                out += TitleGuess.NamedEpisode(show = show, episodeTitle = ep)
+            }
         }
         return out.distinct()
     }
@@ -128,6 +146,28 @@ object TitleParser {
 
     private val IGNORED_KEYS = setOf("title_source", "season_hint", "netflix_id", "media_id", "media_uri", "genre", "date", "duration", "year", "track_number", "disc_number", "num_tracks", "rating", "user_rating",
         NetflixActivity.NF_SERIES, NetflixActivity.NF_EPISODE, NetflixActivity.NF_SEASON, NetflixActivity.NF_EPISODE_NUMBER)
+
+    private val GENERIC_EPISODE_TITLES = setOf(
+        "pilot", "premiere", "series premiere", "season premiere", "premiera", "prologue", "epilogue",
+    )
+
+    private val SEQUEL_SUFFIX = Regex(
+        """(?i)^(?:part|partea|vol\.?|volume|chapter|capitolul)\s+(?:\d+|one|two|three|four|five|unu|doi|trei|[ivx]+)$""",
+    )
+
+    private fun isGenericEpisodeTitle(s: String) = normalize(s) in GENERIC_EPISODE_TITLES
+
+    private fun splitColonEpisode(s: String): Pair<String, String>? {
+        val idx = s.indexOf(": ").takeIf { it >= 3 }
+            ?: s.indexOf(" - ").takeIf { it >= 3 }
+            ?: s.indexOf(" – ").takeIf { it >= 3 }
+            ?: return null
+        val sepLen = if (s.startsWith(": ", idx)) 2 else 3
+        val left = s.substring(0, idx).trim()
+        val right = s.substring(idx + sepLen).trim()
+        if (left.length < 3 || right.length < 3 || SEQUEL_SUFFIX.matches(right)) return null
+        return left to right
+    }
 
     private fun isNoise(s: String) = normalize(s) in NOISE_NORMALIZED
 

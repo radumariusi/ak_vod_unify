@@ -36,6 +36,12 @@
         <package android:name="com.pbs.video" />
         <package android:name="com.sling" />
         <package android:name="tv.arte.plus7" />
+        <package android:name="com.curiosity.curiositystream.androidtv" />
+        <package android:name="com.curiosity.curiositystream" />
+        <package android:name="com.xumo.xumo.tv" />
+        <package android:name="com.xumo.xumo" />
+        <package android:name="com.future.moviesByFawesomeAndroidTV" />
+        <package android:name="com.abide.magellantv" />
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />

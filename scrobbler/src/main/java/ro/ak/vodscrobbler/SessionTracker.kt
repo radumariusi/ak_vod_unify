@@ -18,7 +18,7 @@ data class MediaInfo(
         fun randomKey(): String = java.lang.Long.toHexString(random.nextLong() and 0xffffffffffL)
 
         val IDENTITY_KEYS = listOf(
-            "title", "display_title", "display_subtitle", "artist", "album", "album_artist",
+            "title", "display_title", "display_subtitle", "screen_title", "artist", "album", "album_artist",
             // Codurile titlului (Prime Video GTI, Netflix id): se schimbă la alt film / episod.
             "media_id", "netflix_id", "prime_gti",
         )

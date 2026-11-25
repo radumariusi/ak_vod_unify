@@ -191,7 +191,7 @@ class ScrobbleRepository @Inject constructor(
         if (!_enabled.value) return done(ScrobbleResult.DISABLED)
         if (ScrobbleRules.isIgnoredPackage(event.pkg)) return done(ScrobbleResult.IGNORED)
         val reportedDuration = event.duration
-        if (reportedDuration != null && reportedDuration < ScrobbleRules.MIN_DURATION_MS) {
+        if (reportedDuration != null && reportedDuration < ScrobbleRules.minDurationFor(event.pkg, event.fields)) {
             return done(ScrobbleResult.TOO_SHORT)
         }
         val guesses = TitleParser.guesses(event.fields, event.app)

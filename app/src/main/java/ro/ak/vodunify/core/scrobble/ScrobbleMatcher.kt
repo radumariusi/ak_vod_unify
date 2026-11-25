@@ -1,15 +1,26 @@
 package ro.ak.vodunify.core.scrobble
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import ro.ak.vodunify.core.connector.ExternalIds
 import ro.ak.vodunify.core.connector.MediaRef
 import ro.ak.vodunify.core.connector.MediaType
 import ro.ak.vodunify.core.tmdb.TmdbClient
+import ro.ak.vodunify.core.tmdb.TmdbFindResult
 import ro.ak.vodunify.core.tmdb.TmdbHttpException
 import ro.ak.vodunify.core.tmdb.TmdbListItem
 import ro.ak.vodunify.core.tmdb.TmdbPage
 import ro.ak.vodunify.core.tmdb.TmdbSeasonDetails
 import ro.ak.vodunify.core.tmdb.TmdbTitleDetails
+import java.net.URLEncoder
 import java.util.Collections
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -48,15 +59,29 @@ object MatchRules {
         a != null && b != null && TitleParser.normalize(a).let { it.isNotEmpty() && it == TitleParser.normalize(b) }
 
     fun yearOf(date: String?): Int? = date?.take(4)?.toIntOrNull()
+
+    /** Verifică dacă durata raportată de player e compatibilă cu durata filmului în TMDb (evită potriviri false episod↔film). */
+    fun compatibleDuration(runtimeMs: Long?, reportedMs: Long?): Boolean {
+        if (runtimeMs == null || runtimeMs <= 0L || reportedMs == null || reportedMs < 3 * 60_000L) return true
+        val diff = kotlin.math.abs(runtimeMs - reportedMs)
+        return diff <= (maxOf(runtimeMs, reportedMs) * 0.50).toLong()
+    }
 }
 
 /**
  * Caută în TMDb titlul din ipotezele [TitleParser]. Cere potrivire exactă a numelui (în română sau
  * engleză, ori titlul original), ca să nu scriem niciodată progresul pe alt film. Răspunsurile TMDb
- * sunt păstrate în cache-ul existent, deci un episod revăzut nu mai cere rețea.
+ * sunt păstrată în cache-ul existent; pentru documentare / titluri localizate lipsă pe TMDb
+ * consultăm și IMDb / Wikidata → TMDb `find`.
  */
 @Singleton
-class ScrobbleMatcher @Inject constructor(private val tmdb: TmdbClient) {
+class ScrobbleMatcher @Inject constructor(
+    private val tmdb: TmdbClient,
+    private val http: OkHttpClient,
+    private val json: Json,
+) {
+    private val extClient by lazy { http.newBuilder().callTimeout(8, TimeUnit.SECONDS).build() }
+    private val externalMisses = Collections.synchronizedSet(HashSet<String>())
 
     private val memo = Collections.synchronizedMap(
         object : LinkedHashMap<String, ScrobbleMatch>(256, 0.75f, true) {
@@ -113,7 +138,8 @@ class ScrobbleMatcher @Inject constructor(private val tmdb: TmdbClient) {
             return TvShow(details, page.results.first { it.id == pick.id })
         }
         val aliases = suggestions.values.filter { country == null || country in it.originCountry }
-        val item = matchingAlias("tv", name, aliases) ?: return null
+        val aliasMatch = matchingAlias("tv", name, aliases)
+        val item = aliasMatch ?: (if (country == null) externalTvItem(name) else null) ?: return null
         val details = tmdb.get("tv/${item.id}", mapOf("language" to "en-US"), TmdbTitleDetails.serializer(), TmdbClient.LONG_TTL)
         return TvShow(details, item)
     }
@@ -207,14 +233,21 @@ class ScrobbleMatcher @Inject constructor(private val tmdb: TmdbClient) {
                 .map { MatchRules.Candidate(it.id, listOf(it.title, it.originalTitle), MatchRules.yearOf(it.releaseDate)) }
             val exact = candidates.filter { c -> c.names.any { MatchRules.sameName(it, g.title) } }
             if (exact.isEmpty()) continue
+            val compatible = if (durationMs != null && exact.size > 1) {
+                exact.take(4).filter { MatchRules.compatibleDuration(movieRuntime(it.id), durationMs) }.ifEmpty { exact }
+            } else {
+                exact
+            }
             // Mai multe filme cu același nume: anul, apoi durata cea mai apropiată.
-            val byYear = g.year?.let { y -> exact.firstOrNull { it.year == y } }
-            val closest = if (exact.size > 1 && durationMs != null) {
-                exact.take(4).minByOrNull { c -> kotlin.math.abs((movieRuntime(c.id) ?: (Long.MAX_VALUE / 2)) - durationMs) }
+            val byYear = g.year?.let { y -> compatible.firstOrNull { it.year == y } }
+            val closest = if (compatible.size > 1 && durationMs != null) {
+                compatible.take(4).minByOrNull { c -> kotlin.math.abs((movieRuntime(c.id) ?: (Long.MAX_VALUE / 2)) - durationMs) }
             } else {
                 null
             }
-            val pick = byYear ?: closest ?: exact.first()
+            val pick = byYear ?: closest ?: compatible.first()
+            val runtime = movieRuntime(pick.id)
+            if (!MatchRules.compatibleDuration(runtime, durationMs)) continue
             val item = page.results.first { it.id == pick.id }
             return ScrobbleMatch(
                 media = MediaRef(
@@ -223,16 +256,134 @@ class ScrobbleMatcher @Inject constructor(private val tmdb: TmdbClient) {
                     title = item.title ?: item.originalTitle ?: g.title,
                     year = pick.year,
                 ),
-                runtimeMs = movieRuntime(pick.id),
+                runtimeMs = runtime,
             )
         }
-        val item = matchingAlias("movie", g.title, suggestions.values) ?: return null
+        val item = matchingAlias("movie", g.title, suggestions.values)
+            ?: externalMovieItem(g.title, g.year)
+            ?: return null
+        val runtime = movieRuntime(item.id)
+        if (!MatchRules.compatibleDuration(runtime, durationMs)) return null
         return ScrobbleMatch(
             MediaRef(MediaType.MOVIE, ExternalIds(tmdb = item.id), item.title ?: item.originalTitle ?: g.title,
                 MatchRules.yearOf(item.releaseDate)),
-            movieRuntime(item.id),
+            runtime,
         )
     }
+
+    // ---------- Rezervă documentare / titluri localizate: IMDb + Wikidata → TMDb ----------
+
+    private suspend fun externalTvItem(name: String): TmdbListItem? {
+        val key = "tv:${TitleParser.normalize(name)}"
+        if (key in externalMisses) return null
+        val imdbId = imdbSuggestionId(name, isTv = true, year = null)
+        imdbId?.let { tmdbFind(it, isTv = true) }?.let { return it }
+        val (tmdbTvId, wdImdbId) = wikidataExternalIds(name, isTv = true)
+        tmdbTvId?.let { id ->
+            runCatching { tmdb.get("tv/$id", mapOf("language" to "en-US"), TmdbListItem.serializer(), TmdbClient.LONG_TTL) }
+                .getOrNull()?.let { return it }
+        }
+        wdImdbId?.let { tmdbFind(it, isTv = true) }?.let { return it }
+        recordExternalMiss(key)
+        return null
+    }
+
+    private suspend fun externalMovieItem(name: String, year: Int?): TmdbListItem? {
+        val key = "movie:${TitleParser.normalize(name)}:${year ?: 0}"
+        if (key in externalMisses) return null
+        val imdbId = imdbSuggestionId(name, isTv = false, year = year)
+        imdbId?.let { tmdbFind(it, isTv = false) }?.let { return it }
+        val (tmdbMovieId, wdImdbId) = wikidataExternalIds(name, isTv = false)
+        tmdbMovieId?.let { id ->
+            runCatching { tmdb.get("movie/$id", mapOf("language" to "en-US"), TmdbListItem.serializer(), TmdbClient.LONG_TTL) }
+                .getOrNull()?.takeIf { !it.adult }?.let { return it }
+        }
+        wdImdbId?.let { tmdbFind(it, isTv = false) }?.let { return it }
+        recordExternalMiss(key)
+        return null
+    }
+
+    private suspend fun tmdbFind(imdbId: String, isTv: Boolean): TmdbListItem? {
+        val res = try {
+            tmdb.get("find/$imdbId", mapOf("external_source" to "imdb_id", "language" to "en-US"), TmdbFindResult.serializer(), TmdbClient.LONG_TTL)
+        } catch (e: TmdbHttpException) {
+            if (e.code == 404) return null else throw e
+        }
+        return if (isTv) res.tvResults.firstOrNull() else res.movieResults.firstOrNull { !it.adult }
+    }
+
+    private suspend fun imdbSuggestionId(name: String, isTv: Boolean, year: Int?): String? {
+        val encoded = URLEncoder.encode(name.trim().lowercase(), "UTF-8").replace("+", "%20")
+        val body = httpGet("https://v3.sg.media-imdb.com/suggestion/x/$encoded.json") ?: return null
+        return parseImdbSuggestion(body, name, isTv, year)
+    }
+
+    private suspend fun wikidataExternalIds(name: String, isTv: Boolean): Pair<Long?, String?> {
+        val encoded = URLEncoder.encode(name.trim(), "UTF-8")
+        var qid: String? = null
+        for (lang in listOf("ro", "en")) {
+            val searchBody = httpGet("https://www.wikidata.org/w/api.php?action=wbsearchentities&search=$encoded&language=$lang&format=json&limit=5")
+                ?: continue
+            qid = parseWikidataSearchEntityId(searchBody, name)
+            if (qid != null) break
+        }
+        qid ?: return null to null
+        val entityBody = httpGet("https://www.wikidata.org/w/api.php?action=wbgetentities&ids=$qid&props=claims&format=json")
+            ?: return null to null
+        return parseWikidataClaims(entityBody, qid, isTv)
+    }
+
+    private suspend fun httpGet(url: String): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val req = Request.Builder().url(url).header("User-Agent", "AKVodUnify/1.0").build()
+            extClient.newCall(req).execute().use { r -> if (r.isSuccessful) r.body?.string() else null }
+        }.getOrNull()
+    }
+
+    private fun recordExternalMiss(key: String) {
+        if (externalMisses.size > 500) externalMisses.clear()
+        externalMisses.add(key)
+    }
+
+    internal fun parseImdbSuggestion(body: String, name: String, isTv: Boolean, year: Int?): String? = runCatching {
+        val arr = json.parseToJsonElement(body).jsonObject["d"]?.jsonArray ?: return null
+        val qNorm = TitleParser.normalize(name)
+        val candidates = arr.mapNotNull { it as? JsonObject }.filter { obj ->
+            val id = obj["id"]?.jsonPrimitive?.content ?: return@filter false
+            if (!id.startsWith("tt")) return@filter false
+            val title = obj["l"]?.jsonPrimitive?.content ?: return@filter false
+            if (TitleParser.normalize(title) != qNorm) return@filter false
+            val q = obj["q"]?.jsonPrimitive?.content.orEmpty().lowercase()
+            val matchesKind = if (isTv) q.contains("tv series") || q.contains("mini-series") else !q.contains("tv series") && !q.contains("mini-series")
+            matchesKind
+        }
+        val byYear = year?.let { y -> candidates.firstOrNull { it["y"]?.jsonPrimitive?.content?.toIntOrNull() == y } }
+        (byYear ?: candidates.firstOrNull())?.get("id")?.jsonPrimitive?.content
+    }.getOrNull()
+
+    internal fun parseWikidataSearchEntityId(body: String, name: String): String? = runCatching {
+        val qNorm = TitleParser.normalize(name)
+        val arr = json.parseToJsonElement(body).jsonObject["search"]?.jsonArray ?: return null
+        arr.mapNotNull { it as? JsonObject }.firstOrNull { item ->
+            val label = item["label"]?.jsonPrimitive?.content
+            val match = item["match"]?.jsonObject?.get("text")?.jsonPrimitive?.content
+            val desc = item["description"]?.jsonPrimitive?.content.orEmpty().lowercase()
+            val nameOk = TitleParser.normalize(label.orEmpty()) == qNorm || TitleParser.normalize(match.orEmpty()) == qNorm
+            val mediaDesc = desc.isEmpty() || listOf("film", "movie", "documentary", "documentar", "series", "serial", "television", "televiziune", "miniseries", "short").any { it in desc }
+            nameOk && mediaDesc
+        }?.get("id")?.jsonPrimitive?.content
+    }.getOrNull()
+
+    internal fun parseWikidataClaims(body: String, qid: String, isTv: Boolean): Pair<Long?, String?> = runCatching {
+        val claims = json.parseToJsonElement(body).jsonObject["entities"]?.jsonObject
+            ?.get(qid)?.jsonObject?.get("claims")?.jsonObject ?: return null to null
+        fun firstClaimString(prop: String): String? = claims[prop]?.jsonArray?.firstOrNull()?.jsonObject
+            ?.get("mainsnak")?.jsonObject?.get("datavalue")?.jsonObject?.get("value")?.jsonPrimitive?.content
+        val tmdbProp = if (isTv) "P4947" else "P4983"
+        val tmdbId = firstClaimString(tmdbProp)?.toLongOrNull()
+        val imdbId = firstClaimString("P345")?.takeIf { it.startsWith("tt") }
+        tmdbId to imdbId
+    }.getOrNull() ?: (null to null)
 
     @Serializable
     private data class AlternativeName(val title: String = "")

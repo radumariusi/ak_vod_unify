@@ -115,6 +115,7 @@ class ScreenTextTest {
     @Test
     fun adScreenDetectsRealAdsAndIgnoresSeekbarMarkers() {
         assertTrue(ScreenText.isAdScreen(items("Ad 1 of 2", "0:15")))
+        assertTrue(ScreenText.isAdScreen(items("Ad 1 of 1. This ad will end in", "00:35")))
         assertTrue(ScreenText.isAdScreen(items("Your video will resume after the ad")))
         assertTrue(ScreenText.isAdScreen(items("Reclamă", "Skip ad")))
         assertFalse(
@@ -122,5 +123,11 @@ class ScreenTextTest {
                 items("The End of Oak Street", "ad_marker_1|{\"adStartTime\":0,\"adDuration\":50000}", "15:05"),
             ),
         )
+    }
+
+    @Test
+    fun ignoresChannelGuideAndDpadButtons() {
+        assertNull(ScreenText.guess(items("DPAD Top Button", "DPAD Left Button", "peacocktv"), "Peacock TV"))
+        assertEquals("Gunsmoke", ScreenText.guess(items("Channel Guide", "Live TV", "Gunsmoke"), "Pluto TV")!!.title)
     }
 }

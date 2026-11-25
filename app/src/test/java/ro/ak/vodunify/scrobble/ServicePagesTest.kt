@@ -93,4 +93,12 @@ class ServicePagesTest {
         assertEquals(7, t.episode)
         assertEquals("Orodruin", t.episodeTitle)
     }
+
+    @Test
+    fun arteConfigExtractsTitleAndSubtitle() {
+        val json = """{"data":{"id":"103438-001-A_en","attributes":{"metadata":{"title":"Love Has its Networks","subtitle":"Dino Dinner","duration":{"seconds":283}}}}}"""
+        val t = ServicePages.arteConfig(json)!!
+        assertEquals("Love Has its Networks", t.show)
+        assertEquals("Dino Dinner", t.episodeTitle)
+    }
 }

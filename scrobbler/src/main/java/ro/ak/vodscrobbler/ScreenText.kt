@@ -58,14 +58,19 @@ object ScreenText {
         "previous", "next", "anterior", "urmator", "volume", "mute", "cc", "hd", "4k", "uhd", "dolby vision",
         "dolby atmos", "hdr", "hdr10", "loading", "se incarca", "ok", "cancel", "anuleaza", "exit", "iesire",
         "netflix", "apple tv", "apple tv+", "prime video", "amazon prime video", "disney+", "disney", "max",
-        "hbo max", "skyshowtime", "peacock", "stremio", "player", "video", "video player", "seek bar",
-        "progress", "progres", "now playing", "se reda", "up next", "urmeaza", "watch now", "vizioneaza acum",
+        "hbo max", "skyshowtime", "peacock", "peacocktv", "tubi", "pluto tv", "plex", "xumo", "xumo play",
+        "fawesome", "voyo", "arte", "curiositystream", "curiosity stream", "magellantv", "magellan tv",
+        "player", "video", "video player", "video player view", "seek bar", "progress", "progres",
+        "now playing", "se reda", "up next", "urmeaza", "watch now", "vizioneaza acum",
+        "channel guide", "live tv", "on demand", "kids mode", "hide player controls", "show player controls",
+        "play queue", "add to watchlist", "press ok to select", "favorite channel",
+        "dpad top button", "dpad bottom button", "dpad left button", "dpad right button",
         "ad", "ads", "advertisement", "reclama", "publicitate", "sponsored", "sponsorizat", "commercial",
         "ad break", "reclame",
     )
 
     private val AD_TEXT = Regex(
-        """(?i)^(?:ad|ads|advertisement|reclam[aă]|publicitate|sponsored|sponsorizat|commercial|ad\s*break)(?:\s*(?:[·:\-]\s*\d.*|\d+\s*(?:of|din|/)\s*\d+))?$|\b(?:your video will resume|video will resume|content will resume|video-ul va continua|reclama se termin[aă]|ad ends in|skip\s+ad|sari peste reclam[aă]|during\s+ad\s+break)\b""",
+        """(?i)^(?:ad|ads|advertisement|reclam[aă]|publicitate|sponsored|sponsorizat|commercial|ad\s*break)(?:\s*[·:\-]\s*\d.*|\s+\d+\s*(?:of|din|/)\s*\d+\b.*)?$|\b(?:your video will resume|video will resume|content will resume|video-ul va continua|reclama se termin[aă]|(?:this\s+)?ad\s+(?:will\s+end|ends)\s+in|skip\s+ad|sari peste reclam[aă]|during\s+ad\s+break)\b""",
     )
 
     /** True dacă pe ecran rulează o reclamă (nu filmul / episodul principal). */

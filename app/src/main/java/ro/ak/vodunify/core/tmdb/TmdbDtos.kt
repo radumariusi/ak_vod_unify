@@ -245,3 +245,9 @@ data class TmdbStudioDetails(
     @SerialName("logo_path") val logoPath: String? = null,
     @SerialName("origin_country") val originCountry: String? = null,
 )
+
+@Serializable
+data class TmdbFindResult(
+    @SerialName("movie_results") val movieResults: List<TmdbListItem> = emptyList(),
+    @SerialName("tv_results") val tvResults: List<TmdbListItem> = emptyList(),
+)

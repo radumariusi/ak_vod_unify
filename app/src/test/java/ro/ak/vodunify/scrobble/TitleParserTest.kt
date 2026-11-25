@@ -130,4 +130,40 @@ class TitleParserTest {
         assertEquals(3, first.season)
         assertEquals(7, first.episode)
     }
+
+    @Test
+    fun tubiScreenShowCombinesWithEpisodeTitle() {
+        val g = TitleParser.guesses(
+            mapOf("title" to "S01:E01 - We Are Not in Kansas Anymore", "screen_title" to "The Airport"),
+            "Tubi",
+        )
+        assertEquals(TitleGuess.NumberedEpisode("The Airport", 1, 1, "We Are Not in Kansas Anymore"), g.first())
+    }
+
+    @Test
+    fun barePilotDoesNotGuessMovie() {
+        assertTrue(TitleParser.guesses(mapOf("title" to "Pilot"), "Peacock TV").none { it is TitleGuess.Movie })
+    }
+
+    @Test
+    fun documentaryColonTitleAddsEpisodeFallback() {
+        val g = TitleParser.guesses(mapOf("title" to "Ancient Engineering: Megaships"), "CuriosityStream")
+        assertEquals(TitleGuess.Movie("Ancient Engineering: Megaships", null), g.first())
+        assertTrue(g.contains(TitleGuess.NamedEpisode("Ancient Engineering", "Megaships")))
+    }
+
+    @Test
+    fun arteMinimumDurationAllowsShortDocumentaries() {
+        assertEquals(ScrobbleRules.MIN_DOCUMENTARY_DURATION_MS, ScrobbleRules.minDurationFor("tv.arte.plus7", mapOf("title" to "Dragoste la prima notificare")))
+        assertEquals(ScrobbleRules.MIN_DURATION_MS, ScrobbleRules.minDurationFor("com.peacocktv.peacockandroid", mapOf("title" to "DIG")))
+        assertEquals(ScrobbleRules.MIN_DURATION_MS, ScrobbleRules.minDurationFor("tv.arte.plus7", mapOf("title" to "Brâncuși Trailer")))
+    }
+
+    @Test
+    fun compatibleDurationRejectsEpisodeToFeatureMovieMismatch() {
+        assertTrue(MatchRules.compatibleDuration(95 * 60_000L, 90 * 60_000L))
+        assertTrue(!MatchRules.compatibleDuration(95 * 60_000L, 34 * 60_000L))
+        assertTrue(!MatchRules.compatibleDuration(95 * 60_000L, 4 * 60_000L))
+        assertTrue(MatchRules.compatibleDuration(null, 34 * 60_000L))
+    }
 }

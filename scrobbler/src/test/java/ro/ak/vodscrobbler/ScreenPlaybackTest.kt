@@ -47,4 +47,15 @@ class ScreenPlaybackTest {
         p.onScreen(null, times(200_000), 0, details = ScreenGuess("The Bear", "S3 E2"))
         assertEquals("The Bear", p.tracker.media?.fields?.get("title"))
     }
+
+    @Test
+    fun adBreakInScreenOnlyPlayerSavesProgressAndIgnoresAd() {
+        val p = ScreenPlayback("net.cme.voyo.ro.tvapp", "VOYO")
+        p.onScreen(ScreenGuess("Clanul", "S1:E2"), times(600_000), 0)
+        p.onScreen(ScreenGuess("Clanul", "S1:E2"), times(610_000), 10_000)
+        val preAd = p.tracker.onAdDetected(12_000)
+        assertEquals(SendReason.PAUSE, preAd.single().reason)
+        assertEquals(612_000L, preAd.single().positionMs)
+        assertTrue(p.onScreen(ScreenGuess("Ad", null), times(15_000, 30_000), 15_000).isEmpty())
+    }
 }

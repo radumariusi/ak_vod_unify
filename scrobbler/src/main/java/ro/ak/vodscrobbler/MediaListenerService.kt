@@ -295,7 +295,7 @@ class MediaListenerService : NotificationListenerService() {
         }
         if (s == PlayState.PAUSED && t.tracker.state == PlayState.PLAYING) {
             probeLogcat(t)
-            if (!hasTextTitle(t) && t.screenGuess == null) {
+            if (needsScreenShow(t) && t.screenGuess == null) {
                 ScreenState.requestSnapshot(t.tracker.packageName)
                 handler.postDelayed({ recheckScreenPause(t) }, 1_200L)
             }
@@ -313,16 +313,30 @@ class MediaListenerService : NotificationListenerService() {
     }
 
     private fun recheckScreenPause(t: Tracked) {
-        if (!tracked.values.contains(t) || t.tracker.state != PlayState.PAUSED || hasTextTitle(t) || t.screenGuess != null) return
+        if (!tracked.values.contains(t) || t.tracker.state != PlayState.PAUSED || !needsScreenShow(t) || t.screenGuess != null) return
         val snap = ScreenState.latest(t.tracker.packageName) ?: return
         val guess = snap.guess ?: return
+        val hadTitle = hasTextTitle(t)
         t.screenGuess = guess
         DiagLog.add("${t.tag}: titlu citit după pauză de pe ecran: ${guess.title} · ${guess.subtitle ?: "-"}")
-        dispatch(t.tracker.onMetadata(merged(t), SystemClock.elapsedRealtime()))
+        dispatch(t.tracker.onMetadata(merged(t), SystemClock.elapsedRealtime(), correction = hadTitle))
         publishLive()
     }
 
     private fun hasTextTitle(t: Tracked) = t.nativeInfo?.fields?.keys?.any { it in TEXT_TITLE_KEYS } == true
+
+    /** True când sesiunea nu are serialul separat (ex. Tubi pune doar „S01:E01 - …” în TITLE). */
+    private fun needsScreenShow(t: Tracked): Boolean {
+        val fields = t.nativeInfo?.fields ?: return true
+        val texts = fields.entries
+            .filter { (k, _) -> k in TEXT_TITLE_KEYS }
+            .map { (_, v) -> v.trim() }
+            .filter { it.isNotEmpty() }
+            .distinctBy { it.lowercase() }
+        if (texts.isEmpty()) return true
+        if (texts.size > 1) return false
+        return LEADING_EPISODE_RE.containsMatchIn(texts.first())
+    }
 
     private val loggedLogcat = LinkedHashSet<String>()
 
@@ -356,14 +370,14 @@ class MediaListenerService : NotificationListenerService() {
      * înainte (cea cu butonul „Redă”), sau de pe ecranul playerului dacă l-am citit deja.
      */
     private fun onPlaybackStarted(t: Tracked, now: Long) {
-        if (hasTextTitle(t) || t.screenGuess != null) return
+        if (!needsScreenShow(t) || t.screenGuess != null) return
         val pkg = t.tracker.packageName
         val latest = ScreenState.latest(pkg)?.takeIf { it.guess != null && now - it.at < 15_000 && (!it.times.isEmpty || it.guess.subtitle != null) }
         val details = ScreenState.lastDetails(pkg)?.takeIf { now - it.at < DETAILS_MAX_AGE_MS }
         val pick = latest ?: details ?: return
         t.screenGuess = pick.guess
         DiagLog.add("${t.tag}: titlu luat de pe ${if (pick === latest) "ecranul playerului" else "pagina titlului"}: ${pick.guess?.title} · ${pick.guess?.subtitle ?: "-"}")
-        dispatch(t.tracker.onMetadata(merged(t), now))
+        dispatch(t.tracker.onMetadata(merged(t), now, correction = hasTextTitle(t)))
     }
 
     /** Ce s-a citit de pe ecran: titlul și minutul, pentru sesiunile aplicației respective. */
@@ -389,14 +403,16 @@ class MediaListenerService : NotificationListenerService() {
         }
         for (t in active) {
             val guess = snap.guess
-            if (guess != null && !hasTextTitle(t) && guess != t.screenGuess) {
+            if (guess != null && needsScreenShow(t) && guess != t.screenGuess) {
                 val previous = t.screenGuess
+                val hadNativeTitle = hasTextTitle(t)
                 val oldCode = ScreenPlayback.episodeCode(previous?.subtitle)
                 val newCode = ScreenPlayback.episodeCode(guess.subtitle)
                 if (oldCode == null || oldCode != newCode) t.screenTimeResolver.reset()
                 t.screenGuess = guess
                 DiagLog.add("${t.tag}: titlu de pe ecran: ${guess.title} · ${guess.subtitle ?: "-"}")
-                dispatch(t.tracker.onMetadata(merged(t), now, correction = previous != null && (oldCode == null || oldCode == newCode)))
+                val isCorrection = (previous != null || hadNativeTitle) && (oldCode == null || oldCode == newCode)
+                dispatch(t.tracker.onMetadata(merged(t), now, correction = isCorrection))
             }
             if (!snap.times.isEmpty) {
                 val nativeDuration = t.nativeInfo?.durationMs
@@ -408,12 +424,19 @@ class MediaListenerService : NotificationListenerService() {
         publishLive()
     }
 
-    /** Redări fără sesiune media (Nuvio, DebridStream…), urmărite doar de pe ecran. */
+    /** Redări fără sesiune media (Nuvio, DebridStream, Voyo, CuriosityStream…), urmărite doar de pe ecran. */
     private val screenOnly = HashMap<String, ScreenPlayback>()
 
     private fun onScreenOnly(snap: ScreenSnapshot, now: Long) {
         val pkg = snap.packageName
         var p = screenOnly[pkg]
+        if (snap.isAd) {
+            if (p != null) {
+                dispatch(p.tracker.onAdDetected(now))
+                publishLive()
+            }
+            return
+        }
         if (p == null) {
             if (!ScreenState.KNOWN_VIDEO_PREFIXES.any { pkg.startsWith(it) } || !ScreenPlayback.looksLikePlayer(snap.times)) return
             p = ScreenPlayback(pkg, appLabel(pkg))
@@ -435,7 +458,7 @@ class MediaListenerService : NotificationListenerService() {
         val before = p.guess
         dispatch(p.onScreen(snap.guess, snap.times, now, details))
         if (p.guess != before) DiagLog.add("${p.appLabel}#ecran: titlu de pe ecran: ${p.guess?.title} · ${p.guess?.subtitle ?: "-"}")
-        updateTicker()
+        publishLive()
     }
 
     private fun tickScreenOnly(now: Long) {
@@ -458,13 +481,18 @@ class MediaListenerService : NotificationListenerService() {
     private fun merged(t: Tracked): MediaInfo? {
         val native = t.nativeInfo
         val nativeHasText = native?.fields?.keys?.any { it in TEXT_TITLE_KEYS } == true
-        if (nativeHasText && t.extraFields.isEmpty()) return native
+        val g = t.screenGuess
         val fields = LinkedHashMap(native?.fields.orEmpty())
         fields.putAll(t.extraFields)
-        if (nativeHasText) return MediaInfo(fields, native?.durationMs)
+        if (nativeHasText) {
+            if (g != null && needsScreenShow(t) && fields.values.none { it.equals(g.title, ignoreCase = true) }) {
+                fields["screen_title"] = g.title
+                fields["title_source"] = "screen"
+            }
+            return if (t.extraFields.isEmpty() && fields == native?.fields) native else MediaInfo(fields, native?.durationMs)
+        }
         val n = mediaNotifications[t.tracker.packageName]
         val notifTitle = n?.title?.takeIf { !it.equals(t.tracker.appLabel, ignoreCase = true) }
-        val g = t.screenGuess
         when {
             notifTitle != null -> {
                 fields["title"] = notifTitle
@@ -545,7 +573,7 @@ class MediaListenerService : NotificationListenerService() {
         ScreenState.skipScreenForPackages = tracked.values
             .filter { t ->
                 val active = t.tracker.state == PlayState.PLAYING || t.tracker.state == PlayState.PAUSED || t.tracker.state == PlayState.BUFFERING
-                active && hasTextTitle(t) && t.tracker.hasSessionPosition &&
+                active && !needsScreenShow(t) && t.tracker.hasSessionPosition &&
                     ScreenState.KNOWN_VIDEO_PREFIXES.none { t.tracker.packageName.startsWith(it) }
             }
             .map { it.tracker.packageName }
@@ -558,6 +586,15 @@ class MediaListenerService : NotificationListenerService() {
                 positionMs = t.tracker.position(now),
                 media = t.tracker.media,
                 playedMs = t.tracker.playedTime(now),
+            )
+        } + screenOnly.values.map { p ->
+            LiveSession(
+                packageName = p.packageName,
+                appLabel = p.appLabel,
+                state = p.tracker.state,
+                positionMs = p.tracker.position(now),
+                media = p.tracker.media,
+                playedMs = p.tracker.playedTime(now),
             )
         }
     }
@@ -587,6 +624,9 @@ class MediaListenerService : NotificationListenerService() {
 
         /** Câmpurile care conțin cu adevărat un titlu (nu doar coduri). */
         private val TEXT_TITLE_KEYS = setOf("title", "display_title", "display_subtitle", "artist", "album", "album_artist")
+        private val LEADING_EPISODE_RE = Regex(
+            """(?i)^(?:[ST]\d{1,2}\s*[:.,\-·•|/]?\s*(?:E|Ep\.?\s?)\d{1,3}|(?:episode|episodul|episod|ep\.?)\s*\d{1,3}|pilot)\b""",
+        )
         private const val PREFIX = "android.media.metadata."
 
         /** Toate câmpurile text din metadate (fără imagini), cu nume scurte: "title", "artist"… */
