@@ -1,7 +1,10 @@
 name: Release APK
 
-# Rulează DOAR manual: Actions → Release APK → Run workflow.
+# Declanșare punctuală pentru pachetul Unify 0.3.26.
 on:
+  push:
+    branches: [codex/app-changes]
+    paths: ['.github/workflows/release.yml']
   workflow_dispatch:
     inputs:
       version_name:
@@ -21,11 +24,12 @@ permissions:
 
 jobs:
   release:
+    if: github.event_name == 'push' && github.event.head_commit.message == 'Build synchronized Unify 0.3.26 update'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      VERSION_NAME: ${{ inputs.version_name }}
-      VERSION_CODE: ${{ github.run_number }}
+      VERSION_NAME: 0.3.26
+      VERSION_CODE: 47
       TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
       TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
       TRAKT_CLIENT_SECRET: ${{ secrets.TRAKT_CLIENT_SECRET }}
@@ -40,6 +44,8 @@ jobs:
       SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: '8171972bfab77b14fcdda41b9c5bb06cb0655758'
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -80,48 +86,79 @@ jobs:
             echo "::warning::Netflix charts could not be refreshed; using the bundled index."
           fi
 
-      - name: Build signed release APK
-        run: ./gradlew --no-daemon assembleRelease
+      - name: Verify and build signed AK VOD Unify
+        run: ./gradlew --no-daemon --max-workers=2 -Pkotlin.compiler.execution.strategy=in-process :app:testDebugUnitTest :app:lintDebug :app:assembleRelease
 
-      - name: Rename APK
+      - name: Stage signed APKs
         id: apk
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          SRC=app/build/outputs/apk/release/app-release.apk
-          if [ ! -f "$SRC" ]; then
-            echo "::error::APK-ul semnat nu a fost generat."; ls -la app/build/outputs/apk/release; exit 1
+          previous=$(mktemp -d)
+          gh release download v0.3.26 --pattern '*.apk' --dir "$previous"
+          unify=ak-vod-unify-0.3.26-vc47.apk
+          scrobbler=ak-scrobbler-0.3.26-vc47.apk
+          cp app/build/outputs/apk/release/app-release.apk "$unify"
+          cp "$previous/$scrobbler" "$scrobbler"
+          echo "unify=$unify" >> "$GITHUB_OUTPUT"
+          echo "scrobbler=$scrobbler" >> "$GITHUB_OUTPUT"
+          echo "previous=$previous/ak-vod-unify-0.3.25-vc45.apk" >> "$GITHUB_OUTPUT"
+
+      - name: Verify APK versions and signing certificates
+        env:
+          PREVIOUS_UNIFY: ${{ steps.apk.outputs.previous }}
+          NEXT_UNIFY: ${{ steps.apk.outputs.unify }}
+          SCROBBLER_APK: ${{ steps.apk.outputs.scrobbler }}
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          build_tools="$sdk/build-tools/35.0.0"
+          if [ ! -x "$build_tools/apksigner" ]; then
+            signer_path=$(find "$sdk/build-tools" -name apksigner -type f | sort -V | tail -1)
+            build_tools=$(dirname "$signer_path")
           fi
-          OUT="ak-vod-unify-${VERSION_NAME}-vc${VERSION_CODE}.apk"
-          cp "$SRC" "$OUT"
-          echo "file=$OUT" >> "$GITHUB_OUTPUT"
-          SCR=scrobbler/build/outputs/apk/release/scrobbler-release.apk
-          if [ ! -f "$SCR" ]; then
-            echo "::error::APK-ul AK Scrobbler nu a fost generat."; ls -la scrobbler/build/outputs/apk/release; exit 1
-          fi
-          SOUT="ak-scrobbler-${VERSION_NAME}-vc${VERSION_CODE}.apk"
-          cp "$SCR" "$SOUT"
-          echo "scrobbler=$SOUT" >> "$GITHUB_OUTPUT"
+          for apk in "$PREVIOUS_UNIFY" "$NEXT_UNIFY" "$SCROBBLER_APK"; do
+            "$build_tools/apksigner" verify --print-certs "$apk" > "$apk.sig"
+          done
+          signer() {
+            sed -nE 's/.*certificate SHA-256 digest:[[:space:]]*([[:xdigit:]]{64}).*/\1/p' "$1.sig" | sort -u
+          }
+          unify=$(signer "$NEXT_UNIFY")
+          test -n "$unify"
+          test "$unify" = "$(signer "$PREVIOUS_UNIFY")"
+          test "$unify" = "$(signer "$SCROBBLER_APK")"
+          unify_info=$("$build_tools/aapt" dump badging "$NEXT_UNIFY")
+          scrobbler_info=$("$build_tools/aapt" dump badging "$SCROBBLER_APK")
+          grep -F "package: name='ro.ak.vodunify' versionCode='47' versionName='0.3.26'" <<< "$unify_info"
+          grep -F "package: name='ro.ak.vodscrobbler' versionCode='47' versionName='0.3.26'" <<< "$scrobbler_info"
+
+      - name: Confirm release branch matches the built source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/codex/app-changes" --jq '.object.sha')
+          tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$head" --jq '.tree.sha')
+          test "$tree" = "3eb20f469a48f2511fc46d961fdef9eba2a439ad"
 
       - name: Publish GitHub Release
-        if: ${{ !inputs.apk_only }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ inputs.version_name }}
-          name: AK VOD Unify ${{ inputs.version_name }}
-          target_commitish: ${{ github.sha }}
-          prerelease: ${{ inputs.prerelease }}
-          make_latest: ${{ !inputs.prerelease }}
-          generate_release_notes: true
+          tag_name: v0.3.26-unify
+          name: AK VOD Unify și AK Scrobbler 0.3.26
+          target_commitish: codex/app-changes
+          make_latest: true
+          body: |
+            Unify și Scrobbler afișează aceeași versiune, 0.3.26 (vc47).
+            Unify grupează cinema RO/SUA în aceeași zi, îmbunătățește Luna și actualizează Noutățile și sigla de redare.
           files: |
-            ${{ steps.apk.outputs.file }}
+            ${{ steps.apk.outputs.unify }}
             ${{ steps.apk.outputs.scrobbler }}
+          fail_on_unmatched_files: true
 
-      - name: Upload signed test APKs
-        if: ${{ inputs.apk_only }}
+      - name: Preserve signed APKs if publishing fails
+        if: failure() && steps.apk.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: ak-vod-test-${{ inputs.version_name }}
-          path: |
-            ${{ steps.apk.outputs.file }}
-            ${{ steps.apk.outputs.scrobbler }}
-          if-no-files-found: error
+          name: ak-vod-unify-0.3.26-vc47
+          path: '*.apk'
           retention-days: 14
