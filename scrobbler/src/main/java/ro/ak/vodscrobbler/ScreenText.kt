@@ -40,8 +40,8 @@ object ScreenText {
     private val TIME = Regex("""^[-−]?\d{1,2}:\d{2}(:\d{2})?(\s*/\s*[-−]?\d{1,2}:\d{2}(:\d{2})?)?$""")
     private val REMAINING = Regex("""(?i)^(\d+\s*(h|ore|oră|min|m|s)\b\s*)+(rămase|remaining|left)?$""")
     private val EPISODE = Regex(
-        """(?i)((?<![\p{L}\d])[ST]\d{1,2}\s*[:.,\-]?\s*(E|Ep\.?\s?)\d{1,3}(?!\d))|""" +
-            """((season|sezonul|sezon)\s*\d{1,2})|((episode|episodul|episod|ep\.)\s*\d{1,3})|((?<![\p{L}\d])E\d{1,3}(?!\d))""",
+        """(?i)((?<![\p{L}\d])[ST]\d{1,2}\s*[:.,\-·•|/]?\s*(?:E|Ep\.?\s?)\d{1,3}(?!\d))|""" +
+            """((?:season|sezonul|sezon|sez\.?)\s*\d{1,2})|((?:episode|episodul|episod|ep\.?)\s*\d{1,3})|((?<![\p{L}\d])E\d{1,3}(?!\d))""",
     )
 
     /** Butoane și etichete de player (EN / RO), normalizate. */

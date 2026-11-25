@@ -354,7 +354,11 @@ class TrackingRepository @Inject constructor(
                 if (media.type != MediaType.EPISODE) dao.upsertWatched(listOf(TrackingEntities.watched(event)))
             } else if (media.type == MediaType.EPISODE) {
                 val previouslyWatched = dao.deleteItemHistory(media.titleKey, media.season, media.episode, protectedSources) > 0
-                if (previouslyWatched) rememberStartedShow(media.asShow(), now)
+                if (previouslyWatched) {
+                    val remaining = dao.historyFor(media.titleKey).first().visible { it.source }
+                    if (remaining.isNotEmpty()) rememberStartedShow(media.asShow(), now)
+                    else dao.removeWatchedFromVisibleSources(media.titleKey, protectedSources)
+                }
             } else {
                 dao.deleteTitleHistory(media.titleKey, protectedSources)
                 dao.removeWatchedFromVisibleSources(media.titleKey, protectedSources)
@@ -391,8 +395,12 @@ class TrackingRepository @Inject constructor(
                     TrackingEntities.history(event).copy(appPackage = resume?.appPackage, playbackAt = resume?.updatedAt)
                 },
             )
-            if (wholeShow) dao.deleteResumeFor(show.titleKey)
-            else keys.chunked(500).forEach { batch -> dao.deleteResumeItems(batch.map { "$LOCAL_SOURCE|$it" }) }
+            if (wholeShow) {
+                dao.deleteResumeFor(show.titleKey)
+                dao.removeWatchedFromVisibleSources(show.titleKey, protectedSources)
+            } else {
+                keys.chunked(500).forEach { batch -> dao.deleteResumeItems(batch.map { "$LOCAL_SOURCE|$it" }) }
+            }
         }
         hidden.show(show.titleKey)
     }
@@ -409,7 +417,11 @@ class TrackingRepository @Inject constructor(
         } else {
             val removed = dao.deleteSeasonHistory(show.titleKey, seasons, protectedSources)
             dao.deleteSeasonResumes(show.titleKey, seasons)
-            if (removed > 0) rememberStartedShow(show, now)
+            if (removed > 0) {
+                val remaining = dao.historyFor(show.titleKey).first().visible { it.source }
+                if (remaining.isNotEmpty()) rememberStartedShow(show, now)
+                else dao.removeWatchedFromVisibleSources(show.titleKey, protectedSources)
+            }
             removed
         }
     }

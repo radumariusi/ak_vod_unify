@@ -56,6 +56,12 @@ class SeriesMarker @Inject constructor(
     }
 
     companion object {
+        /** Numărul total de episoade pe fiecare sezon normal (fără „Speciale”). */
+        fun totalCounts(details: TitleDetails): Map<Int, Int> =
+            details.seasons.asSequence()
+                .filter { it.number > 0 && it.episodeCount > 0 }
+                .associate { it.number to it.episodeCount }
+
         /** TMDb include și episoadele viitoare în totalul sezonului. */
         fun airedCounts(details: TitleDetails): Map<Int, Int> = airedCounts(details.seasons, details.lastAiredEpisode)
 

@@ -118,4 +118,16 @@ class TitleParserTest {
         val uk = MatchRules.Candidate(2996, listOf("The Office"), 2001, listOf("GB"))
         assertEquals(2316L, MatchRules.pickExact("The Office", listOf(uk, us), country = "US")!!.id)
     }
+
+    @Test
+    fun primeDotSeparatedSeasonEpisode() {
+        val g = TitleParser.guesses(
+            mapOf("title" to "The Lord of the Rings: The Rings of Power", "display_subtitle" to "S3 · E7 · Orodruin"),
+            "Prime Video",
+        )
+        val first = g.first() as TitleGuess.NumberedEpisode
+        assertEquals("The Lord of the Rings: The Rings of Power", first.show)
+        assertEquals(3, first.season)
+        assertEquals(7, first.episode)
+    }
 }

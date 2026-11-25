@@ -251,9 +251,10 @@ class StatusActivity : Activity() {
         }
         adb.showText(
             listenerHelp + screenHelp + logcatHelp +
-                "Pe televizoarele care închid aplicațiile (ex. TCL), tot prin ADB, o singură dată:\n" +
+                "Pe televizoarele care închid aplicațiile (ex. TCL / Safety Guard), prin ADB (o singură dată):\n" +
                 "• bulina: ${Access.adbOverlayCommand(this)}\n" +
-                "• fără economie de baterie: ${Access.adbBatteryCommand(this)}",
+                "• fără economie de baterie: ${Access.adbBatteryCommand(this)}\n" +
+                Access.adbKeepAliveCommands(this).joinToString("\n") { "• $it" },
         )
 
         val sessions = ScrobblerState.live

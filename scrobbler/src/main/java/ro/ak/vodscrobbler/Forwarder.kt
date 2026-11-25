@@ -109,6 +109,11 @@ class Forwarder private constructor(private val context: Context) {
             .mapNotNull { k -> fields?.optString(k)?.takeIf { it.isNotBlank() } }
             .distinct()
             .joinToString(" · ")
+            .ifBlank {
+                listOf("prime_gti", "netflix_id", "media_id")
+                    .mapNotNull { k -> fields?.optString(k)?.takeIf { it.isNotBlank() }?.let { "$k:$it" } }
+                    .joinToString(" · ")
+            }
         val entry = JSONObject().apply {
             put("at", payload.optLong("at"))
             put("app", payload.optString("app"))

@@ -30,11 +30,11 @@ object TitleParser {
     )
 
     private val SEASON_EPISODE = listOf(
-        // S1:E3, S01E03, S1 E3, T1:E3, S1 Ep. 3
-        Regex("""(?i)(?<![\p{L}\d])[ST](\d{1,2})\s*[:.,\-]?\s*(?:E|Ep\.?\s?)(\d{1,3})(?!\d)"""),
-        // Season 1 Episode 3, Sezonul 1 Episodul 3, Staffel 1 Folge 3 …
+        // S1:E3, S01E03, S1 E3, S3 · E7, T1:E3, S1 Ep. 3
+        Regex("""(?i)(?<![\p{L}\d])[ST](\d{1,2})\s*[:.,\-·•|/]?\s*(?:E|Ep\.?\s?)(\d{1,3})(?!\d)"""),
+        // Season 1 Episode 3, Sezonul 1 Episodul 3, Sez. 3 Ep. 7, Staffel 1 Folge 3 …
         Regex(
-            """(?i)(?:season|sezonul|sezon|staffel|temporada|saison|stagione|seizoen)\s*(\d{1,2})\D{0,20}?""" +
+            """(?i)(?:season|sezonul|sezon|sez\.?|staffel|temporada|saison|stagione|seizoen)\s*(\d{1,2})\D{0,20}?""" +
                 """(?:episode|episodul|episod|ep\.?|folge|episodio|épisode|aflevering)\s*(\d{1,3})""",
         ),
         // 1x03
@@ -78,12 +78,14 @@ object TitleParser {
         }
         if (out.isNotEmpty()) return out.distinct()
 
-        // 3) Fără numere: serial + nume de episod (în ambele ordini), apoi film.
+        // 3) Fără numere: serial + nume de episod (în ambele ordini), apoi film (dacă nu avem indiciu de sezon).
         val firstThree = texts.take(3)
         for (a in firstThree) for (b in firstThree) {
             if (a != b) out += TitleGuess.NamedEpisode(show = stripYear(b), episodeTitle = stripYear(a))
         }
-        texts.take(2).forEach { t -> out += TitleGuess.Movie(stripYear(t), year(t)) }
+        if ("season_hint" !in fields) {
+            texts.take(2).forEach { t -> out += TitleGuess.Movie(stripYear(t), year(t)) }
+        }
         return out.distinct()
     }
 
@@ -124,7 +126,7 @@ object TitleParser {
     /** Titluri doar din cifre: „1917”, „1883”, „12 12 12”. */
     private val NUMERIC_TITLE = Regex("""^(\d{3,4}|\d{1,4}([ .\-]\d{1,4})+)$""")
 
-    private val IGNORED_KEYS = setOf("title_source", "netflix_id", "media_id", "media_uri", "genre", "date", "duration", "year", "track_number", "disc_number", "num_tracks", "rating", "user_rating",
+    private val IGNORED_KEYS = setOf("title_source", "season_hint", "netflix_id", "media_id", "media_uri", "genre", "date", "duration", "year", "track_number", "disc_number", "num_tracks", "rating", "user_rating",
         NetflixActivity.NF_SERIES, NetflixActivity.NF_EPISODE, NetflixActivity.NF_SEASON, NetflixActivity.NF_EPISODE_NUMBER)
 
     private fun isNoise(s: String) = normalize(s) in NOISE_NORMALIZED

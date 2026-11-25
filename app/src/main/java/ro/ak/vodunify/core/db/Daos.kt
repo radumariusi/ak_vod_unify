@@ -40,6 +40,12 @@ interface TrackingDao {
     @Query("UPDATE resume_points SET appPackage = :pkg WHERE id = :id AND updatedAt = :at AND positionMs = :positionMs AND (appPackage IS NULL OR TRIM(appPackage) = '')")
     suspend fun restoreResumePackage(id: String, at: Long, positionMs: Long, pkg: String): Int
 
+    @Query("UPDATE resume_points SET appPackage = :pkg WHERE id = :id AND (appPackage IS NULL OR TRIM(appPackage) = '')")
+    suspend fun restoreResumePackageAny(id: String, pkg: String): Int
+
+    @Query("SELECT appPackage FROM watch_events WHERE mediaKey = :mediaKey AND appPackage IS NOT NULL AND TRIM(appPackage) != '' ORDER BY COALESCE(playbackAt, watchedAt) DESC LIMIT 1")
+    suspend fun latestAppForMedia(mediaKey: String): String?
+
     @Transaction
     suspend fun upsertResumeIfNewer(item: ResumePointEntity): Boolean {
         val current = resumeById(item.id)
@@ -173,7 +179,7 @@ interface TrackingDao {
 
     @Query(
         "SELECT mediaKey, source, appPackage, MAX(COALESCE(playbackAt, watchedAt)) AS at FROM watch_events " +
-            "WHERE (source = :local AND appPackage IS NOT NULL AND playbackAt IS NOT NULL) OR source IN (:imports) " +
+            "WHERE (source = :local AND appPackage IS NOT NULL AND TRIM(appPackage) != '') OR source IN (:imports) " +
             "GROUP BY mediaKey",
     )
     fun latestPlaybackApps(local: String, imports: List<String>): Flow<List<TitlePlaybackApp>>

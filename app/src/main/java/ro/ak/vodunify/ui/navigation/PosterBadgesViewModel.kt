@@ -50,8 +50,8 @@ class PosterBadgesViewModel @Inject constructor(
                     ?.appPackage ?: finished?.appPackage
                 val status = entry?.currentStatus
                 val stage = when {
-                    status == LibraryStatus.IN_PROGRESS || status == LibraryStatus.UP_NEXT || summary != null -> PosterStage.IN_PROGRESS
                     status == LibraryStatus.WATCHED -> PosterStage.WATCHED
+                    status == LibraryStatus.IN_PROGRESS || status == LibraryStatus.UP_NEXT || (summary != null && summary.watched > 0) -> PosterStage.IN_PROGRESS
                     else -> PosterStage.UNWATCHED
                 }
                 if (stage != PosterStage.UNWATCHED) {

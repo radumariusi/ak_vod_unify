@@ -61,6 +61,7 @@ import ro.ak.vodunify.core.calendar.time.RomaniaTime
 import ro.ak.vodunify.core.prefs.UiPrefs
 import ro.ak.vodunify.ui.components.FixedRowsScroll
 import ro.ak.vodunify.ui.components.CinemaBadges
+import ro.ak.vodunify.ui.components.ViewingStatusBadge
 import ro.ak.vodunify.ui.components.layoutSpec
 import ro.ak.vodunify.ui.components.returningFocus
 import ro.ak.vodunify.ui.theme.Accent
@@ -356,6 +357,13 @@ private fun MonthDayCell(
                                     Text(item.title, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 } else {
                                     AsyncImage(item.posterUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                }
+                                if ((item.watched || item.inProgress) && posterWidth > 12.dp) {
+                                    ViewingStatusBadge(
+                                        watched = item.watched,
+                                        modifier = Modifier.align(Alignment.TopEnd).padding(1.5.dp),
+                                        size = if (posterWidth < 34.dp) 10.dp else 13.dp,
+                                    )
                                 }
                                 if (item.cinemaRegions.size > 1 && posterWidth > 4.dp) {
                                     CinemaBadges(

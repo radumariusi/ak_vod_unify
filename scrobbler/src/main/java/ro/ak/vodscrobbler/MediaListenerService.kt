@@ -251,6 +251,7 @@ class MediaListenerService : NotificationListenerService() {
             }
             entry = Tracked(controller, tracker, callback, tag)
             entry.nativeInfo = controller.metadata?.toInfo()
+            extractGtiFromBundle(controller.extras, entry.extraFields)
             controller.registerCallback(callback, handler)
             tracked[key] = entry
             ScreenState.rememberMediaApp(this, controller.packageName)
@@ -288,11 +289,28 @@ class MediaListenerService : NotificationListenerService() {
         if (s == PlayState.PLAYING && !t.everPlayed) {
             t.everPlayed = true
             onPlaybackStarted(t, now)
-            // Jurnalul sistemului: după câteva secunde, când aplicația a scris deja ce a pornit.
+            // Jurnalul sistemului: verificăm rapid și din nou după câteva secunde (logcat se rotește repede pe TV).
+            handler.postDelayed({ probeLogcat(t) }, 2_500L)
             handler.postDelayed({ probeLogcat(t) }, LOGCAT_DELAY_MS)
         }
-        if (s == PlayState.PAUSED && t.tracker.state == PlayState.PLAYING) probeLogcat(t)
+        if (s == PlayState.PAUSED && t.tracker.state == PlayState.PLAYING) {
+            probeLogcat(t)
+            if (!hasTextTitle(t) && t.screenGuess == null) {
+                handler.postDelayed({ recheckScreenPause(t) }, 1_000L)
+            }
+        }
+        extractGtiFromBundle(state?.extras, t.extraFields)
         dispatch(t.tracker.onPlaybackState(s, position, state?.lastPositionUpdateTime ?: 0L, state?.playbackSpeed ?: 1f, now))
+    }
+
+    private fun recheckScreenPause(t: Tracked) {
+        if (!tracked.values.contains(t) || t.tracker.state != PlayState.PAUSED || hasTextTitle(t) || t.screenGuess != null) return
+        val snap = ScreenState.latest(t.tracker.packageName) ?: return
+        val guess = snap.guess ?: return
+        t.screenGuess = guess
+        DiagLog.add("${t.tag}: titlu citit după pauză de pe ecran: ${guess.title} · ${guess.subtitle ?: "-"}")
+        dispatch(t.tracker.onMetadata(merged(t), SystemClock.elapsedRealtime()))
+        publishLive()
     }
 
     private fun hasTextTitle(t: Tracked) = t.nativeInfo?.fields?.keys?.any { it in TEXT_TITLE_KEYS } == true
@@ -561,8 +579,30 @@ class MediaListenerService : NotificationListenerService() {
                 val text = getText(key)?.toString()?.trim()
                 if (!text.isNullOrEmpty()) fields[short] = text
             }
+            description?.let { d ->
+                d.mediaId?.trim()?.takeIf { it.isNotEmpty() }?.let { fields.putIfAbsent("media_id", it) }
+                d.title?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { fields.putIfAbsent("title", it) }
+                d.subtitle?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { fields.putIfAbsent("display_subtitle", it) }
+                d.description?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { fields.putIfAbsent("display_description", it) }
+            }
             val duration = getLong(MediaMetadata.METADATA_KEY_DURATION).takeIf { it > 0 }
             return MediaInfo(fields, duration)
+        }
+
+        private val PRIME_GTI_RE = Regex("""amzn1\.dv\.gti\.[0-9a-fA-F-]{20,}""")
+
+        @Suppress("DEPRECATION")
+        fun extractGtiFromBundle(extras: Bundle?, out: MutableMap<String, String>) {
+            if (extras == null || extras.isEmpty || "prime_gti" in out) return
+            runCatching {
+                for (k in extras.keySet()) {
+                    val v = extras.get(k)?.toString() ?: continue
+                    PRIME_GTI_RE.find(v)?.value?.let {
+                        out["prime_gti"] = it
+                        return
+                    }
+                }
+            }
         }
 
         private val LONG_KEYS = setOf("duration", "year", "track_number", "disc_number", "num_tracks", "bt_folder_type", "media_type")

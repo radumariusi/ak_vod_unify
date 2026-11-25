@@ -208,7 +208,7 @@ class CatalogRepository @Inject constructor(
             backdropUrl = TmdbImages.backdrop(dto.backdropPath),
             rating = dto.voteAverage?.takeIf { it > 0 },
             genreIds = dto.genres.map { it.id },
-            episodeCount = if (isMovie) null else airedEpisodeCount(dto),
+            episodeCount = if (isMovie) null else totalEpisodeCount(dto),
             origin = TmdbMappers.origin(dto, kind),
         )
     }
@@ -633,6 +633,12 @@ class CatalogRepository @Inject constructor(
 
     suspend fun clearCache() = tmdb.clearCache()
 
+}
+
+/** Numărul total de episoade ale serialului (fără „Speciale”), inclusiv episoadele anunțate din sezoanele existente. */
+internal fun totalEpisodeCount(details: TmdbTitleDetails): Int? {
+    val regular = details.seasons.filter { it.seasonNumber > 0 && it.episodeCount > 0 }.sumOf { it.episodeCount }
+    return if (regular > 0) regular else details.numberOfEpisodes
 }
 
 /** TMDb include sezoane anunțate și episoade care încă nu au apărut. */

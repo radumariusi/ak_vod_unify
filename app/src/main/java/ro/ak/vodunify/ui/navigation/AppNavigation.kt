@@ -149,8 +149,11 @@ fun AppNavigation() {
     var exitPrompt by remember { mutableStateOf(false) }
     val onHome = current == TopDestination.HOME.route
     val onCalendar = current == TopDestination.CALENDAR.route
+    val onDetails = current == Routes.TITLE
     val calendarBackdropState = remember { mutableStateOf<String?>(null) }
     val showCalendarBackdrop: (String?) -> Unit = remember { { calendarBackdropState.value = it } }
+    val detailsBackdropState = remember { mutableStateOf<String?>(null) }
+    val showDetailsBackdrop: (String?) -> Unit = remember { { detailsBackdropState.value = it } }
     SideEffect { restore.show(backStack?.id) }
     ExpireFocusRestore(restore)
 
@@ -204,7 +207,7 @@ fun AppNavigation() {
     ) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             // Fundalul panoramic al titlului focalizat e citit separat, fără a recompune bara de sus / NavHost.
-            ScreenBackdrop(onHome, onCalendar, backdrop, calendarBackdropState, Modifier.matchParentSize())
+            ScreenBackdrop(onHome, onCalendar, onDetails, backdrop, calendarBackdropState, detailsBackdropState, Modifier.matchParentSize())
             Column(Modifier.fillMaxSize()) {
                 TopBar(
                     current = current,
@@ -227,7 +230,7 @@ fun AppNavigation() {
                             navArgument("kind") { type = NavType.StringType },
                             navArgument("id") { type = NavType.LongType },
                         ),
-                    ) { DetailsScreen() }
+                    ) { DetailsScreen(onBackdropChange = showDetailsBackdrop) }
                     composable(
                         Routes.PERSON,
                         arguments = listOf(navArgument("id") { type = NavType.LongType }),
@@ -389,12 +392,15 @@ private fun NavTab(
 private fun ScreenBackdrop(
     onHome: Boolean,
     onCalendar: Boolean,
+    onDetails: Boolean,
     backdrop: BackdropState,
     calendarBackdrop: State<String?>,
+    detailsBackdrop: State<String?>,
     modifier: Modifier = Modifier,
 ) {
     if (onHome) TitleBackdrop(backdrop.url, modifier)
     if (onCalendar) calendarBackdrop.value?.let { TitleBackdrop(it, modifier) }
+    if (onDetails) detailsBackdrop.value?.let { TitleBackdrop(it, modifier, opacity = 0.9f, settleMillis = 0) }
 }
 
 /** Navigation păstrează intrările reale ale fiecărei file, cu ViewModel și starea Compose. */

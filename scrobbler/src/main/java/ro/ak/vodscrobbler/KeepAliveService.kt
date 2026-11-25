@@ -86,6 +86,21 @@ class KeepAliveService : Service() {
         super.onDestroy()
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Dacă sistemul sau TV-ul închide sarcina din fundal, reprogramăm repornirea serviciului permanent.
+        val restart = PendingIntent.getForegroundService(
+            applicationContext,
+            101,
+            Intent(applicationContext, KeepAliveService::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_ONE_SHOT,
+        )
+        runCatching {
+            val am = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+            am.set(android.app.AlarmManager.ELAPSED_REALTIME, android.os.SystemClock.elapsedRealtime() + 2_000L, restart)
+        }
+        super.onTaskRemoved(rootIntent)
+    }
+
     private fun notification(): Notification {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.createNotificationChannel(

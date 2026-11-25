@@ -281,27 +281,28 @@ fun PosterViewingStatus(
 
 /** Desenat ca simbol, independent de fontul instalat pe televizor. */
 @Composable
-fun ViewingStatusBadge(watched: Boolean, modifier: Modifier = Modifier) {
+fun ViewingStatusBadge(watched: Boolean, modifier: Modifier = Modifier, size: Dp = BadgeHeight) {
     val ink = if (watched) Color(0xFF9CF5CE) else Color(0xFFFFCF76)
     val background = if (watched) Color(0xF210362E) else Color(0xF2332713)
+    val stroke = (size / 16.dp).coerceIn(0.65f, 1.5f)
     Canvas(
         modifier
-            .size(BadgeHeight)
+            .size(size)
             .background(background, BadgeShape)
             .semantics { contentDescription = if (watched) "Văzut" else "Văzut parțial" },
     ) {
         if (watched) {
-            val start = Offset(size.width * .24f, size.height * .51f)
-            val bend = Offset(size.width * .43f, size.height * .69f)
-            val end = Offset(size.width * .77f, size.height * .32f)
-            drawLine(ink, start, bend, 1.8.dp.toPx(), StrokeCap.Round)
-            drawLine(ink, bend, end, 1.8.dp.toPx(), StrokeCap.Round)
+            val start = Offset(this.size.width * .24f, this.size.height * .51f)
+            val bend = Offset(this.size.width * .43f, this.size.height * .69f)
+            val end = Offset(this.size.width * .77f, this.size.height * .32f)
+            drawLine(ink, start, bend, (1.8f * stroke).dp.toPx(), StrokeCap.Round)
+            drawLine(ink, bend, end, (1.8f * stroke).dp.toPx(), StrokeCap.Round)
         } else {
-            drawCircle(ink, radius = size.minDimension * .32f, style = Stroke(1.4.dp.toPx()))
-            val top = center - Offset(0f, size.height * .18f)
-            val end = center + Offset(size.width * .12f, size.height * .07f)
-            drawLine(ink, top, center, 1.3.dp.toPx(), StrokeCap.Round)
-            drawLine(ink, center, end, 1.3.dp.toPx(), StrokeCap.Round)
+            drawCircle(ink, radius = this.size.minDimension * .32f, style = Stroke((1.4f * stroke).dp.toPx()))
+            val top = center - Offset(0f, this.size.height * .18f)
+            val end = center + Offset(this.size.width * .12f, this.size.height * .07f)
+            drawLine(ink, top, center, (1.3f * stroke).dp.toPx(), StrokeCap.Round)
+            drawLine(ink, center, end, (1.3f * stroke).dp.toPx(), StrokeCap.Round)
         }
     }
 }

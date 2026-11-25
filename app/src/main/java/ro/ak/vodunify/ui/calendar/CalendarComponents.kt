@@ -206,15 +206,12 @@ internal fun CalendarRatings(item: CalendarItem) {
 private fun CalendarPosterHeader(item: CalendarItem, modifier: Modifier = Modifier) {
     val now = LocalCalendarNow.current
     val time = item.upcomingPosterTime(now)
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f)) {
             CalendarRatings(item)
         }
-        when {
-            time.isNotEmpty() -> PosterLabel(time)
-            !now.isBefore(item.releaseAt) && (item.watched || item.inProgress) ->
-                ViewingStatusBadge(watched = item.watched)
-        }
+        if (time.isNotEmpty()) PosterLabel(time)
+        if (item.watched || item.inProgress) ViewingStatusBadge(watched = item.watched)
     }
 }
 

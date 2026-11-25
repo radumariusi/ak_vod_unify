@@ -33,6 +33,25 @@ class ServicePagesTest {
     }
 
     @Test
+    fun primeInlineAndQuotedEpisodeNumbers() {
+        val htmlInline = """<html><head><meta property="og:title" content="Prime Video: The Lord of the Rings: The Rings of Power - Season 3, Ep. 7"></head></html>"""
+        val t1 = ServicePages.prime(htmlInline, gti)!!
+        assertEquals("The Lord of the Rings: The Rings of Power", t1.show)
+        assertEquals(3, t1.season)
+        assertEquals(7, t1.episode)
+
+        val htmlQuoted = """<html><head><meta property="og:title" content="Watch The Rings of Power - Season 3 | Prime Video"></head>
+            <script>{"episodeNumber":"7","titleID":"$gti"}</script></html>"""
+        val t2 = ServicePages.prime(htmlQuoted, gti)!!
+        assertEquals("The Rings of Power", t2.show)
+        assertEquals(3, t2.season)
+        assertEquals(7, t2.episode)
+
+        val seasonOnly = ServicePages.asFields(ro.ak.vodunify.core.scrobble.ServiceTitle("The Rings of Power", 3, null))
+        assertTrue(TitleParser.guesses(seasonOnly, "Prime Video").none { it is TitleGuess.Movie })
+    }
+
+    @Test
     fun netflixTitle() {
         val html = """<meta content="Stranger Things | Netflix Official Site" property="og:title">"""
         assertEquals("Stranger Things", ServicePages.netflix(html)!!.show)

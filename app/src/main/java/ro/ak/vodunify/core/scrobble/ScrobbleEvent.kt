@@ -54,3 +54,4 @@ data class ScrobbleLogEntry(
 
 internal const val SCROBBLE_PREFS = "scrobbler"
 internal const val SCROBBLE_LOG = "log"
+internal const val SCROBBLE_APP_HISTORY = "app_by_key"

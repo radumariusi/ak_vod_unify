@@ -24,7 +24,11 @@ object ServicePages {
     private val OG_TITLE = Regex("""<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
     private val OG_TITLE_REV = Regex("""<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']""", RegexOption.IGNORE_CASE)
     private val TITLE_TAG = Regex("""<title[^>]*>([^<]+)</title>""", RegexOption.IGNORE_CASE)
-    private val SEASON = Regex("""(?i)[\s:–—-]*\b(?:season|sezonul|sezon|staffel|temporada|saison)\s*(\d{1,2})\b.*$""")
+    private val SEASON = Regex("""(?i)[\s:–—\-]*\b(?:season|sezonul|sezon|sez\.?|staffel|temporada|saison)\s*(\d{1,2})\b.*$""")
+    private val PRIME_INLINE_EP = Regex("""(?i)\b(?:season|sezonul|sezon|sez\.?)\s*(\d{1,2})\s*[,·•\-:\s]+\s*(?:ep\.?|episode|episodul|episod)\s*(\d{1,3})\b""")
+    private val PRIME_LD_EPISODE = Regex(""""episodeNumber"\s*:\s*"?(\d{1,3})"?""")
+    private val PRIME_LD_SEQ = Regex(""""(?:episodeNumber|sequenceNumber)"\s*:\s*"?(\d{1,3})"?""")
+    private val PRIME_LD_SEASON = Regex(""""seasonNumber"\s*:\s*"?(\d{1,2})"?""")
 
     fun pageTitle(html: String): String? {
         val raw = OG_TITLE.find(html)?.groupValues?.get(1)
@@ -36,22 +40,37 @@ object ServicePages {
 
     /** „Watch The Boys - Season 4 | Prime Video” → The Boys, sezonul 4 (+ episodul, dacă îl găsim lângă cod). */
     fun prime(html: String, gti: String): ServiceTitle? {
-        var t = pageTitle(html) ?: return null
-        t = t.replace(Regex("""(?i)\s*[|–—-]\s*(amazon\s+)?prime\s*video.*$"""), "")
-            .replace(Regex("""(?i)^(prime video:\s*|watch\s+|vizioneaz[aă]\s+|urm[aă]re[sș]te\s+)"""), "")
+        val rawTitle = pageTitle(html) ?: return null
+        var t = rawTitle
+            .replace(Regex("""(?i)\s*[|–—-]\s*(amazon\.com\s*:\s*|amazon\s+)?prime\s*video.*$"""), "")
+            .replace(Regex("""(?i)^(amazon\.com:\s*|prime video:\s*|watch\s+|vizioneaz[aă]\s+|urm[aă]re[sș]te\s+)"""), "")
             .trim()
-        val season = SEASON.find(t)?.groupValues?.get(1)?.toIntOrNull()
-        val show = t.replace(SEASON, "").trim(' ', ':', '-', '–', '—').trim()
-        if (show.isEmpty()) return null
-        return ServiceTitle(show, season, episodeNear(html, gti), null)
+        val inline = PRIME_INLINE_EP.find(t)
+        val season = inline?.groupValues?.get(1)?.toIntOrNull()
+            ?: SEASON.find(t)?.groupValues?.get(1)?.toIntOrNull()
+            ?: PRIME_LD_SEASON.find(html)?.groupValues?.get(1)?.toIntOrNull()
+        val show = t
+            .replace(PRIME_INLINE_EP, "")
+            .replace(SEASON, "")
+            .trim(' ', ':', '-', '–', '—', ',')
+            .trim()
+        if (show.isEmpty() || show.equals("prime video", ignoreCase = true) || show.equals("amazon.com", ignoreCase = true)) {
+            return null
+        }
+        val ep = inline?.groupValues?.get(2)?.toIntOrNull()
+            ?: episodeNear(html, gti)
+            ?: PRIME_LD_EPISODE.find(html)?.groupValues?.get(1)?.toIntOrNull()
+        return ServiceTitle(show, season, ep, null)
     }
 
     /** În JSON-ul paginii, numărul episodului e în apropierea codului lui. */
     private fun episodeNear(html: String, gti: String): Int? {
         var idx = html.indexOf(gti)
         while (idx >= 0) {
-            val window = html.substring(idx, minOf(html.length, idx + 3000))
-            Regex(""""episodeNumber"\s*:\s*(\d{1,3})""").find(window)?.let { return it.groupValues[1].toInt() }
+            val from = (idx - 1500).coerceAtLeast(0)
+            val to = minOf(html.length, idx + 4000)
+            val window = html.substring(from, to)
+            PRIME_LD_SEQ.find(window)?.let { return it.groupValues[1].toInt() }
             idx = html.indexOf(gti, idx + gti.length)
         }
         return null
@@ -80,6 +99,7 @@ object ServicePages {
             e != null -> put("display_subtitle", "Episodul $e")
             t.episodeTitle != null -> put("display_subtitle", t.episodeTitle)
         }
+        if (s != null && e == null) put("season_hint", s.toString())
     }
 }
 
@@ -119,7 +139,11 @@ class ServiceTitleResolver @Inject constructor(http: OkHttpClient) {
         val title = when {
             gti != null -> cached("prime:$gti") {
                 val (html, httpNote) = get("https://www.primevideo.com/detail/$gti/")
-                (html?.let { ServicePages.prime(it, gti) }) to httpNote
+                val parsed = html?.let { ServicePages.prime(it, gti) }
+                if (parsed != null) parsed to httpNote else {
+                    val (fbHtml, fbNote) = get("https://www.amazon.com/gp/video/detail/$gti/")
+                    (fbHtml?.let { ServicePages.prime(it, gti) }) to "$httpNote / amazon: $fbNote"
+                }
             }
             netflixId != null -> cached("netflix:$netflixId") {
                 val (html, httpNote) = get("https://www.netflix.com/title/$netflixId")

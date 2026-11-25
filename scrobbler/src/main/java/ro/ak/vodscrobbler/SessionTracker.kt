@@ -122,8 +122,11 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
             return emptyList()
         }
         if (previous != null && info != null && ((!previous.hasTitle && info.hasTitle) || correction)) {
-            // Am aflat (sau corectat) titlul pentru redarea în curs: păstrăm poziția.
+            // Am aflat (sau corectat) titlul pentru redarea în curs: păstrăm poziția și, dacă e pe pauză, retrimitem imediat.
             media = info.copy(durationMs = info.durationMs ?: previous.durationMs)
+            if (state == PlayState.PAUSED && info.hasTitle && (!previous.hasTitle || correction)) {
+                return listOfNotNull(emit(SendReason.PAUSE, bestPosition(now), now, media, forceTitleUpdate = true))
+            }
             return emptyList()
         }
         val out = mutableListOf<Outgoing>()
@@ -204,13 +207,19 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
         return out
     }
 
-    private fun emit(reason: SendReason, positionMs: Long?, now: Long, info: MediaInfo? = media): Outgoing? {
+    private fun emit(
+        reason: SendReason,
+        positionMs: Long?,
+        now: Long,
+        info: MediaInfo? = media,
+        forceTitleUpdate: Boolean = false,
+    ): Outgoing? {
         // Fără titlu trimitem oricum: AK VOD Unify îl păstrează ca „neidentificat” (aplicație + durată + minut).
         val m = info ?: MediaInfo(emptyMap(), null)
         val pos = positionMs ?: return skip(reason, "poziție necunoscută (aplicația nu o trimite)")
         if (pos < MIN_POSITION_MS) return skip(reason, "poziție ${pos / 1000}s, sub ${MIN_POSITION_MS / 1000}s")
         val last = lastSentPositionMs
-        if (last != null && lastSentReason != SendReason.TICK && reason != SendReason.TICK &&
+        if (!forceTitleUpdate && last != null && lastSentReason != SendReason.TICK && reason != SendReason.TICK &&
             kotlin.math.abs(last - pos) < SAME_POSITION_MS
         ) {
             return skip(reason, "același minut ca trimiterea precedentă")

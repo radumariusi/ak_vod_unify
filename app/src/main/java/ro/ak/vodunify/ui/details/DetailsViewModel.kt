@@ -142,7 +142,7 @@ class DetailsViewModel @Inject constructor(
     }.flatMapLatest { details ->
         when {
             details == null -> flowOf(null)
-            !ExternalTrackers.ENABLED -> tracking.localShowProgress(ref(details), SeriesMarker.airedCounts(details))
+            !ExternalTrackers.ENABLED -> tracking.localShowProgress(ref(details), SeriesMarker.totalCounts(details))
             else -> flow {
                 try {
                     emit(tracking.showProgress(ref(details)))
@@ -188,7 +188,7 @@ class DetailsViewModel @Inject constructor(
         val media = show.copy(type = MediaType.EPISODE, season = episode.season, episode = episode.number, episodeTitle = episode.name)
         act {
             val latest = if (ExternalTrackers.ENABLED) showProgress.value else
-                tracking.localShowProgress(show, SeriesMarker.airedCounts(details)).first()
+                tracking.localShowProgress(show, SeriesMarker.totalCounts(details)).first()
             val watched = latest?.watched?.contains(number) == true
             tracking.setWatched(media, !watched)
             if (ExternalTrackers.ENABLED) {

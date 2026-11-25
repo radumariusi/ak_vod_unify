@@ -184,6 +184,11 @@ class HistoryImportRepository @Inject constructor(
                 is ImportPlanner.Kind.Resume -> {
                     val current = resume[media.itemKey]
                     if (current == null || current.first < at) {
+                        val pkg = when (service) {
+                            ImportSources.NETFLIX -> "com.netflix.ninja"
+                            ImportSources.PRIME_VIDEO -> "com.amazon.amazonvideo.livingroom"
+                            else -> null
+                        }
                         resume[media.itemKey] = at to ResumePointEntity(
                             id = "$service|${media.itemKey}",
                             source = service,
@@ -192,6 +197,7 @@ class HistoryImportRepository @Inject constructor(
                             updatedAt = at,
                             remoteId = null,
                             positionMs = kind.positionMs,
+                            appPackage = pkg,
                         )
                     }
                 }

@@ -35,7 +35,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -109,14 +111,22 @@ import ro.ak.vodunify.ui.watch.playbackRequest
 fun DetailsScreen(
     viewModel: DetailsViewModel = hiltViewModel(),
     chooser: WatchChooserViewModel = hiltViewModel(),
+    onBackdropChange: ((String?) -> Unit)? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     // Revenit din altă aplicație (ex. ai instalat un serviciu): recitim ce e instalat.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshInstalled() }
+    val backdropUrl = (state as? LoadState.Data)?.value?.item?.backdropUrl
+    if (onBackdropChange != null) {
+        SideEffect { onBackdropChange(backdropUrl) }
+        DisposableEffect(onBackdropChange) {
+            onDispose { onBackdropChange(null) }
+        }
+    }
     when (val s = state) {
         LoadState.Loading -> LoadingPanel(Modifier.fillMaxSize())
         is LoadState.Failed -> ErrorPanel(s.error, onRetry = viewModel::retry)
-        is LoadState.Data -> DetailsContent(s.value, viewModel, chooser)
+        is LoadState.Data -> DetailsContent(s.value, viewModel, chooser, drawLocalBackdrop = onBackdropChange == null)
     }
     WatchChooserHost(chooser)
 }
@@ -127,7 +137,12 @@ fun DetailsScreen(
  * serial au ecranul lor, grupate pe sezoane (butonul „Episoade”).
  */
 @Composable
-private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel, chooser: WatchChooserViewModel) {
+private fun DetailsContent(
+    details: TitleDetails,
+    viewModel: DetailsViewModel,
+    chooser: WatchChooserViewModel,
+    drawLocalBackdrop: Boolean,
+) {
     val selectedSeason by viewModel.season.collectAsStateWithLifecycle()
     val episodes by viewModel.episodes.collectAsStateWithLifecycle()
     val connected by viewModel.trackerConnected.collectAsStateWithLifecycle()
@@ -149,7 +164,9 @@ private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel, c
     }
 
     Box(Modifier.fillMaxSize()) {
-        TitleBackdrop(details.item.backdropUrl, Modifier.fillMaxSize(), opacity = 0.9f, settleMillis = 0)
+        if (drawLocalBackdrop) {
+            TitleBackdrop(details.item.backdropUrl, Modifier.fillMaxSize(), opacity = 0.9f, settleMillis = 0)
+        }
         if (showingEpisodes) {
             EpisodesPane(
                 details = details,
@@ -490,10 +507,9 @@ private fun EpisodesPane(
     val spec = layoutSpec()
     val seasons = details.seasons
     val current = seasons.firstOrNull { it.number == selected } ?: seasons.firstOrNull() ?: return
-    val airedCounts = remember(details) { ro.ak.vodunify.core.tracking.SeriesMarker.airedCounts(details) }
     fun seasonLabel(s: SeasonSummary): String {
         val seen = watched.count { it.season == s.number && it.episode <= s.episodeCount }
-        return if (seen > 0) "${s.name} · $seen/${airedCounts[s.number] ?: s.episodeCount}" else "${s.name} · ${s.episodeCount} ep."
+        return if (seen > 0) "${s.name} · $seen/${s.episodeCount}" else "${s.name} · ${s.episodeCount} ep."
     }
     if (spec.isCompact) {
         Column(Modifier.fillMaxSize().padding(horizontal = spec.screenPadding, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -581,8 +597,8 @@ private fun SeasonEpisodes(
             val loaded = (episodes as? LoadState.Data)?.value?.takeIf { it.number == season.number }
             if (canMark && loaded != null) {
                 val aired = ro.ak.vodunify.core.tracking.SeriesMarker.aired(loaded.episodes)
-                if (aired.isNotEmpty()) {
-                    val seasonWatched = aired.all { EpisodeNumber(it.season, it.number) in watched }
+                if (aired.isNotEmpty() || loaded.episodes.any { EpisodeNumber(it.season, it.number) in watched }) {
+                    val seasonWatched = loaded.episodes.isNotEmpty() && loaded.episodes.all { EpisodeNumber(it.season, it.number) in watched }
                     WatchedToggle(seasonWatched, watchedLabel = "✓ Sezon văzut", unwatchedLabel = "Marchează sezonul văzut") {
                         onToggleSeason(season.number, seasonWatched)
                     }

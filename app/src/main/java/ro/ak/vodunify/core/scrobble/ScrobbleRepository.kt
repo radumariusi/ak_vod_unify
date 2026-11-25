@@ -197,10 +197,12 @@ class ScrobbleRepository @Inject constructor(
         val progress = ScrobbleRules.progress(position, duration)
 
         if (ScrobbleRules.isFinished(progress, _watchedPercent.value / 100f)) {
+            rememberApp(media, event.pkg)
             markWatchedLocally(media, event.at, event.pkg)
             return done(ScrobbleResult.WATCHED, media, duration, position)
         }
         // Pauza / oprirea se publică (în modul automat); punctele intermediare doar se salvează.
+        rememberApp(media, event.pkg)
         publisher.setManualPosition(media, position, duration, publish = !event.isTick && !fromQueue, appPackage = event.pkg, recordedAt = event.at)
         return done(ScrobbleResult.SAVED, media, duration, position)
     }
@@ -417,6 +419,34 @@ class ScrobbleRepository @Inject constructor(
         prefs.edit().putString(SCROBBLE_LOG, json.encodeToString(logSerializer, list)).apply()
     }
 
+    private val appHistoryLock = Any()
+    private val appHistorySerializer = MapSerializer(String.serializer(), String.serializer())
+    private var appHistory: LinkedHashMap<String, String>? = null
+
+    private fun rememberApp(media: MediaRef, pkg: String) {
+        if (pkg.isBlank()) return
+        synchronized(appHistoryLock) {
+            val map = appHistory ?: runCatching {
+                prefs.getString(SCROBBLE_APP_HISTORY, null)?.let {
+                    LinkedHashMap(json.decodeFromString(appHistorySerializer, it))
+                }
+            }.getOrNull() ?: LinkedHashMap()
+            appHistory = map
+            val changed = map[media.itemKey] != pkg || map[media.titleKey] != pkg
+            map.remove(media.itemKey)
+            map[media.itemKey] = pkg
+            map.remove(media.titleKey)
+            map[media.titleKey] = pkg
+            while (map.size > MAX_APP_HISTORY) {
+                val firstKey = map.keys.firstOrNull() ?: break
+                map.remove(firstKey)
+            }
+            if (changed) {
+                prefs.edit().putString(SCROBBLE_APP_HISTORY, json.encodeToString(appHistorySerializer, map)).apply()
+            }
+        }
+    }
+
     private fun readLog(): List<ScrobbleLogEntry> = runCatching {
         prefs.getString(SCROBBLE_LOG, null)?.let { json.decodeFromString(logSerializer, it) }
     }.getOrNull().orEmpty()
@@ -429,8 +459,9 @@ class ScrobbleRepository @Inject constructor(
         const val KEY_NETFLIX_STATUS = "netflix_status_"
         const val KEY_PROOFS = "proofs"
         const val MAX_UNRESOLVED = 2_000
+        const val MAX_APP_HISTORY = 2_000
         val eventsSerializer = ListSerializer(ScrobbleEvent.serializer())
-        const val MAX_LOG = 50
+        const val MAX_LOG = 400
     }
 }
 

@@ -6,6 +6,7 @@ import org.junit.Test
 import ro.ak.vodunify.core.catalog.EpisodeAir
 import ro.ak.vodunify.core.catalog.SeasonSummary
 import ro.ak.vodunify.core.catalog.airedEpisodeCount
+import ro.ak.vodunify.core.catalog.totalEpisodeCount
 import ro.ak.vodunify.core.connector.EpisodeNumber
 import ro.ak.vodunify.core.connector.ExternalIds
 import ro.ak.vodunify.core.connector.MediaRef
@@ -85,5 +86,29 @@ class LocalProgressTest {
         )
         assertEquals(4, airedEpisodeCount(show, premiere.minusDays(1)))
         assertEquals(5, airedEpisodeCount(show.copy(lastEpisodeToAir = TmdbEpisodeRef(2, 1)), premiere))
+        assertEquals(12, totalEpisodeCount(show))
+    }
+
+    @Test
+    fun partialSeasonRemainsInProgressEvenIfRemainingEpisodesUnaired() {
+        val showWithThreeSeasons = TmdbTitleDetails(
+            id = 2,
+            numberOfEpisodes = 24,
+            seasons = listOf(
+                TmdbSeasonSummary(1, episodeCount = 8, airDate = "2022-09-01"),
+                TmdbSeasonSummary(2, episodeCount = 8, airDate = "2024-08-29"),
+                TmdbSeasonSummary(3, episodeCount = 8, airDate = "2026-10-01"),
+            ),
+            lastEpisodeToAir = TmdbEpisodeRef(3, 6),
+        )
+        val total = totalEpisodeCount(showWithThreeSeasons)!!
+        assertEquals(24, total)
+        val watched22 = (1..8).map { ep(1, it, it.toLong()) } +
+            (1..8).map { ep(2, it, 10L + it) } +
+            (1..6).map { ep(3, it, 20L + it) }
+        val summary = LocalProgress.summaries(watched22).getValue("tv:tmdb:1")
+        val merged = LibraryLogic.mergeSeries(emptyList(), mapOf("tv:tmdb:1" to summary), mapOf("tv:tmdb:1" to total))
+        assertEquals(setOf(LibraryStatus.IN_PROGRESS), merged.single().statuses)
+        assertEquals("S3E6 · 22/24 episoade", LibraryLogic.seriesLabel(summary, total))
     }
 }

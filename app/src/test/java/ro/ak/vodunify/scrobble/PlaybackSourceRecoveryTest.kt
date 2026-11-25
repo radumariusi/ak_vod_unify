@@ -9,6 +9,7 @@ import ro.ak.vodunify.core.connector.MediaType
 import ro.ak.vodunify.core.db.ResumePointEntity
 import ro.ak.vodunify.core.scrobble.ScrobbleLogEntry
 import ro.ak.vodunify.core.scrobble.recordedPackage
+import ro.ak.vodunify.core.scrobble.relaxedLogPackage
 import ro.ak.vodunify.core.tracking.TrackingEntities
 
 class PlaybackSourceRecoveryTest {
@@ -38,5 +39,15 @@ class PlaybackSourceRecoveryTest {
 
     @Test fun rejectsConflictingSources() {
         assertNull(recordedPackage(point, listOf(entry, entry.copy(pkg = "com.netflix.ninja"))))
+    }
+
+    @Test fun relaxedFallbackMatchesSameShowOrEpisodeByKey() {
+        assertEquals(
+            "com.amazon.amazonvideo.livingroom",
+            relaxedLogPackage(
+                point,
+                listOf(entry.copy(at = 2_000L, positionMs = 90_000L, pkg = "com.amazon.amazonvideo.livingroom", itemKey = "tv:tmdb:42:s1e5")),
+            ),
+        )
     }
 }

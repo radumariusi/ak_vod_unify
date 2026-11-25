@@ -36,7 +36,7 @@ object LogcatProbe {
     }
 
     private fun read(): List<String> {
-        val p = ProcessBuilder("logcat", "-d", "-v", "brief", "-t", "3000").redirectErrorStream(true).start()
+        val p = ProcessBuilder("logcat", "-d", "-v", "brief", "-t", "8000").redirectErrorStream(true).start()
         val out = BufferedReader(InputStreamReader(p.inputStream)).use { r -> r.readLines() }
         p.waitFor(5, TimeUnit.SECONDS)
         p.destroy()
