@@ -32,6 +32,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import ro.ak.vodunify.ui.components.readable
+import ro.ak.vodunify.ui.navigation.LocalCatalogActions
 
 /** „AK Scrobbler”: ce a citit aplicația însoțitoare din Netflix, Prime, SkyShowtime etc. */
 @OptIn(ExperimentalLayoutApi::class)
@@ -67,10 +68,12 @@ fun ScrobblerSection(viewModel: ScrobblerSettingsViewModel = hiltViewModel()) {
                 color = if (installed) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
             )
             OnOffDropdown("Primește vizionările", enabled, viewModel::setEnabled, on = "Da", off = "Oprit")
+            val actions = LocalCatalogActions.current
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (installed) {
                     OutlinedButton(onClick = { viewModel.launchIntent()?.let(context::startActivity) }) { Text("Deschide AK Scrobbler") }
                 }
+                OutlinedButton(onClick = actions.openDiagnostics) { Text("Jurnal complet & GitHub") }
                 if (log.isNotEmpty()) OutlinedButton(onClick = viewModel::clearLog) { Text("Golește jurnalul") }
                 if (unresolved > 0) OutlinedButton(onClick = viewModel::retryIdentification) { Text("Reîncearcă identificarea") }
             }

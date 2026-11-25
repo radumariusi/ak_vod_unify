@@ -123,5 +123,11 @@
             </intent-filter>
         </receiver>
 
+        <provider
+            android:name=".ScrobbleDiagProvider"
+            android:authorities="${applicationId}.diag"
+            android:exported="true"
+            android:permission="${mainAppId}.permission.SCROBBLE" />
+
     </application>
 </manifest>

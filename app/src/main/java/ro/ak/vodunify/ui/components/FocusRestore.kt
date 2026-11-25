@@ -1,6 +1,8 @@
 package ro.ak.vodunify.ui.components
 
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -117,10 +119,24 @@ internal fun <T> rememberRestoringRowState(rowKey: String, items: List<T>, key: 
  * ca să nu „furăm” focusul mai târziu.
  */
 @Composable
-fun ExpireFocusRestore(restore: FocusRestore) {
-    val position = restore.pending ?: return
-    LaunchedEffect(position) {
-        delay(5_000)
-        if (restore.pending == position) restore.clear(position.entry)
+internal fun rememberRestoringGridState(findIndex: (cardKey: String) -> Int?): LazyGridState {
+    val state = rememberLazyGridState()
+    val target = returningFocus()
+    LaunchedEffect(target) {
+        val key = target?.cardKey ?: return@LaunchedEffect
+        val index = findIndex(key) ?: return@LaunchedEffect
+        if (index >= 0 && state.layoutInfo.visibleItemsInfo.none { it.index == index }) {
+            state.scrollToItem(index)
+        }
     }
+    return state
+}
+
+/**
+ * Păstrăm ultima poziție focalizată a fiecărei file pe toată durata sesiunii (se resetează la Back
+ * sau la repornirea aplicației). Nu o mai ștergem după 5 secunde.
+ */
+@Composable
+fun ExpireFocusRestore(restore: FocusRestore) {
+    // Păstrat pentru compatibilitate; curățarea se face doar la Back (TabBackToStart) sau la repornire.
 }

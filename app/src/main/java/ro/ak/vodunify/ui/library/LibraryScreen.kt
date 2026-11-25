@@ -73,6 +73,7 @@ import ro.ak.vodunify.core.tracking.SyncStatus
 import ro.ak.vodunify.ui.components.FocusCard
 import ro.ak.vodunify.ui.components.NetworkImage
 import ro.ak.vodunify.ui.components.layoutSpec
+import ro.ak.vodunify.ui.components.rememberRestoringGridState
 import ro.ak.vodunify.ui.navigation.LocalCatalogActions
 
 /**
@@ -92,7 +93,37 @@ fun LibraryScreen(viewModel: LibraryViewModel = hiltViewModel()) {
         LibraryRows(state, status, viewModel)
         return
     }
-    val grid = rememberLazyGridState()
+    val grid = rememberRestoringGridState { cardKey ->
+        if (!state.connected || state.loading) return@rememberRestoringGridState null
+        var idx = 1 // header
+        if (state.filter.tab == LibraryTab.ALL || state.filter.tab == LibraryTab.WATCHLIST) {
+            val started = state.items.filter { it.posterStage == PosterStage.IN_PROGRESS }
+            if (started.isNotEmpty()) {
+                idx++
+                val pos = started.indexOfFirst { "library|${it.key}" == cardKey }
+                if (pos >= 0) return@rememberRestoringGridState idx + pos
+                idx += started.size
+            }
+            val saved = state.items.filter { it.posterStage == PosterStage.UNWATCHED }
+            for (kind in listOf(TitleKind.MOVIE, TitleKind.TV)) {
+                idx++
+                val part = saved.filter { it.kind == kind }
+                val pos = part.indexOfFirst { "library|${it.key}" == cardKey }
+                if (pos >= 0) return@rememberRestoringGridState idx + pos
+                idx += part.size
+            }
+            val watched = state.items.filter { it.posterStage == PosterStage.WATCHED }
+            if (watched.isNotEmpty()) {
+                idx++
+                val pos = watched.indexOfFirst { "library|${it.key}" == cardKey }
+                if (pos >= 0) return@rememberRestoringGridState idx + pos
+            }
+            null
+        } else {
+            val pos = state.items.indexOfFirst { "library|${it.key}" == cardKey }
+            if (pos >= 0) idx + pos else null
+        }
+    }
     TabBackToStart { grid.scrollToItem(0) }
 
     KeepFocusedContentVisible(spec.isTv) {

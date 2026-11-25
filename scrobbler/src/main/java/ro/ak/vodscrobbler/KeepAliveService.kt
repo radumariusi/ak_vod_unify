@@ -104,9 +104,11 @@ class KeepAliveService : Service() {
     private fun notification(): Notification {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.createNotificationChannel(
-            NotificationChannel(CHANNEL, "AK Scrobbler activ", NotificationManager.IMPORTANCE_MIN).apply {
+            NotificationChannel(CHANNEL, "AK Scrobbler activ", NotificationManager.IMPORTANCE_LOW).apply {
                 description = "Ține AK Scrobbler pornit ca să vadă ce rulează pe TV."
                 setShowBadge(false)
+                setSound(null, null)
+                enableVibration(false)
             },
         )
         val open = PendingIntent.getActivity(

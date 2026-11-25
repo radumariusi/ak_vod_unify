@@ -149,4 +149,49 @@ class SessionTrackerTest {
         val out = t.onPlaybackState(PlayState.PAUSED, 312_000, 12_000, 0f, 12_000)
         assertEquals(312_000L, out.single().positionMs)
     }
+
+    @Test
+    fun adBreakSavesMoviePositionAndIgnoresPauseOrExitDuringAd() {
+        val t = SessionTracker("com.amazon.amazonvideo.livingroom", "Prime Video")
+        t.onMetadata(episode, 0)
+        val id = t.playId
+        t.onPlaybackState(PlayState.PLAYING, 900_000, 0, 1f, 0)
+
+        // Reclama apare cu titlu de reclamă sau durată scurtă: salvăm minutul filmului (15:30).
+        val ad = MediaInfo(mapOf("title" to "Reclamă"), durationMs = 30_000L)
+        val preAdOut = t.onMetadata(ad, 30_000)
+        assertEquals(1, preAdOut.size)
+        assertEquals(SendReason.PAUSE, preAdOut[0].reason)
+        assertEquals("Chapter One", preAdOut[0].media.fields["title"])
+        assertEquals(930_000L, preAdOut[0].positionMs)
+        assertEquals(id, preAdOut[0].playId)
+
+        // În timpul reclamei: pauza, tick-ul sau ieșirea nu suprascriu cu 0:15 al reclamei.
+        assertTrue(t.onPlaybackState(PlayState.PLAYING, 5_000, 31_000, 1f, 31_000).isEmpty())
+        assertTrue(t.onPlaybackState(PlayState.PAUSED, 15_000, 41_000, 0f, 41_000).isEmpty())
+        assertTrue(t.onTick(100_000).isEmpty())
+
+        // Revine episodul: continuă același playId.
+        assertTrue(t.onMetadata(episode, 105_000).isEmpty())
+        assertEquals(id, t.playId)
+        t.onPlaybackState(PlayState.PLAYING, 931_000, 105_000, 1f, 105_000)
+        val pauseAfter = t.onPlaybackState(PlayState.PAUSED, 960_000, 134_000, 0f, 134_000)
+        assertEquals(960_000L, pauseAfter.single().positionMs)
+        assertEquals(id, pauseAfter.single().playId)
+    }
+
+    @Test
+    fun adScreenIgnoresExitDuringAd() {
+        val t = SessionTracker("com.skyshowtime.skyshowtime", "SkyShowtime")
+        t.onMetadata(episode, 0)
+        t.onPlaybackState(PlayState.PLAYING, 1_200_000, 0, 1f, 0)
+
+        val preAd = t.onAdDetected(20_000)
+        assertEquals(SendReason.PAUSE, preAd.single().reason)
+        assertEquals(1_220_000L, preAd.single().positionMs)
+
+        // Utilizatorul iese din aplicație în timpul reclamei: nu trimite STOP cu minutul reclamei.
+        assertTrue(t.onPlaybackState(PlayState.STOPPED, 10_000, 25_000, 0f, 25_000).isEmpty())
+        assertTrue(t.onGone(26_000).isEmpty())
+    }
 }

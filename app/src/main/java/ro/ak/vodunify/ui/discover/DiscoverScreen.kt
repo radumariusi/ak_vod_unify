@@ -37,6 +37,7 @@ import ro.ak.vodunify.ui.components.LoadingPanel
 import ro.ak.vodunify.ui.components.OutlinedButton
 import ro.ak.vodunify.ui.components.PosterCard
 import ro.ak.vodunify.ui.components.layoutSpec
+import ro.ak.vodunify.ui.components.rememberRestoringGridState
 
 /**
  * Descoperă: tot catalogul, filtrat cu liste de alegere (ca restul aplicației): filme sau seriale, ordinea,
@@ -48,7 +49,10 @@ fun DiscoverScreen(viewModel: DiscoverViewModel = hiltViewModel()) {
     val spec = layoutSpec()
     val periods = remember { DiscoverPeriod.options() }
 
-    val grid = rememberLazyGridState()
+    val grid = rememberRestoringGridState { cardKey ->
+        val idx = state.items.indexOfFirst { "discover|${it.mediaKey}" == cardKey }
+        if (idx >= 0) 1 + idx else null
+    }
     TabBackToStart { grid.scrollToItem(0) }
 
     LazyVerticalGrid(

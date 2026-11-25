@@ -371,6 +371,13 @@ class MediaListenerService : NotificationListenerService() {
         val playing = active.any { it.tracker.state == PlayState.PLAYING }
         val isPlayer = playing || !snap.times.isEmpty || snap.guess?.subtitle != null
         if (!isPlayer) return
+        if (snap.isAd) {
+            for (t in active) {
+                dispatch(t.tracker.onAdDetected(now))
+            }
+            publishLive()
+            return
+        }
         for (t in active) {
             val guess = snap.guess
             if (guess != null && !hasTextTitle(t) && guess != t.screenGuess) {
@@ -526,6 +533,13 @@ class MediaListenerService : NotificationListenerService() {
     private fun publishLive() {
         updateTicker()
         val now = SystemClock.elapsedRealtime()
+        ScreenState.skipScreenForPackages = tracked.values
+            .filter { t ->
+                val active = t.tracker.state == PlayState.PLAYING || t.tracker.state == PlayState.PAUSED || t.tracker.state == PlayState.BUFFERING
+                active && hasTextTitle(t) && t.tracker.hasSessionPosition
+            }
+            .map { it.tracker.packageName }
+            .toSet()
         ScrobblerState.live = tracked.values.map { t ->
             LiveSession(
                 packageName = t.tracker.packageName,

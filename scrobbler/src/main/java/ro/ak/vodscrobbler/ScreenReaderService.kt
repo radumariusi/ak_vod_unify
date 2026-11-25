@@ -79,6 +79,9 @@ class ScreenReaderService : AccessibilityService() {
         if (pkg == packageName || IGNORED.any { pkg.startsWith(it) }) return
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             ScreenState.foregroundPackage = pkg
+        } else if (pkg in ScreenState.skipScreenForPackages) {
+            // Sesiunea media dă deja titlul și poziția exactă: nu trezim procesorul la fiecare subtitrare/secundă.
+            return
         }
         if (!isInteresting(pkg)) return
         // Cel mult o citire la ~1 s: playerele schimbă textele (timpul) foarte des.
@@ -175,7 +178,15 @@ class ScreenReaderService : AccessibilityService() {
         val app = ScrobblerState.live.firstOrNull { it.packageName == pkg }?.appLabel ?: appLabel(pkg)
         val guess = ScreenText.guess(items, app)
         val times = ScreenText.times(items, ranges)
-        val snap = ScreenSnapshot(pkg, lastSnapshotAt, guess, times, ScreenText.hasPlayButton(items), items.size)
+        val snap = ScreenSnapshot(
+            pkg,
+            lastSnapshotAt,
+            guess,
+            times,
+            ScreenText.hasPlayButton(items),
+            items.size,
+            isAd = ScreenText.isAdScreen(items),
+        )
         ScreenState.publish(snap)
 
         // Jurnal: doar când se schimbă ce înțelegem de pe ecran (nu la fiecare secundă).
@@ -234,12 +245,12 @@ class ScreenReaderService : AccessibilityService() {
          */
         val READER_PREFIXES = listOf("com.apple.atve.", "com.nuvio", "app.nuvio", "com.debridstream")
 
-        const val SETTLE_MS = 700L
-        const val POLL_MS = 4_000L
-        const val MIN_GAP_MS = 1_500L
-        const val MAX_DEPTH = 40
-        const val MAX_ITEMS = 300
-        const val MAX_NODES = 3000
+        const val SETTLE_MS = 800L
+        const val POLL_MS = 5_000L
+        const val MIN_GAP_MS = 2_500L
+        const val MAX_DEPTH = 36
+        const val MAX_ITEMS = 120
+        const val MAX_NODES = 800
 
         /** Sistemul, tastaturile și launcherele: nu au titluri de film. */
         val IGNORED = listOf(

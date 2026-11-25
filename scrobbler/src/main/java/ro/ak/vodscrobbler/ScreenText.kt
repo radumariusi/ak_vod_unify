@@ -60,7 +60,17 @@ object ScreenText {
         "netflix", "apple tv", "apple tv+", "prime video", "amazon prime video", "disney+", "disney", "max",
         "hbo max", "skyshowtime", "peacock", "stremio", "player", "video", "video player", "seek bar",
         "progress", "progres", "now playing", "se reda", "up next", "urmeaza", "watch now", "vizioneaza acum",
+        "ad", "ads", "advertisement", "reclama", "publicitate", "sponsored", "sponsorizat", "commercial",
+        "ad break", "reclame",
     )
+
+    private val AD_TEXT = Regex(
+        """(?i)^(?:ad|ads|advertisement|reclam[aă]|publicitate|sponsored|sponsorizat)(?:\s*\d+\s*(?:of|din|/)\s*\d+)?$|\b(?:your video will resume|video-ul va continua|reclama se termin[aă]|ad ends in)\b""",
+    )
+
+    /** True dacă pe ecran rulează o reclamă (nu filmul / episodul principal). */
+    fun isAdScreen(items: List<ScreenItem>): Boolean =
+        items.any { AD_TEXT.containsMatchIn(it.text.trim()) }
 
     fun guess(items: List<ScreenItem>, appLabel: String? = null): ScreenGuess? {
         val app = appLabel?.let(::normalize)

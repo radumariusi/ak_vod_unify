@@ -55,6 +55,7 @@ import ro.ak.vodunify.ui.components.PersonCard
 import ro.ak.vodunify.ui.components.PosterCard
 import ro.ak.vodunify.ui.components.TextInput
 import ro.ak.vodunify.ui.components.layoutSpec
+import ro.ak.vodunify.ui.components.rememberRestoringGridState
 import java.time.Year
 
 @Composable
@@ -65,7 +66,26 @@ fun SearchScreen(viewModel: SearchViewModel = hiltViewModel()) {
     val focusManager = LocalFocusManager.current
     val years = remember { (Year.now().value downTo Year.now().value - 40).toList() }
 
-    val grid = rememberLazyGridState()
+    val groups = remember(state.results) {
+        listOf(
+            "Filme" to state.results.filter { it is SearchResult.Title && it.item.kind == TitleKind.MOVIE },
+            "Seriale" to state.results.filter { it is SearchResult.Title && it.item.kind == TitleKind.TV },
+            "Persoane" to state.results.filter { it is SearchResult.Person },
+        ).filter { it.second.isNotEmpty() }
+    }
+    val grid = rememberRestoringGridState { cardKey ->
+        var idx = 2 // query + filters
+        if (state.error != null || state.isIdle || (state.results.isEmpty() && !state.loading)) idx++
+        for ((_, list) in groups) {
+            if (groups.size > 1) idx++
+            val pos = list.indexOfFirst { r ->
+                r is SearchResult.Title && "search|${r.item.mediaKey}" == cardKey
+            }
+            if (pos >= 0) return@rememberRestoringGridState idx + pos
+            idx += list.size
+        }
+        null
+    }
     TabBackToStart { grid.scrollToItem(0) }
 
     LazyVerticalGrid(
@@ -133,11 +153,6 @@ fun SearchScreen(viewModel: SearchViewModel = hiltViewModel()) {
         }
 
         // Rezultatele pe secțiuni: Filme, Seriale, Persoane (fiecare cu titlul ei, pe tot rândul).
-        val groups = listOf(
-            "Filme" to state.results.filter { it is SearchResult.Title && it.item.kind == TitleKind.MOVIE },
-            "Seriale" to state.results.filter { it is SearchResult.Title && it.item.kind == TitleKind.TV },
-            "Persoane" to state.results.filter { it is SearchResult.Person },
-        ).filter { it.second.isNotEmpty() }
         groups.forEach { (label, list) ->
             if (groups.size > 1) {
                 item(key = "section_$label", span = { GridItemSpan(maxLineSpan) }) {
@@ -146,7 +161,7 @@ fun SearchScreen(viewModel: SearchViewModel = hiltViewModel()) {
             }
             items(list, key = { resultKey(it) }) { result ->
                 when (result) {
-                    is SearchResult.Title -> PosterCard(result.item)
+                    is SearchResult.Title -> PosterCard(result.item, rowKey = "search")
                     is SearchResult.Person -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         PersonCard(result.person.copy(role = result.knownFor))
                     }

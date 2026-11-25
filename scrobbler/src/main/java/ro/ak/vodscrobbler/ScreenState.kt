@@ -13,6 +13,8 @@ data class ScreenSnapshot(
     /** Pagina de detalii a unui titlu (are buton „Redă”/„Play”). */
     val hasPlayButton: Boolean,
     val textCount: Int,
+    /** Ecranul arată o reclamă / pauză publicitară (nu conținutul principal). */
+    val isAd: Boolean = false,
 )
 
 /**
@@ -24,6 +26,9 @@ object ScreenState {
 
     /** Aplicațiile urmărite doar de pe ecran acum (fără sesiune media): le recitim periodic. */
     @Volatile var screenOnlyPackages: Set<String> = emptySet()
+
+    /** Aplicații care au deja titlul și poziția în sesiunea media: nu consumăm CPU citind ecranul. */
+    @Volatile var skipScreenForPackages: Set<String> = emptySet()
 
     /** Aplicația din prim-plan, după accesibilitate. */
     @Volatile var foregroundPackage: String? = null
