@@ -11,8 +11,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import ro.ak.vodunify.core.scrobble.NetflixRecentWorker
 import ro.ak.vodunify.core.scrobble.ScrobbleLogEntry
+import ro.ak.vodunify.core.scrobble.ScrobblePuller
 import ro.ak.vodunify.core.scrobble.ScrobbleRepository
 import javax.inject.Inject
 
@@ -20,6 +20,7 @@ import javax.inject.Inject
 class ScrobblerSettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repository: ScrobbleRepository,
+    private val puller: ScrobblePuller,
 ) : ViewModel() {
     val log: StateFlow<List<ScrobbleLogEntry>> = repository.log
     val enabled: StateFlow<Boolean> = repository.enabled
@@ -38,21 +39,21 @@ class ScrobblerSettingsViewModel @Inject constructor(
 
     fun refresh() {
         _installed.value = repository.isScrobblerInstalled()
+        puller.pullInForegroundAsync()
     }
 
     fun retryIdentification() {
         if (retrying) return
         retrying = true
-        _retryStatus.value = "Reîncerc potrivirea cu TMDb și verific activitatea Netflix."
-        NetflixRecentWorker.retryNow(context)
+        _retryStatus.value = "Preiau evenimentele din AK Scrobbler, reîncerc TMDb și verific activitatea Netflix."
         viewModelScope.launch {
             try {
-                repository.retryUnresolved()
-                _retryStatus.value = "Verificarea TMDb s-a încheiat. Activitatea Netflix se procesează în fundal."
+                puller.pullInForeground(forceRetryUnresolved = true)
+                _retryStatus.value = "Verificarea TMDb și activitatea Netflix s-au încheiat."
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _retryStatus.value = "Nu am putut termina verificarea TMDb: ${e.message}"
+                _retryStatus.value = "Nu am putut termina verificarea: ${e.message}"
             } finally {
                 retrying = false
             }

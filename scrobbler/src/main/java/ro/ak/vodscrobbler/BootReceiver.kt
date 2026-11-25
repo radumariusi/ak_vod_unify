@@ -17,7 +17,6 @@ class BootReceiver : BroadcastReceiver() {
                 if (Access.isListenerEnabled(context)) {
                     NotificationListenerService.requestRebind(ComponentName(context, MediaListenerService::class.java))
                 }
-                Forwarder.get(context).flushPending()
                 KeepAliveService.start(context)
             }
         }

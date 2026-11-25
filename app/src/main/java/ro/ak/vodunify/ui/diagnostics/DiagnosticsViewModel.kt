@@ -18,6 +18,7 @@ import ro.ak.vodunify.core.publish.PublishRepository
 import ro.ak.vodunify.core.publish.PublishSettings
 import ro.ak.vodunify.core.publish.RouteItem
 import ro.ak.vodunify.core.publish.summary
+import ro.ak.vodunify.core.scrobble.ScrobblePuller
 import ro.ak.vodunify.core.scrobble.ScrobbleRepository
 import ro.ak.vodunify.core.tracking.SyncStatus
 import ro.ak.vodunify.core.tracking.TrackingEntities
@@ -30,6 +31,7 @@ class DiagnosticsViewModel @Inject constructor(
     private val publisher: PublishRepository,
     private val tracking: TrackingRepository,
     private val scrobble: ScrobbleRepository,
+    private val scrobblePuller: ScrobblePuller,
     private val okHttp: OkHttpClient,
 ) : ViewModel() {
 
@@ -80,13 +82,14 @@ class DiagnosticsViewModel @Inject constructor(
         publisher.publishItem(TrackingEntities.media(item.ref), manual = true).summary()
     }
 
-    /** Sincronizează toate sursele; după sincronizare se reverifică publicările neconfirmate. */
+    /** Preia coada din Scrobbler, sincronizează sursele și reverifică publicările. */
     fun syncAndVerify() = launchAction("sync") {
+        val pulled = scrobblePuller.pullInForeground(forceRetryUnresolved = true)
         tracking.sync()
         publisher.verifyPending()
         when (val s = tracking.status.value) {
             is SyncStatus.Failed -> "Sincronizare cu erori: ${s.message}"
-            else -> "Sincronizat și reverificat"
+            else -> if (pulled > 0) "Preluat $pulled evenimente din Scrobbler · sincronizat" else "Sincronizat și reverificat"
         }
     }
 

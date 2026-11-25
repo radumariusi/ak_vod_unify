@@ -68,11 +68,6 @@
             android:theme="@style/Theme.AkScrobbler.Window"
             android:windowSoftInputMode="adjustResize" />
 
-        <receiver
-            android:name=".NetflixRecoveryReceiver"
-            android:exported="true"
-            android:permission="${mainAppId}.permission.SCROBBLE" />
-
         <!--
             Ascultătorul de notificări: odată ce îi dai acces, Android îl ține pornit singur
             (și îl repornește după restart). Prin el avem voie să citim sesiunile media active.

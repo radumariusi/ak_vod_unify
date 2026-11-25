@@ -124,8 +124,9 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
         if (inAdBreak) {
             if (info == null || isAdContent(info, savedMovieMedia)) return emptyList()
             val saved = savedMovieMedia
-            if (saved != null && (saved.identity == info.identity || (!info.hasTitle && saved.hasTitle))) {
-                media = saved.copy(durationMs = info.durationMs ?: saved.durationMs)
+            val cleanInfo = info.withoutAdFlags()
+            if (saved != null && (saved.identity == cleanInfo.identity || (!cleanInfo.hasTitle && saved.hasTitle))) {
+                media = saved.copy(durationMs = cleanInfo.durationMs ?: saved.durationMs)
                 savedPlayId?.let { playId = it }
                 inAdBreak = false
                 savedMovieMedia = null
@@ -137,7 +138,7 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
             inAdBreak = false
             savedMovieMedia = null
             savedPlayId = null
-            media = info
+            media = cleanInfo
             basePositionMs = null
             positionFromSession = false
             playedMs = 0L
@@ -149,8 +150,16 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
             return emptyList()
         }
         val previous = media
-        if (previous != null && previous.hasTitle && state != PlayState.STOPPED && isAdContent(info, previous)) {
-            return onAdDetected(now)
+        if (isAdContent(info, previous)) {
+            if (previous != null && previous.hasTitle && state != PlayState.STOPPED) {
+                return onAdDetected(now)
+            }
+            // Reclamă pre-roll (înainte să pornească filmul, la 0:00): nu pornim cronometrul reclamei.
+            savedMovieMedia = info?.withoutAdFlags()?.takeIf { it.hasTitle }
+            savedPlayId = playId
+            inAdBreak = true
+            playingSince = null
+            return emptyList()
         }
         if (previous != null && info != null && previous.identity == info.identity) {
             // Același titlu: doar actualizăm durata / câmpurile noi.
@@ -199,12 +208,20 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
 
     private fun isAdContent(info: MediaInfo?, reference: MediaInfo?): Boolean {
         if (info == null) return false
+        val adFlag = info.fields["advertisement"]
+        val isAdExtra = info.fields["is_ad"]
+        if (adFlag == "1" || adFlag.equals("true", ignoreCase = true) ||
+            isAdExtra == "1" || isAdExtra.equals("true", ignoreCase = true)
+        ) return true
         val titleText = listOfNotNull(info.fields["title"], info.fields["display_title"], info.fields["artist"]).joinToString(" ")
         if (titleText.isNotBlank() && AD_TITLE_RE.containsMatchIn(titleText)) return true
         val refDuration = reference?.durationMs ?: 0L
         val adDuration = info.durationMs ?: 0L
-        return refDuration >= 20 * 60_000L && adDuration in 5_000L..120_000L && info.identity != reference?.identity
+        return refDuration >= 20 * 60_000L && adDuration in 5_000L..180_000L && info.identity != reference?.identity
     }
+
+    private fun MediaInfo.withoutAdFlags(): MediaInfo =
+        copy(fields = fields.filterKeys { it != "advertisement" && it != "is_ad" })
 
     fun onPlaybackState(newState: PlayState, positionMs: Long?, updateTime: Long, newSpeed: Float, now: Long): List<Outgoing> {
         if (inAdBreak) {

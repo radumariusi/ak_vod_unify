@@ -16,14 +16,7 @@ import java.util.concurrent.TimeUnit
 /** Cere activitatea Netflix după ce serviciul a înregistrat vizionarea. */
 class NetflixRecentWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
-        if (!inputData.getBoolean(LOCAL_ONLY, false)) {
-            val receiver = ComponentName(SCROBBLER_PACKAGE, "ro.ak.vodscrobbler.NetflixRecoveryReceiver")
-            val installed = runCatching { applicationContext.packageManager.getReceiverInfo(receiver, 0) }.getOrNull()
-            if (installed != null) {
-                applicationContext.sendBroadcast(Intent(NetflixRecent.ACTION).setComponent(receiver))
-                return Result.success()
-            }
-        }
+        // Nu mai trimitem broadcast automat către AK Scrobbler (decuplare totală); scanăm doar local dacă există sesiune.
         val result = NetflixRecent.scan(applicationContext)
         NetflixMatchWorker.enqueue(applicationContext, result.toString())
         return Result.success()

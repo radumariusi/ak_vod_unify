@@ -111,4 +111,16 @@ class ScreenTextTest {
     fun resourceKeysAreIgnored() {
         assertNull(ScreenText.guess(items("ATVE.ScreenReader.Loading")))
     }
+
+    @Test
+    fun adScreenDetectsRealAdsAndIgnoresSeekbarMarkers() {
+        assertTrue(ScreenText.isAdScreen(items("Ad 1 of 2", "0:15")))
+        assertTrue(ScreenText.isAdScreen(items("Your video will resume after the ad")))
+        assertTrue(ScreenText.isAdScreen(items("Reclamă", "Skip ad")))
+        assertFalse(
+            ScreenText.isAdScreen(
+                items("The End of Oak Street", "ad_marker_1|{\"adStartTime\":0,\"adDuration\":50000}", "15:05"),
+            ),
+        )
+    }
 }

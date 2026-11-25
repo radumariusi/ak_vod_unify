@@ -198,7 +198,6 @@ class KeepAliveService : Service() {
         fun reconnect(context: Context) {
             start(context)
             MediaListenerService.reconnect(context)
-            Forwarder.get(context).flushPending()
         }
 
         /** Pornește serviciul dacă se poate (din fundal, Android 12+ poate refuza: nu e grav). */

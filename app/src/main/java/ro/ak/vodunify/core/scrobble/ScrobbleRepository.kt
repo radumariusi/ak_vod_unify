@@ -66,6 +66,8 @@ class ScrobbleRepository @Inject constructor(
 
     private val proofSerializer = MapSerializer(String.serializer(), AppProof.serializer())
     private val _proofs = MutableStateFlow<Map<String, AppProof>>(emptyMap())
+    private val processedIdsSerializer = ListSerializer(String.serializer())
+    private var processedIds: ArrayDeque<String>? = null
 
     /**
      * Dovada, pe fiecare aplicație (pachet), că „Continuă vizionarea” merge: ultima vizionare recunoscută
@@ -129,20 +131,37 @@ class ScrobbleRepository @Inject constructor(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ScrobbleMatch>?) = size > 200
     }
 
-    /** Câte vizionări neidentificate încă păstrăm (le reîncercăm automat). */
-    /**
-     * Procesează un eveniment. Aruncă excepție doar pentru erori trecătoare (rețea), ca
-     * scrobblerul să-l retrimită mai târziu.
-     */
+    /** Importă cronologic un lot tras din coada locală a AK Scrobbler; întoarce ID-urile salvate durabil. */
+    suspend fun importBatch(events: List<ScrobbleEvent>): List<String> = mutex.withLock {
+        ensureLoaded()
+        val seen = ensureProcessedIds()
+        val confirmed = ArrayList<String>(events.size)
+        for (event in events.sortedBy { it.at }) {
+            if (event.id.isNotBlank() && event.id in seen) {
+                confirmed.add(event.id)
+                continue
+            }
+            process(event, fromQueue = false)
+            if (event.id.isNotBlank()) {
+                seen.addLast(event.id)
+                while (seen.size > MAX_PROCESSED_IDS) seen.removeFirst()
+                confirmed.add(event.id)
+            }
+        }
+        saveProcessedIds(seen)
+        confirmed
+    }
+
+    fun hasRecentUnresolvedNetflix(): Boolean {
+        ensureLoaded()
+        val now = System.currentTimeMillis()
+        return readUnresolved().any { NetflixActivity.isNetflix(it.pkg) && now - it.at < TimeUnit.DAYS.toMillis(2) }
+    }
+
+    /** Procesează un eveniment (ex. apel direct legacy). */
     suspend fun handle(event: ScrobbleEvent): ScrobbleResult = mutex.withLock {
         ensureLoaded()
-        val result = process(event, fromQueue = false)
-        val now = System.currentTimeMillis()
-        if (_unresolved.value > 0 && now - prefs.getLong(KEY_LAST_RETRY, 0L) >= TimeUnit.MINUTES.toMillis(30)) {
-            prefs.edit().putLong(KEY_LAST_RETRY, now).apply()
-            ScrobbleRetryWorker.schedule(context)
-        }
-        result
+        process(event, fromQueue = false)
     }
 
     private suspend fun process(original: ScrobbleEvent, fromQueue: Boolean): ScrobbleResult {
@@ -153,8 +172,16 @@ class ScrobbleRepository @Inject constructor(
         val raw = ScrobbleRules.rawLabel(event.fields) + (serviceTitles.noteFor(original)?.let { " [$it]" } ?: "")
         fun done(result: ScrobbleResult, media: MediaRef? = null, duration: Long? = event.duration, position: Long = event.positionMs): ScrobbleResult {
             val e = entry(event, raw, media, duration, result, position, fromQueue)
-            // În timpul redării păstrăm o singură linie pe titlu; pauzele, opririle și problemele se adaugă.
-            if (event.isTick && !fromQueue) replaceLastTick(e) else appendLog(e)
+            val duplicateRetryMiss = fromQueue &&
+                (result == ScrobbleResult.UNMATCHED || result == ScrobbleResult.PENDING) &&
+                _log.value.any { prev ->
+                    prev.at == e.at && prev.pkg == e.pkg && prev.positionMs == e.positionMs &&
+                        prev.raw == e.raw && prev.result == e.result
+                }
+            // În timpul redării păstrăm o singură linie pe titlu; nu dublăm liniile „unmatched/pending” la reîncercări.
+            if (!duplicateRetryMiss) {
+                if (event.isTick && !fromQueue) replaceLastTick(e) else appendLog(e)
+            }
             if (media != null && (result == ScrobbleResult.SAVED || result == ScrobbleResult.WATCHED)) {
                 recordProof(original, extra.isNotEmpty(), media)
             }
@@ -172,12 +199,8 @@ class ScrobbleRepository @Inject constructor(
         if (match == null && event.playId.isNotEmpty()) match = byPlay[event.playId]
         if (match == null) {
             // Nu aruncăm nimic: păstrăm vizionarea și o completăm când aflăm titlul (alt eveniment
-            // al aceleiași vizionări) sau la o reîncercare.
+            // al aceleiași vizionări) sau la o reîncercare în prim-plan.
             if (!fromQueue) keepUnresolved(event)
-            // Netflix nu spune titlul: îl aflăm din activitatea profilului Netflix.
-            if (!fromQueue && !event.isTick && NetflixActivity.isNetflix(event.pkg)) {
-                NetflixRecentWorker.schedule(context)
-            }
             return done(if (guesses.isEmpty()) ScrobbleResult.PENDING else ScrobbleResult.UNMATCHED)
         }
         if (event.playId.isNotEmpty()) {
@@ -294,9 +317,6 @@ class ScrobbleRepository @Inject constructor(
         ensureLoaded()
         val now = System.currentTimeMillis()
         val list = mutex.withLock { readUnresolved() }
-        if (list.any { NetflixActivity.isNetflix(it.pkg) && now - it.at < TimeUnit.DAYS.toMillis(2) }) {
-            NetflixRecentWorker.schedule(context)
-        }
         var transientFailure = false
         for (e in list.sortedByDescending { it.at }) {
             if (TitleParser.guesses(e.fields, e.app).isEmpty()) continue
@@ -332,6 +352,10 @@ class ScrobbleRepository @Inject constructor(
         val last = prefs.getLong(key, 0L)
         val lastPackage = prefs.getString(packageKey, null)
         val resumeId = "$LOCAL_SOURCE|${media.itemKey}"
+        if (at < last) {
+            trackingDao.deleteResumeByIdBefore(resumeId, at)
+            return
+        }
         val replay = trackingDao.resumeById(resumeId)?.updatedAt?.let { it > last && it <= at } == true
         val duplicate = kotlin.math.abs(at - last) < TimeUnit.HOURS.toMillis(6) &&
             (at <= last || (lastPackage == appPackage && !replay))
@@ -451,6 +475,18 @@ class ScrobbleRepository @Inject constructor(
         prefs.getString(SCROBBLE_LOG, null)?.let { json.decodeFromString(logSerializer, it) }
     }.getOrNull().orEmpty()
 
+    private fun ensureProcessedIds(): ArrayDeque<String> {
+        processedIds?.let { return it }
+        val loadedIds = runCatching {
+            prefs.getString(KEY_PROCESSED_IDS, null)?.let { json.decodeFromString(processedIdsSerializer, it) }
+        }.getOrNull().orEmpty()
+        return ArrayDeque(loadedIds).also { processedIds = it }
+    }
+
+    private fun saveProcessedIds(ids: ArrayDeque<String>) {
+        prefs.edit().putString(KEY_PROCESSED_IDS, json.encodeToString(processedIdsSerializer, ids.toList())).apply()
+    }
+
     private companion object {
         const val KEY_ENABLED = "enabled"
         const val KEY_WATCHED_PCT = "watched_percent"
@@ -458,8 +494,10 @@ class ScrobbleRepository @Inject constructor(
         const val KEY_LAST_RETRY = "unresolved_last_retry"
         const val KEY_NETFLIX_STATUS = "netflix_status_"
         const val KEY_PROOFS = "proofs"
+        const val KEY_PROCESSED_IDS = "processed_ids"
         const val MAX_UNRESOLVED = 2_000
         const val MAX_APP_HISTORY = 2_000
+        const val MAX_PROCESSED_IDS = 500
         val eventsSerializer = ListSerializer(ScrobbleEvent.serializer())
         const val MAX_LOG = 400
     }

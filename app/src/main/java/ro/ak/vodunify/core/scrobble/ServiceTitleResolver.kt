@@ -117,7 +117,7 @@ class ServiceTitleResolver @Inject constructor(http: OkHttpClient) {
         },
     )
 
-    private data class Optional(val value: ServiceTitle?, val at: Long, val note: String)
+    private data class Optional(val value: ServiceTitle?, val at: Long, val note: String, val transient: Boolean = false)
 
     /** Ce s-a întâmplat la ultima căutare (pentru jurnalul din Setări): „Prime: The Boys S4E3”, „Prime: HTTP 403”… */
     fun noteFor(event: ScrobbleEvent): String? = keyFor(event)?.let { cache[it]?.note }
@@ -157,20 +157,23 @@ class ServiceTitleResolver @Inject constructor(http: OkHttpClient) {
     private suspend fun cached(key: String, load: suspend () -> Pair<ServiceTitle?, String>): ServiceTitle? {
         val now = System.currentTimeMillis()
         cache[key]?.let { c ->
-            // Eșecurile se reîncearcă după 30 de minute.
-            if (c.value != null || now - c.at < TimeUnit.MINUTES.toMillis(30)) return c.value
+            // Eșecurile temporare (HTTP 503/429) se reîncearcă mai repede (2 min); altele după 30 min.
+            val retryWindowMs = if (c.transient) TimeUnit.MINUTES.toMillis(2) else TimeUnit.MINUTES.toMillis(30)
+            if (c.value != null || now - c.at < retryWindowMs) return c.value
         }
         val r = runCatching { load() }
         val pair = r.getOrNull()
         val v = pair?.first
         val httpNote = pair?.second.orEmpty()
+        val transient = r.isFailure || httpNote.contains("HTTP 5") || httpNote.contains("HTTP 429")
         val service = key.substringBefore(':').replaceFirstChar { it.uppercase() }
         val note = when {
             v != null -> "$service: ${v.show}" + (v.season?.let { " S$it" } ?: "") + (v.episode?.let { "E$it" } ?: "")
             r.isFailure -> "$service: eroare ${r.exceptionOrNull()?.javaClass?.simpleName} ${r.exceptionOrNull()?.message?.take(60)}"
             else -> "$service: pagina nu are titlu $httpNote"
         }
-        cache[key] = Optional(v, now, note)
+        if (v == null) ro.ak.vodunify.core.diagnostics.AppDiagLog.add("ServiceTitleResolver ($key): $note")
+        cache[key] = Optional(v, now, note, transient)
         return v
     }
 

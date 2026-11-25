@@ -78,11 +78,21 @@ object GitHubLogUploader {
         val authorities = listOf("ro.ak.vodscrobbler.diag", "ro.ak.vodscrobbler.debug.diag")
         for (auth in authorities) {
             val uri = Uri.parse("content://$auth/report")
-            val text = runCatching {
-                context.contentResolver.query(uri, null, null, null, null)?.use { c ->
+            val client = runCatching { context.contentResolver.acquireUnstableContentProviderClient(uri) }.getOrNull() ?: continue
+            val text = try {
+                client.query(uri, null, null, null, null)?.use { c ->
                     if (c.moveToFirst()) c.getString(0) else null
                 }
-            }.getOrNull()
+            } catch (_: Exception) {
+                null
+            } finally {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    runCatching { client.close() }
+                } else {
+                    @Suppress("DEPRECATION")
+                    runCatching { client.release() }
+                }
+            }
             if (!text.isNullOrBlank()) return text
         }
         return "=== AK Scrobbler ===\n(nu este instalat sau nu a răspuns la interogarea de diagnostic)"

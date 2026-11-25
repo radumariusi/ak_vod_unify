@@ -29,6 +29,7 @@ class VodUnifyApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         ro.ak.vodunify.core.diagnostics.AppDiagLog.installCrashHandler(this)
+        ro.ak.vodunify.core.diagnostics.AppDiagLog.add("AK VOD Unify pornit (${BuildConfig.VERSION_NAME})")
         // Aplicațiile și serviciile adăugate / eliminate de tine (citite sincron de liste).
         AppRegistry.init(this)
         // Setările de interfață (derulare Acasă, aspect Lista mea).

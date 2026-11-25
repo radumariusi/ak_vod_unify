@@ -65,12 +65,15 @@ object ScreenText {
     )
 
     private val AD_TEXT = Regex(
-        """(?i)^(?:ad|ads|advertisement|reclam[aă]|publicitate|sponsored|sponsorizat)(?:\s*\d+\s*(?:of|din|/)\s*\d+)?$|\b(?:your video will resume|video-ul va continua|reclama se termin[aă]|ad ends in)\b""",
+        """(?i)^(?:ad|ads|advertisement|reclam[aă]|publicitate|sponsored|sponsorizat|commercial|ad\s*break)(?:\s*(?:[·:\-]\s*\d.*|\d+\s*(?:of|din|/)\s*\d+))?$|\b(?:your video will resume|video will resume|content will resume|video-ul va continua|reclama se termin[aă]|ad ends in|skip\s+ad|sari peste reclam[aă]|during\s+ad\s+break)\b""",
     )
 
     /** True dacă pe ecran rulează o reclamă (nu filmul / episodul principal). */
     fun isAdScreen(items: List<ScreenItem>): Boolean =
-        items.any { AD_TEXT.containsMatchIn(it.text.trim()) }
+        items.any { item ->
+            val t = item.text.trim()
+            t.isNotEmpty() && !t.contains('{') && !t.startsWith("ad_marker", ignoreCase = true) && AD_TEXT.containsMatchIn(t)
+        }
 
     fun guess(items: List<ScreenItem>, appLabel: String? = null): ScreenGuess? {
         val app = appLabel?.let(::normalize)

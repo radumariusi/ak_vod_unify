@@ -6,6 +6,7 @@ import kotlinx.serialization.Serializable
 /** Ce trimite AK Scrobbler (JSON în coloana „payload” a insert-ului). */
 @Serializable
 data class ScrobbleEvent(
+    val id: String = "",
     val pkg: String,
     val app: String = pkg,
     /** pause | stop | tick */

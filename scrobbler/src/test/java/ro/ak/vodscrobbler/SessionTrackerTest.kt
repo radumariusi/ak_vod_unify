@@ -194,4 +194,39 @@ class SessionTrackerTest {
         assertTrue(t.onPlaybackState(PlayState.STOPPED, 10_000, 25_000, 0f, 25_000).isEmpty())
         assertTrue(t.onGone(26_000).isEmpty())
     }
+
+    @Test
+    fun primeVideoAdvertisementFlagWithSameMediaIdProtectsMovieProgress() {
+        val gti = "amzn1.dv.gti.b7768274-7eac-4ea7-971f-cc4c30501af4"
+        val movie = MediaInfo(mapOf("media_id" to gti, "author" to "PrimeVideo"), durationMs = null)
+        val adSameId = MediaInfo(mapOf("media_id" to gti, "author" to "PrimeVideo", "advertisement" to "1"), durationMs = null)
+
+        val t = SessionTracker("com.amazon.amazonvideo.livingroom", "Prime Video")
+        t.onMetadata(movie, 0)
+        val id = t.playId
+        t.onPlaybackState(PlayState.PLAYING, 600_000, 0, 1f, 0)
+
+        // Prime Video setează ADVERTISEMENT=1 păstrând același MEDIA_ID: salvează 10:15, ignoră reclama.
+        val out = t.onMetadata(adSameId, 15_000)
+        assertEquals(SendReason.PAUSE, out.single().reason)
+        assertEquals(615_000L, out.single().positionMs)
+        assertTrue(t.onPlaybackState(PlayState.PAUSED, 42_000, 30_000, 0f, 30_000).isEmpty())
+
+        // Revine filmul (fără ADVERTISEMENT=1): păstrează playId-ul.
+        assertTrue(t.onMetadata(movie, 45_000).isEmpty())
+        assertEquals(id, t.playId)
+    }
+
+    @Test
+    fun preRollAdvertisementDoesNotCountAsMoviePlayback() {
+        val gti = "amzn1.dv.gti.b7768274-7eac-4ea7-971f-cc4c30501af4"
+        val adStart = MediaInfo(mapOf("media_id" to gti, "advertisement" to "1"), durationMs = null)
+        val movie = MediaInfo(mapOf("media_id" to gti), durationMs = null)
+
+        val t = SessionTracker("com.amazon.amazonvideo.livingroom", "Prime Video")
+        assertTrue(t.onMetadata(adStart, 0).isEmpty())
+        assertTrue(t.onPlaybackState(PlayState.PLAYING, 0, 0, 1f, 0).isEmpty())
+        assertTrue(t.onPlaybackState(PlayState.PAUSED, 35_000, 35_000, 0f, 35_000).isEmpty())
+        assertTrue(t.onMetadata(movie, 40_000).isEmpty())
+    }
 }

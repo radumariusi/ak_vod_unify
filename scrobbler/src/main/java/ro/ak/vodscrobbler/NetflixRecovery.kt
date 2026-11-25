@@ -1,23 +1,16 @@
 package ro.ak.vodscrobbler
 
-import android.content.BroadcastReceiver
-import android.content.ContentValues
 import android.content.Context
-import android.content.Intent
 import android.content.res.Configuration
-import android.net.Uri
-import androidx.work.CoroutineWorker
-import androidx.work.ExistingWorkPolicy
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
-import androidx.work.WorkerParameters
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import ro.ak.vodimport.NetflixRecent
 import ro.ak.vodimport.WebLoginActivity
 
+/**
+ * Autentificarea Netflix în AK Scrobbler. Păstrează sesiunea WebView și ultima activitate
+ * local în Scrobbler, fără a contacta AK VOD Unify în fundal; Unify o preia când intră în prim-plan.
+ */
 class NetflixLoginActivity : WebLoginActivity() {
     override val recentOnly = true
 
@@ -35,34 +28,27 @@ class NetflixLoginActivity : WebLoginActivity() {
         val items = payload.getJSONArray("items")
         val recent = JSONArray()
         for (i in 0 until minOf(items.length(), 200)) recent.put(items.get(i))
-        return if (sendActivity(applicationContext, NetflixRecent.result("ok", items = recent))) {
-            "Sesiunea este activă. Activitatea recentă a fost trimisă către AK VOD Unify."
-        } else {
-            "AK VOD Unify nu a acceptat activitatea. Verifică dacă ai instalat ambele APK-uri din același release."
-        }
+        NetflixLocalCache.save(applicationContext, NetflixRecent.result("ok", items = recent))
+        return "Sesiunea Netflix este activă. AK VOD Unify va prelua automat activitatea la deschidere."
     }
 }
 
-class NetflixRecoveryReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != NetflixRecent.ACTION) return
-        WorkManager.getInstance(context).enqueueUniqueWork(
-            "netflix_recovery", ExistingWorkPolicy.KEEP, OneTimeWorkRequestBuilder<NetflixRecoveryWorker>().build(),
-        )
-    }
-}
+internal object NetflixLocalCache {
+    private const val PREFS = "netflix_local"
+    private const val KEY_JSON = "last_result"
+    private const val KEY_AT = "last_at"
 
-class NetflixRecoveryWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
-    override suspend fun doWork(): Result {
-        val activity = NetflixRecent.scan(applicationContext)
-        val sent = withContext(Dispatchers.IO) { sendActivity(applicationContext, activity) }
-        return if (sent) Result.success() else if (runAttemptCount < 2) Result.retry() else Result.failure()
+    fun save(context: Context, result: JSONObject) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_JSON, result.toString())
+            .putLong(KEY_AT, System.currentTimeMillis())
+            .apply()
     }
-}
 
-private fun sendActivity(context: Context, result: JSONObject): Boolean {
-    val uri = Uri.parse("content://${BuildConfig.MAIN_APP_ID}.scrobble/netflix_recent")
-    return runCatching {
-        context.contentResolver.insert(uri, ContentValues().apply { put("payload", result.toString()) }) != null
-    }.getOrDefault(false)
+    fun readIfFresh(context: Context, maxAgeMs: Long): String? {
+        val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val at = p.getLong(KEY_AT, 0L)
+        if (System.currentTimeMillis() - at > maxAgeMs) return null
+        return p.getString(KEY_JSON, null)
+    }
 }

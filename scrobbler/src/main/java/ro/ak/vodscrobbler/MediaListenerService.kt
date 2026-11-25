@@ -113,7 +113,6 @@ class MediaListenerService : NotificationListenerService() {
         }
         runCatching { activeNotifications?.forEach(::rememberNotification) }
         updateTicker()
-        Forwarder.get(this).flushPending()
         KeepAliveService.start(this)
     }
 
@@ -252,6 +251,7 @@ class MediaListenerService : NotificationListenerService() {
             entry = Tracked(controller, tracker, callback, tag)
             entry.nativeInfo = controller.metadata?.toInfo()
             extractGtiFromBundle(controller.extras, entry.extraFields)
+            extractAdFromBundle(controller.extras, entry.extraFields)
             controller.registerCallback(callback, handler)
             tracked[key] = entry
             ScreenState.rememberMediaApp(this, controller.packageName)
@@ -300,6 +300,14 @@ class MediaListenerService : NotificationListenerService() {
             }
         }
         extractGtiFromBundle(state?.extras, t.extraFields)
+        val wasAd = t.extraFields["is_ad"] == "1"
+        extractAdFromBundle(state?.extras, t.extraFields)
+        val isAdNow = t.extraFields["is_ad"] == "1"
+        if (isAdNow && !wasAd) {
+            dispatch(t.tracker.onAdDetected(now))
+        } else if (!isAdNow && wasAd) {
+            dispatch(t.tracker.onMetadata(merged(t), now))
+        }
         dispatch(t.tracker.onPlaybackState(s, position, state?.lastPositionUpdateTime ?: 0L, state?.playbackSpeed ?: 1f, now))
     }
 
@@ -536,7 +544,8 @@ class MediaListenerService : NotificationListenerService() {
         ScreenState.skipScreenForPackages = tracked.values
             .filter { t ->
                 val active = t.tracker.state == PlayState.PLAYING || t.tracker.state == PlayState.PAUSED || t.tracker.state == PlayState.BUFFERING
-                active && hasTextTitle(t) && t.tracker.hasSessionPosition
+                active && hasTextTitle(t) && t.tracker.hasSessionPosition &&
+                    ScreenState.KNOWN_VIDEO_PREFIXES.none { t.tracker.packageName.startsWith(it) }
             }
             .map { it.tracker.packageName }
             .toSet()
@@ -619,7 +628,25 @@ class MediaListenerService : NotificationListenerService() {
             }
         }
 
-        private val LONG_KEYS = setOf("duration", "year", "track_number", "disc_number", "num_tracks", "bt_folder_type", "media_type")
+        private val LONG_KEYS = setOf("duration", "year", "track_number", "disc_number", "num_tracks", "bt_folder_type", "media_type", "advertisement")
+
+        @Suppress("DEPRECATION")
+        fun extractAdFromBundle(extras: Bundle?, out: MutableMap<String, String>) {
+            out.remove("is_ad")
+            if (extras == null || extras.isEmpty) return
+            runCatching {
+                for (k in extras.keySet()) {
+                    val low = k.lowercase()
+                    if (low == "advertisement" || low == "is_ad" || low == "is_advertisement" || low.endsWith(".advertisement") || low.endsWith(".is_ad")) {
+                        val v = extras.get(k)
+                        if (v == true || v == 1 || v == 1L || v?.toString()?.equals("true", true) == true || v?.toString() == "1") {
+                            out["is_ad"] = "1"
+                            return
+                        }
+                    }
+                }
+            }
+        }
 
         /** Toate cheile brute din metadate, cu tipul lor, pentru jurnal. */
         fun describe(md: MediaMetadata?): String {
