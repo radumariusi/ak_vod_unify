@@ -41,6 +41,8 @@ object GitHubLogUploader {
         context: Context,
         scrobbleLog: List<ScrobbleLogEntry>,
         routeItems: List<RouteItem>,
+        netflixStatus: List<String> = emptyList(),
+        unresolvedCount: Int = 0,
     ): String = withContext(Dispatchers.IO) {
         AppDiagLog.init(context)
         val fmt = SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.ROOT)
@@ -50,6 +52,10 @@ object GitHubLogUploader {
             appendLine("=== AK VOD Unify (${BuildConfig.VERSION_NAME} · ${BuildConfig.APPLICATION_ID}) ===")
             appendLine("Generat: ${fmt.format(Date())}")
             appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL} (Android ${Build.VERSION.RELEASE}, SDK ${Build.VERSION.SDK_INT})")
+            appendLine("Unresolved count: $unresolvedCount")
+            if (netflixStatus.isNotEmpty()) {
+                appendLine("Netflix status: ${netflixStatus.joinToString(" | ")}")
+            }
             appendLine()
             appendLine("--- AK VOD Unify: Jurnal aplicație ---")
             appendLine(AppDiagLog.asText().ifBlank { "(gol)" })

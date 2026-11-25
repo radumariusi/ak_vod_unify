@@ -66,9 +66,10 @@ class ScrobbleDiagProvider : ContentProvider() {
                         ?: if (trigger) {
                             runCatching {
                                 runBlocking {
-                                    withTimeoutOrNull(25_000L) { NetflixRecent.scan(ctx) }
+                                    withTimeoutOrNull(42_000L) { NetflixRecent.scan(ctx) }
                                 }
                             }.getOrNull()?.also { NetflixLocalCache.save(ctx, it) }?.toString()
+                                ?: NetflixRecent.result("error", "Timeout WebView Netflix (42s) în AK Scrobbler").toString()
                         } else {
                             null
                         }

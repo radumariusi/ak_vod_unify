@@ -268,6 +268,12 @@ class ScrobbleRepository @Inject constructor(
             "not_logged_in" -> "$time · ${result.message ?: "neconectat"}"
             else -> "$time · eroare: ${result.message ?: "-"}"
         }
+        ro.ak.vodunify.core.diagnostics.AppDiagLog.add("Netflix applyNetflixRecent: $line")
+        if (result.status == "ok" && matched == 0 && result.items.isNotEmpty()) {
+            val sampleItems = result.items.take(3).joinToString(" | ") { "${it.title}@${it.watchedAt}" }
+            val sampleUnres = readUnresolved().filter { NetflixActivity.isNetflix(it.pkg) }.take(2).joinToString(" | ") { "at=${it.at},pos=${it.positionMs}" }
+            ro.ak.vodunify.core.diagnostics.AppDiagLog.add("Netflix zero-match debug: items=[$sampleItems] pending=[$sampleUnres]")
+        }
         mutex.withLock {
             prefs.edit().putString(KEY_NETFLIX_STATUS + result.route.ifBlank { "?" }, line).apply()
             _netflix.value = readNetflixStatus()

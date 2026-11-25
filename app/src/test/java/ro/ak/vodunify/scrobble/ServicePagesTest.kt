@@ -67,4 +67,30 @@ class ServicePagesTest {
         )
         assertTrue(TitleParser.guesses(fields, "Prime Video").isEmpty())
     }
+
+    @Test
+    fun primeSeasonPageHydrationPicksExactEpisodeOverSeasonOneSwitcher() {
+        val epGti = "amzn1.dv.gti.af1a7586-2d90-4ece-8c98-24f1577a7852"
+        val s3Gti = "amzn1.dv.gti.8c43a805-f19b-4642-b474-7494b7759e80"
+        val html = """
+            <html><head><title>Prime Video: The Lord of the Rings: The Rings of Power - Season 3</title></head>
+            <body><script type="application/json">{
+              "signupLink":"/signup?cGTI=$epGti",
+              "seasons":[{"sequenceNumber":1,"titleType":"season"},{"sequenceNumber":2,"titleType":"season"},{"sequenceNumber":3,"titleType":"season"}],
+              "self":{
+                "$s3Gti":{"gti":"$s3Gti","sequenceNumber":3,"titleType":"season"},
+                "$epGti":{"gti":"$epGti","sequenceNumber":7,"titleType":"episode"}
+              },
+              "episodes":{
+                "amzn1.dv.gti.00000000-0000-0000-0000-000000000001":{"title":"Marnûkh","episodeNumber":1},
+                "$epGti":{"title":"Orodruin"}
+              }
+            }</script></body></html>
+        """.trimIndent()
+        val t = ServicePages.prime(html, epGti)!!
+        assertEquals("The Lord of the Rings: The Rings of Power", t.show)
+        assertEquals(3, t.season)
+        assertEquals(7, t.episode)
+        assertEquals("Orodruin", t.episodeTitle)
+    }
 }

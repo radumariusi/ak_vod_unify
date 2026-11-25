@@ -64,14 +64,26 @@ class DiagnosticsViewModel @Inject constructor(
     }
 
     fun uploadLogsToGitHub() = launchAction("upload_logs") {
-        val report = GitHubLogUploader.collectFullReport(context, scrobble.log.value, items.value.orEmpty())
+        val report = GitHubLogUploader.collectFullReport(
+            context,
+            scrobble.log.value,
+            items.value.orEmpty(),
+            netflixStatus = scrobble.netflix.value,
+            unresolvedCount = scrobble.unresolved.value,
+        )
         val url = GitHubLogUploader.uploadGist(okHttp, _githubToken.value, report).getOrThrow()
         _uploadedGistUrl.value = url
         "Jurnal încărcat pe GitHub: $url"
     }
 
     fun saveLogsLocally() = launchAction("save_logs") {
-        val report = GitHubLogUploader.collectFullReport(context, scrobble.log.value, items.value.orEmpty())
+        val report = GitHubLogUploader.collectFullReport(
+            context,
+            scrobble.log.value,
+            items.value.orEmpty(),
+            netflixStatus = scrobble.netflix.value,
+            unresolvedCount = scrobble.unresolved.value,
+        )
         val path = GitHubLogUploader.saveLocal(context, report).getOrThrow()
         "Jurnal salvat local: $path"
     }

@@ -75,14 +75,25 @@ class ScrobblePuller @Inject constructor(
 
     private suspend fun scanNetflixInForeground(auth: String = "${repository.scrobblerPackage}.diag") {
         if (!repository.hasRecentUnresolvedNetflix()) return
-        val local = if (NetflixRecent.hasSession()) {
+        val hasLocalSession = NetflixRecent.hasSession()
+        val local = if (hasLocalSession) {
+            AppDiagLog.add("Netflix scan: pornesc din sesiunea Unify")
             NetflixRecent.scan(context)
         } else {
-            queryNetflixFromScrobbler(auth) ?: return
+            AppDiagLog.add("Netflix scan: Unify fără cookie Netflix, întreb AK Scrobbler")
+            queryNetflixFromScrobbler(auth) ?: run {
+                AppDiagLog.add("Netflix scan: AK Scrobbler nu a răspuns la /netflix_recent")
+                return
+            }
         }
         val parsed = runCatching {
             json.decodeFromString(NetflixRecentResult.serializer(), local.toString())
+        }.onFailure {
+            AppDiagLog.add("Netflix scan: JSON invalid: ${it.message}")
         }.getOrNull() ?: return
+        AppDiagLog.add(
+            "Netflix scan (${if (hasLocalSession) "Unify" else "Scrobbler"}): status=${parsed.status} · items=${parsed.items.size} · msg=${parsed.message ?: "-"}",
+        )
         repository.applyNetflixRecent(parsed)
     }
 

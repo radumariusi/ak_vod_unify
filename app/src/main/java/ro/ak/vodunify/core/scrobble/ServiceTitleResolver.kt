@@ -41,13 +41,18 @@ object ServicePages {
     /** „Watch The Boys - Season 4 | Prime Video” → The Boys, sezonul 4 (+ episodul, dacă îl găsim lângă cod). */
     fun prime(html: String, gti: String): ServiceTitle? {
         val rawTitle = pageTitle(html) ?: return null
-        var t = rawTitle
+        val t = rawTitle
             .replace(Regex("""(?i)\s*[|–—-]\s*(amazon\.com\s*:\s*|amazon\s+)?prime\s*video.*$"""), "")
             .replace(Regex("""(?i)^(amazon\.com:\s*|prime video:\s*|watch\s+|vizioneaz[aă]\s+|urm[aă]re[sș]te\s+)"""), "")
             .trim()
         val inline = PRIME_INLINE_EP.find(t)
+        val escapedGti = Regex.escape(gti)
+        val selfEp = Regex(""""$escapedGti"\s*:\s*\{[^}]{0,350}?"sequenceNumber"\s*:\s*(\d{1,3})\s*,\s*"titleType"\s*:\s*"episode"""").find(html)
+            ?: Regex(""""gti"\s*:\s*"$escapedGti"[^}]{0,250}?"sequenceNumber"\s*:\s*(\d{1,3})\s*,\s*"titleType"\s*:\s*"episode"""").find(html)
+        val selfSeason = Regex(""""sequenceNumber"\s*:\s*(\d{1,2})\s*,\s*"titleType"\s*:\s*"season"""").find(html)
         val season = inline?.groupValues?.get(1)?.toIntOrNull()
             ?: SEASON.find(t)?.groupValues?.get(1)?.toIntOrNull()
+            ?: selfSeason?.groupValues?.get(1)?.toIntOrNull()
             ?: PRIME_LD_SEASON.find(html)?.groupValues?.get(1)?.toIntOrNull()
         val show = t
             .replace(PRIME_INLINE_EP, "")
@@ -58,19 +63,27 @@ object ServicePages {
             return null
         }
         val ep = inline?.groupValues?.get(2)?.toIntOrNull()
+            ?: selfEp?.groupValues?.get(1)?.toIntOrNull()
             ?: episodeNear(html, gti)
             ?: PRIME_LD_EPISODE.find(html)?.groupValues?.get(1)?.toIntOrNull()
-        return ServiceTitle(show, season, ep, null)
+        val epTitle = Regex(""""$escapedGti"\s*:\s*\{\s*"title"\s*:\s*"([^"]+)"""").find(html)
+            ?.groupValues?.get(1)?.let(::unescape)?.trim()?.takeIf { it.isNotEmpty() && !it.equals(show, ignoreCase = true) }
+        return ServiceTitle(show, season, ep, epTitle)
     }
 
-    /** În JSON-ul paginii, numărul episodului e în apropierea codului lui. */
+    /** În JSON-ul paginii, numărul episodului e în obiectul JSON al codului [gti] (nu în linkurile din pagină). */
     private fun episodeNear(html: String, gti: String): Int? {
         var idx = html.indexOf(gti)
         while (idx >= 0) {
-            val from = (idx - 1500).coerceAtLeast(0)
-            val to = minOf(html.length, idx + 4000)
-            val window = html.substring(from, to)
-            PRIME_LD_SEQ.find(window)?.let { return it.groupValues[1].toInt() }
+            val prefix = html.substring((idx - 40).coerceAtLeast(0), idx)
+            if (!prefix.contains("cGTI=", ignoreCase = true) && !prefix.contains("/detail/")) {
+                val from = (idx - 120).coerceAtLeast(0)
+                val to = minOf(html.length, idx + 450)
+                val window = html.substring(from, to)
+                if (!window.contains(""""titleType":"season"""")) {
+                    PRIME_LD_SEQ.find(window)?.let { return it.groupValues[1].toInt() }
+                }
+            }
             idx = html.indexOf(gti, idx + gti.length)
         }
         return null
