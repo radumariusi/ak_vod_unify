@@ -4,7 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.util.concurrent.ConcurrentHashMap
+import java.util.Collections
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -91,7 +91,11 @@ object ServicePages {
 @Singleton
 class ServiceTitleResolver @Inject constructor(http: OkHttpClient) {
     private val client = http.newBuilder().callTimeout(12, TimeUnit.SECONDS).followRedirects(true).build()
-    private val cache = ConcurrentHashMap<String, Optional>()
+    private val cache = Collections.synchronizedMap(
+        object : LinkedHashMap<String, Optional>(64, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Optional>?) = size > 500
+        },
+    )
 
     private data class Optional(val value: ServiceTitle?, val at: Long, val note: String)
 
@@ -108,48 +112,52 @@ class ServiceTitleResolver @Inject constructor(http: OkHttpClient) {
         }
     }
 
-    private var lastHttp: String = ""
-
     /** Câmpurile de adăugat la eveniment, sau gol dacă nu avem cod / nu am găsit nimic. */
     suspend fun fieldsFor(event: ScrobbleEvent): Map<String, String> {
         val gti = event.fields.values.firstNotNullOfOrNull { ServicePages.PRIME_GTI.find(it)?.value }
         val netflixId = event.fields["netflix_id"]?.takeIf { ServicePages.NETFLIX_ID.matches(it) }
         val title = when {
-            gti != null -> cached("prime:$gti") { ServicePages.prime(get("https://www.primevideo.com/detail/$gti/") ?: return@cached null, gti) }
-            netflixId != null -> cached("netflix:$netflixId") { ServicePages.netflix(get("https://www.netflix.com/title/$netflixId") ?: return@cached null) }
+            gti != null -> cached("prime:$gti") {
+                val (html, httpNote) = get("https://www.primevideo.com/detail/$gti/")
+                (html?.let { ServicePages.prime(it, gti) }) to httpNote
+            }
+            netflixId != null -> cached("netflix:$netflixId") {
+                val (html, httpNote) = get("https://www.netflix.com/title/$netflixId")
+                (html?.let { ServicePages.netflix(it) }) to httpNote
+            }
             else -> null
         } ?: return emptyMap()
         return ServicePages.asFields(title)
     }
 
-    private suspend fun cached(key: String, load: suspend () -> ServiceTitle?): ServiceTitle? {
+    private suspend fun cached(key: String, load: suspend () -> Pair<ServiceTitle?, String>): ServiceTitle? {
         val now = System.currentTimeMillis()
         cache[key]?.let { c ->
             // Eșecurile se reîncearcă după 30 de minute.
             if (c.value != null || now - c.at < TimeUnit.MINUTES.toMillis(30)) return c.value
         }
-        lastHttp = ""
         val r = runCatching { load() }
-        val v = r.getOrNull()
+        val pair = r.getOrNull()
+        val v = pair?.first
+        val httpNote = pair?.second.orEmpty()
         val service = key.substringBefore(':').replaceFirstChar { it.uppercase() }
         val note = when {
             v != null -> "$service: ${v.show}" + (v.season?.let { " S$it" } ?: "") + (v.episode?.let { "E$it" } ?: "")
             r.isFailure -> "$service: eroare ${r.exceptionOrNull()?.javaClass?.simpleName} ${r.exceptionOrNull()?.message?.take(60)}"
-            else -> "$service: pagina nu are titlu $lastHttp"
+            else -> "$service: pagina nu are titlu $httpNote"
         }
-        if (cache.size > 500) cache.clear()
         cache[key] = Optional(v, now, note)
         return v
     }
 
-    private suspend fun get(url: String): String? = withContext(Dispatchers.IO) {
+    private suspend fun get(url: String): Pair<String?, String> = withContext(Dispatchers.IO) {
         val req = Request.Builder().url(url)
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
             .header("Accept-Language", "en-US,en;q=0.8,ro;q=0.6")
             .build()
         client.newCall(req).execute().use { r ->
-            lastHttp = "(HTTP ${r.code} ${r.request.url.host}${r.request.url.encodedPath.take(40)})"
-            if (r.isSuccessful) r.body?.string() else null
+            val httpNote = "(HTTP ${r.code} ${r.request.url.host}${r.request.url.encodedPath.take(40)})"
+            (if (r.isSuccessful) r.body?.string() else null) to httpNote
         }
     }
 }

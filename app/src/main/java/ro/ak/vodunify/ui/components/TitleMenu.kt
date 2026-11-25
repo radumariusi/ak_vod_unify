@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
@@ -95,11 +96,12 @@ class TitleMenuViewModel @Inject constructor(
 
     private fun act(block: suspend (CatalogItem, TitleTrackState?) -> String) {
         val i = _item.value ?: return
-        val s = state.value
+        val cached = state.value
         close()
         viewModelScope.launch {
             _message.value = try {
-                block(i, s)
+                val resolved = cached ?: runCatching { tracking.titleState(i.mediaKey).first() }.getOrNull()
+                block(i, resolved)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

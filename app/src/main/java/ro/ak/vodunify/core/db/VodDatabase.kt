@@ -17,7 +17,7 @@ import androidx.room.RoomDatabase
         TmdbCacheEntity::class,
         AvailabilityEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 abstract class VodDatabase : RoomDatabase() {

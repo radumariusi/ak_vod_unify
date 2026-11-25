@@ -139,19 +139,47 @@ class BackupRepository @Inject constructor(
 
     private fun createZip(): File {
         // Tot ce e în jurnalul WAL trece în fișierul principal, ca arhiva să fie completă.
-        runCatching { db.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(FULL)").use { it.moveToFirst() } }
+        runCatching { db.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() } }
+        val dbFile = context.getDatabasePath(DB_NAME)
+        val trimmedDb = if (dbFile.isFile) trimmedDatabaseCopy(dbFile) else null
         val zip = File(context.cacheDir, "backup.zip")
-        ZipOutputStream(zip.outputStream().buffered()).use { out ->
-            out.putNextEntry(ZipEntry(MANIFEST))
-            out.write("app=${BuildConfig.APPLICATION_ID}\nversion=${BuildConfig.VERSION_NAME}\ncreated=${System.currentTimeMillis()}\n".toByteArray())
-            out.closeEntry()
-            backupFiles().filterNot { it.first.endsWith("-wal") }.forEach { (name, file) ->
-                out.putNextEntry(ZipEntry(name))
-                file.inputStream().use { it.copyTo(out) }
+        try {
+            ZipOutputStream(zip.outputStream().buffered()).use { out ->
+                out.putNextEntry(ZipEntry(MANIFEST))
+                out.write("app=${BuildConfig.APPLICATION_ID}\nversion=${BuildConfig.VERSION_NAME}\ncreated=${System.currentTimeMillis()}\n".toByteArray())
                 out.closeEntry()
+                backupFiles().filterNot { it.first.endsWith("-wal") }.forEach { (name, file) ->
+                    val source = if (name == "databases/$DB_NAME" && trimmedDb != null) trimmedDb else file
+                    out.putNextEntry(ZipEntry(name))
+                    source.inputStream().use { it.copyTo(out) }
+                    out.closeEntry()
+                }
             }
+            return zip
+        } finally {
+            trimmedDb?.delete()
         }
-        return zip
+    }
+
+    /** Copie compactă a bazei fără cache-ul re-descărcabil TMDb / disponibilitate, cu VACUUM. */
+    private fun trimmedDatabaseCopy(original: File): File? {
+        val copy = File(context.cacheDir, "backup_clean.db")
+        return runCatching {
+            original.copyTo(copy, overwrite = true)
+            android.database.sqlite.SQLiteDatabase.openDatabase(
+                copy.path,
+                null,
+                android.database.sqlite.SQLiteDatabase.OPEN_READWRITE,
+            ).use { sqlite ->
+                sqlite.execSQL("DELETE FROM tmdb_cache")
+                sqlite.execSQL("DELETE FROM availability")
+                sqlite.execSQL("VACUUM")
+            }
+            copy
+        }.getOrElse {
+            copy.delete()
+            null
+        }
     }
 
     private fun applyZip(zip: File) {

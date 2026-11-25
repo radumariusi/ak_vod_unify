@@ -40,9 +40,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -202,11 +206,15 @@ private fun Overview(
     val episodesFocus = remember { FocusRequester() }
     val listState = rememberLazyListState()
     val isTvShow = details.item.kind == TitleKind.TV && details.seasons.isNotEmpty()
+    val currentWatch by rememberUpdatedState(watch)
     if (spec.isTv) {
-        LaunchedEffect(details.item.mediaKey) {
+        LaunchedEffect(details.item.mediaKey, focusEpisodes) {
+            if (!focusEpisodes) {
+                withTimeoutOrNull(250L) { snapshotFlow { currentWatch != null }.first { it } }
+            }
             withFrameNanos { }
             runCatching { if (focusEpisodes && isTvShow) episodesFocus.requestFocus() else primaryFocus.requestFocus() }
-            onFocused()
+            if (focusEpisodes) onFocused()
         }
     }
 

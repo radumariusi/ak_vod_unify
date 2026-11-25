@@ -3,6 +3,7 @@ package ro.ak.vodscrobbler
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -161,8 +162,15 @@ class ScreenReaderService : AccessibilityService() {
         runCatching { windows }.getOrNull()?.forEach { w -> w.root?.let { all.add(it) } }
         if (all.isEmpty()) rootInActiveWindow?.let { all.add(it) }
         val roots = all.filter { it.packageName?.toString() == pkg }
-        if (roots.isEmpty()) return
-        roots.forEach { collect(it, items, ranges, 0) }
+        if (roots.isEmpty()) {
+            all.forEach(::recycleLegacy)
+            return
+        }
+        try {
+            roots.forEach { collect(it, items, ranges, 0) }
+        } finally {
+            all.forEach(::recycleLegacy)
+        }
 
         val app = ScrobblerState.live.firstOrNull { it.packageName == pkg }?.appLabel ?: appLabel(pkg)
         val guess = ScreenText.guess(items, app)
@@ -200,7 +208,18 @@ class ScreenReaderService : AccessibilityService() {
         }
         for (i in 0 until node.childCount) {
             val child = runCatching { node.getChild(i) }.getOrNull() ?: continue
-            collect(child, items, ranges, depth + 1)
+            try {
+                collect(child, items, ranges, depth + 1)
+            } finally {
+                recycleLegacy(child)
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun recycleLegacy(node: AccessibilityNodeInfo) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            runCatching { node.recycle() }
         }
     }
 

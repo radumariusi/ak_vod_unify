@@ -10,7 +10,7 @@ import ro.ak.vodunify.core.tmdb.TmdbListItem
 import ro.ak.vodunify.core.tmdb.TmdbPage
 import ro.ak.vodunify.core.tmdb.TmdbSeasonDetails
 import ro.ak.vodunify.core.tmdb.TmdbTitleDetails
-import java.util.concurrent.ConcurrentHashMap
+import java.util.Collections
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -58,7 +58,11 @@ object MatchRules {
 @Singleton
 class ScrobbleMatcher @Inject constructor(private val tmdb: TmdbClient) {
 
-    private val memo = ConcurrentHashMap<String, ScrobbleMatch>()
+    private val memo = Collections.synchronizedMap(
+        object : LinkedHashMap<String, ScrobbleMatch>(256, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ScrobbleMatch>?) = size > 2_000
+        },
+    )
 
     val isConfigured: Boolean get() = tmdb.isConfigured
 
@@ -84,7 +88,6 @@ class ScrobbleMatcher @Inject constructor(private val tmdb: TmdbClient) {
                 if (result != null) break
             }
         }
-        if (memo.size > 5000) memo.clear()
         if (result != null) memo[key] = result
         return result
     }

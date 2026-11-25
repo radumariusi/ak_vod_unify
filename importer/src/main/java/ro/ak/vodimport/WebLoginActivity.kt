@@ -87,7 +87,7 @@ abstract class WebLoginActivity : ComponentActivity() {
             }
 
             override fun onPageFinished(view: WebView, url: String) {
-                if (!requested || !service.trusted(url)) return
+                if (isFinishing || isDestroyed || !requested || !service.trusted(url)) return
                 if (service.isLogin(url)) {
                     cancelImport()
                     status.text = "Conectează-te și încearcă din nou."
@@ -96,7 +96,7 @@ abstract class WebLoginActivity : ComponentActivity() {
                 if (!atDocumentStart && service == Service.NETFLIX) view.evaluateJavascript(Scripts.NETFLIX_CAPTURE_HOOK, null)
                 val run = generation
                 main.postDelayed({
-                    if (requested && run == generation) readHistory()
+                    if (!isFinishing && !isDestroyed && requested && run == generation) readHistory()
                 }, if (service == Service.NETFLIX) 2_000L else 1_000L)
             }
         }
@@ -195,7 +195,7 @@ abstract class WebLoginActivity : ComponentActivity() {
         thread {
             val message = runCatching { saveHistory(service.id, payload) }.getOrElse { "Eroare: ${it.message}" }
             main.post {
-                if (generation == run) {
+                if (!isFinishing && !isDestroyed && generation == run) {
                     importing = false
                     status.text = message
                 }

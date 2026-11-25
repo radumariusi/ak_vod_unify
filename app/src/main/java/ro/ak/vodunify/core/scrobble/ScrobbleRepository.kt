@@ -3,9 +3,13 @@ package ro.ak.vodunify.core.scrobble
 import android.content.Context
 import android.content.pm.PackageManager
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
@@ -20,7 +24,9 @@ import ro.ak.vodunify.core.connector.WatchEvent
 import ro.ak.vodunify.core.db.TrackingDao
 import ro.ak.vodunify.core.publish.LOCAL_SOURCE
 import ro.ak.vodunify.core.publish.PublishRepository
+import ro.ak.vodunify.core.tmdb.TmdbHttpException
 import ro.ak.vodunify.core.tracking.TrackingEntities
+import java.io.IOException
 import java.time.Instant
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -46,17 +52,20 @@ class ScrobbleRepository @Inject constructor(
 ) {
     private val prefs = context.getSharedPreferences(SCROBBLE_PREFS, Context.MODE_PRIVATE)
     private val mutex = Mutex()
+    private val loadLock = Any()
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile private var loaded = false
     private val logSerializer = ListSerializer(ScrobbleLogEntry.serializer())
 
-    private val _log = MutableStateFlow(readLog())
+    private val _log = MutableStateFlow<List<ScrobbleLogEntry>>(emptyList())
     val log: StateFlow<List<ScrobbleLogEntry>> = _log.asStateFlow()
-    private val _unresolved = MutableStateFlow(readUnresolved().size)
+    private val _unresolved = MutableStateFlow(0)
     val unresolved = _unresolved.asStateFlow()
-    private val _netflix = MutableStateFlow(readNetflixStatus())
+    private val _netflix = MutableStateFlow<List<String>>(emptyList())
     val netflix = _netflix.asStateFlow()
 
     private val proofSerializer = MapSerializer(String.serializer(), AppProof.serializer())
-    private val _proofs = MutableStateFlow(readProofs())
+    private val _proofs = MutableStateFlow<Map<String, AppProof>>(emptyMap())
 
     /**
      * Dovada, pe fiecare aplicație (pachet), că „Continuă vizionarea” merge: ultima vizionare recunoscută
@@ -66,6 +75,22 @@ class ScrobbleRepository @Inject constructor(
 
     private val _enabled = MutableStateFlow(prefs.getBoolean(KEY_ENABLED, true))
     val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
+
+    init {
+        ioScope.launch { ensureLoaded() }
+    }
+
+    private fun ensureLoaded() {
+        if (loaded) return
+        synchronized(loadLock) {
+            if (loaded) return
+            _log.value = readLog()
+            _unresolved.value = readUnresolved().size
+            _netflix.value = readNetflixStatus()
+            _proofs.value = readProofs()
+            loaded = true
+        }
+    }
 
     /** Pachetul AK Scrobbler care se potrivește cu acest build (debug ↔ debug). */
     val scrobblerPackage: String = if (BuildConfig.DEBUG) "ro.ak.vodscrobbler.debug" else "ro.ak.vodscrobbler"
@@ -83,6 +108,7 @@ class ScrobbleRepository @Inject constructor(
     }
 
     fun clearLog() {
+        ensureLoaded()
         prefs.edit().remove(SCROBBLE_LOG).apply()
         _log.value = emptyList()
     }
@@ -109,6 +135,7 @@ class ScrobbleRepository @Inject constructor(
      * scrobblerul să-l retrimită mai târziu.
      */
     suspend fun handle(event: ScrobbleEvent): ScrobbleResult = mutex.withLock {
+        ensureLoaded()
         val result = process(event, fromQueue = false)
         val now = System.currentTimeMillis()
         if (_unresolved.value > 0 && now - prefs.getLong(KEY_LAST_RETRY, 0L) >= TimeUnit.MINUTES.toMillis(30)) {
@@ -185,6 +212,7 @@ class ScrobbleRepository @Inject constructor(
      * procesăm ca pe orice vizionare (minut salvat / văzut).
      */
     suspend fun applyNetflixRecent(result: NetflixRecentResult) {
+        ensureLoaded()
         var matched = 0
         if (result.status == "ok") {
             val pending = mutex.withLock { readUnresolved() }
@@ -261,24 +289,39 @@ class ScrobbleRepository @Inject constructor(
      */
     suspend fun retryUnresolved() {
         if (!matcher.isConfigured) return
+        ensureLoaded()
         val now = System.currentTimeMillis()
-        val list = mutex.withLock {
-            prefs.edit().putLong(KEY_LAST_RETRY, now).apply()
-            readUnresolved()
-        }
+        val list = mutex.withLock { readUnresolved() }
         if (list.any { NetflixActivity.isNetflix(it.pkg) && now - it.at < TimeUnit.DAYS.toMillis(2) }) {
             NetflixRecentWorker.schedule(context)
         }
+        var transientFailure = false
         for (e in list.sortedByDescending { it.at }) {
             if (TitleParser.guesses(e.fields, e.app).isEmpty()) continue
-            mutex.withLock {
-                if (e !in readUnresolved()) return@withLock
-                val r = process(e, fromQueue = true)
+            val retryNow = mutex.withLock {
+                if (e !in readUnresolved()) return@withLock false
+                val r = try {
+                    process(e, fromQueue = true)
+                } catch (_: IOException) {
+                    transientFailure = true
+                    return@withLock true
+                } catch (http: TmdbHttpException) {
+                    if (http.code == 429 || http.code >= 500) {
+                        transientFailure = true
+                        return@withLock true
+                    }
+                    throw http
+                }
                 if (r == ScrobbleResult.SAVED || r == ScrobbleResult.WATCHED || r == ScrobbleResult.IGNORED || r == ScrobbleResult.TOO_SHORT) {
                     writeUnresolved(readUnresolved().filterNot { unresolvedKey(it) == unresolvedKey(e) })
                 }
+                false
             }
+            if (retryNow) break
         }
+        // La erori trecătoare de rețea/rată, scurtăm pauza la 5 minute în loc de 30.
+        val nextRetryMark = if (transientFailure) now - TimeUnit.MINUTES.toMillis(25) else now
+        prefs.edit().putLong(KEY_LAST_RETRY, nextRetryMark).apply()
     }
 
     private suspend fun markWatchedLocally(media: MediaRef, at: Long, appPackage: String) {

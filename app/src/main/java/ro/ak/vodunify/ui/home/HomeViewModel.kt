@@ -60,6 +60,7 @@ import ro.ak.vodunify.core.tracking.TrackingRepository
 import ro.ak.vodunify.core.scrobble.PlaybackSourceRecovery
 import ro.ak.vodunify.ui.components.LoadState
 import ro.ak.vodunify.ui.components.loadCatching
+import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import kotlinx.serialization.json.Json
@@ -300,8 +301,12 @@ class HomeViewModel @Inject constructor(
         val cacheKey: String get() = "$settings|${LocalDate.now()}|" + followed.joinToString(",") { (kind, id) -> "${kind.path}:$id" }
     }
 
-    // Imagini și titluri localizate din TMDb, ținute în memorie cât trăiește ecranul.
-    private val artCache = ConcurrentHashMap<String, CatalogItem>()
+    // Imagini și titluri localizate din TMDb, ținute în memorie cu limită ca să nu crească nelimitat.
+    private val artCache = Collections.synchronizedMap(
+        object : LinkedHashMap<String, CatalogItem>(128, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CatalogItem>?) = size > 400
+        },
+    )
     private val artGate = Semaphore(6)
 
     private fun artKey(kind: TitleKind, tmdbId: Long, settings: CatalogSettings) =
@@ -332,7 +337,11 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) { tracking.syncIfStale() }
     }
 
-    private val logoCache = ConcurrentHashMap<String, String>()
+    private val logoCache = Collections.synchronizedMap(
+        object : LinkedHashMap<String, String>(128, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > 400
+        },
+    )
 
     @Volatile private var logoLanguage: String = "ro"
 

@@ -49,6 +49,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -148,8 +149,8 @@ fun AppNavigation() {
     var exitPrompt by remember { mutableStateOf(false) }
     val onHome = current == TopDestination.HOME.route
     val onCalendar = current == TopDestination.CALENDAR.route
-    var calendarBackdrop by remember { mutableStateOf<String?>(null) }
-    val showCalendarBackdrop: (String?) -> Unit = remember { { calendarBackdrop = it } }
+    val calendarBackdropState = remember { mutableStateOf<String?>(null) }
+    val showCalendarBackdrop: (String?) -> Unit = remember { { calendarBackdropState.value = it } }
     SideEffect { restore.show(backStack?.id) }
     ExpireFocusRestore(restore)
 
@@ -202,9 +203,8 @@ fun AppNavigation() {
         LocalTabTopFocus provides focusActiveTab,
     ) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-            // Fundalul panoramic al titlului focalizat, peste tot ecranul, sub meniu.
-            if (onHome) TitleBackdrop(backdrop.url, Modifier.matchParentSize())
-            if (onCalendar && calendarBackdrop != null) TitleBackdrop(calendarBackdrop, Modifier.matchParentSize())
+            // Fundalul panoramic al titlului focalizat e citit separat, fără a recompune bara de sus / NavHost.
+            ScreenBackdrop(onHome, onCalendar, backdrop, calendarBackdropState, Modifier.matchParentSize())
             Column(Modifier.fillMaxSize()) {
                 TopBar(
                     current = current,
@@ -382,6 +382,19 @@ private fun NavTab(
             }
         }
     }
+}
+
+/** Izolează citirea fundalului focalizat ca schimbarea posterelelor pe TV să nu recompună tot ecranul. */
+@Composable
+private fun ScreenBackdrop(
+    onHome: Boolean,
+    onCalendar: Boolean,
+    backdrop: BackdropState,
+    calendarBackdrop: State<String?>,
+    modifier: Modifier = Modifier,
+) {
+    if (onHome) TitleBackdrop(backdrop.url, modifier)
+    if (onCalendar) calendarBackdrop.value?.let { TitleBackdrop(it, modifier) }
 }
 
 /** Navigation păstrează intrările reale ale fiecărei file, cu ViewModel și starea Compose. */

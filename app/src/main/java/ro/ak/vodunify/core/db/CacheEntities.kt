@@ -2,6 +2,7 @@ package ro.ak.vodunify.core.db
 
 import androidx.room.Dao
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Upsert
@@ -10,7 +11,7 @@ import androidx.room.Upsert
  * Cache brut pentru răspunsurile TMDb. Cheia include calea, limba și piața (regiunea),
  * deci același titlu are intrări separate pe RO/US și pe limbă.
  */
-@Entity(tableName = "tmdb_cache")
+@Entity(tableName = "tmdb_cache", indices = [Index(value = ["fetchedAt"], name = "idx_tmdb_cache_fetched")])
 data class TmdbCacheEntity(
     @PrimaryKey val key: String,
     val body: String,

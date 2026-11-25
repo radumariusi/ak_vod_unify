@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -51,23 +52,43 @@ class HistoryImportRepository @Inject constructor(
     private val dao: TrackingDao,
     private val json: Json,
 ) {
-    private val queueDir = File(context.filesDir, "import_queue").apply { mkdirs() }
-    private val unmatchedDir = File(context.filesDir, "import_unmatched").apply { mkdirs() }
+    private val queueDir = File(context.filesDir, "import_queue")
+    private val unmatchedDir = File(context.filesDir, "import_unmatched")
     private val prefs = context.getSharedPreferences("history_import", Context.MODE_PRIVATE)
     private val statsSerializer = ListSerializer(ImportServiceStats.serializer())
     private val mutex = Mutex()
+    private val loadLock = Any()
+    private val ioScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+    @Volatile private var loaded = false
 
-    private val _stats = MutableStateFlow(readStats())
+    private val _stats = MutableStateFlow<List<ImportServiceStats>>(emptyList())
     val stats: StateFlow<List<ImportServiceStats>> = _stats.asStateFlow()
 
     /** Câte elemente așteaptă potrivirea în TMDb. */
-    private val _pending = MutableStateFlow(countPending())
+    private val _pending = MutableStateFlow(0)
     val pending: StateFlow<Int> = _pending.asStateFlow()
+
+    init {
+        ioScope.launch { ensureLoaded() }
+    }
+
+    private fun ensureLoaded() {
+        if (loaded) return
+        synchronized(loadLock) {
+            if (loaded) return
+            queueDir.mkdirs()
+            unmatchedDir.mkdirs()
+            _stats.value = readStats()
+            _pending.value = countPending()
+            loaded = true
+        }
+    }
 
     /** Pune un lot în coadă și pornește procesarea. Sigur de apelat de pe orice fir. */
     fun enqueue(batch: ImportBatch) = enqueueAll(listOf(batch))
 
     fun enqueueAll(batches: List<ImportBatch>) {
+        ensureLoaded()
         for (batch in batches.filter { it.items.isNotEmpty() }) {
             val name = "${System.currentTimeMillis()}-${System.nanoTime()}.json"
             val tmp = File(queueDir, "$name.tmp")
@@ -80,6 +101,7 @@ class HistoryImportRepository @Inject constructor(
 
     /** Procesează toată coada. Aruncă excepție la erori de rețea (lucrul se reîncearcă). */
     suspend fun processQueue() = mutex.withLock {
+        ensureLoaded()
         _pending.value = countPending()
         while (true) {
             val next = queueFiles().firstOrNull() ?: break
@@ -108,6 +130,7 @@ class HistoryImportRepository @Inject constructor(
 
     suspend fun clear(service: String) = withContext(Dispatchers.IO) {
         mutex.withLock {
+            ensureLoaded()
             dao.clearSource(service)
             unresolvedFile(service)?.delete()
             writeStats(_stats.value.filterNot { it.service == service })
@@ -116,6 +139,7 @@ class HistoryImportRepository @Inject constructor(
 
     suspend fun retryUnmatched(service: String): Int = withContext(Dispatchers.IO) {
         mutex.withLock {
+            ensureLoaded()
             val batch = readUnresolved(service) ?: return@withLock 0
             if (batch.items.isEmpty()) return@withLock 0
             enqueue(batch)
@@ -244,10 +268,13 @@ class HistoryImportRepository @Inject constructor(
     private suspend fun writeHistory(events: List<WatchEvent>, service: String) {
         // Aceeași vizionare deja salvată în aceeași zi (de AK Scrobbler, de un import anterior sau din
         // CSV-ul aceluiași serviciu) contează o singură dată. Revizionările din alte zile rămân.
+        val seenInBatch = HashSet<String>()
         val fresh = events.filter { e ->
             val ref = TrackingEntities.ref(e.media)
             val (from, to) = ImportPlanner.dayBounds(e.watchedAt.toEpochMilli())
-            dao.countWatchesBetween(ref.mediaKey, ref.season, ref.episode, from, to) == 0
+            val dayKey = "${ref.mediaKey}:${ref.season}:${ref.episode}:$from"
+            seenInBatch.add(dayKey) &&
+                dao.countWatchesBetween(ref.mediaKey, ref.season, ref.episode, from, to) == 0
         }
         if (fresh.isEmpty()) return
         dao.insertHistory(

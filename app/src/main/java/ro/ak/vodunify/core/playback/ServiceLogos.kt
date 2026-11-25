@@ -1,5 +1,8 @@
 package ro.ak.vodunify.core.playback
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import ro.ak.vodunify.core.tmdb.TmdbClient
@@ -55,15 +58,21 @@ class ServiceLogos @Inject constructor(private val tmdb: TmdbClient) {
             val map = HashMap<Int, String>()
             val all = LinkedHashMap<Int, String>()
             var ok = false
-            for (kind in listOf("movie", "tv")) for (region in listOf("RO", "US")) {
-                runCatching {
-                    tmdb.get("watch/providers/$kind", mapOf("watch_region" to region), TmdbProviderList.serializer(), TmdbClient.LONG_TTL)
-                }.onSuccess { list ->
-                    ok = true
-                    list.results.forEach { p ->
-                        p.logoPath?.let { map.putIfAbsent(p.providerId, IMAGE_BASE + it) }
-                        all.putIfAbsent(p.providerId, p.providerName)
+            val pairs = listOf("movie" to "RO", "movie" to "US", "tv" to "RO", "tv" to "US")
+            val lists = coroutineScope {
+                pairs.map { (kind, region) ->
+                    async {
+                        runCatching {
+                            tmdb.get("watch/providers/$kind", mapOf("watch_region" to region), TmdbProviderList.serializer(), TmdbClient.LONG_TTL)
+                        }.getOrNull()
                     }
+                }.awaitAll()
+            }
+            lists.filterNotNull().forEach { list ->
+                ok = true
+                list.results.forEach { p ->
+                    p.logoPath?.let { map.putIfAbsent(p.providerId, IMAGE_BASE + it) }
+                    all.putIfAbsent(p.providerId, p.providerName)
                 }
             }
             if (ok) {

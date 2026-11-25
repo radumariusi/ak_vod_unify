@@ -99,6 +99,7 @@ class LibraryViewModel @Inject constructor(
         if (ExternalTrackers.ENABLED) tracking.anyConnected else flowOf(true),
         settingsAndRefresh,
     ) { view, flh, connected, settings -> Input(view.library, view.series, flh.first, connected, settings, flh.second, flh.third) }
+        .debounce { if (computed) 350L else 0L }
         .transformLatest { raw ->
             val initial = show(raw)
             emit(initial)
