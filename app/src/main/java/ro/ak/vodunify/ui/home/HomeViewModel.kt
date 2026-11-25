@@ -11,6 +11,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -45,6 +46,9 @@ import ro.ak.vodunify.core.calendar.model.MovieRelease
 import ro.ak.vodunify.core.calendar.model.MovieReleaseKind
 import ro.ak.vodunify.core.playback.TargetApp
 import ro.ak.vodunify.core.connector.ExternalTrackers
+import ro.ak.vodunify.core.connector.EpisodeNumber
+import ro.ak.vodunify.core.reconcile.LibraryStatus
+import ro.ak.vodunify.core.reconcile.ReconciledView
 import ro.ak.vodunify.core.db.ResumePointEntity
 import ro.ak.vodunify.core.tracking.SeriesSummary
 import java.time.LocalDate
@@ -111,8 +115,36 @@ class HomeViewModel @Inject constructor(
     val state: StateFlow<LoadState<HomeCatalog>> = combine(_state, contentFilter, ::filtered)
         .stateIn(viewModelScope, SharingStarted.Eagerly, filtered(_state.value, contentFilter.value))
 
-    val personal: StateFlow<PersonalRows> = combine(_personal, contentFilter) { rows, filter -> filter.personal(rows) }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, contentFilter.value.personal(_personal.value))
+    private val releaseViewing = tracking.reconciled.map(::newReleaseViewing)
+        .distinctUntilChanged().flowOn(Dispatchers.Default)
+
+    val personal: StateFlow<PersonalRows> = combine(_personal, contentFilter, releaseViewing) { rows, filter, viewing ->
+        filter.personal(viewing.hideWatched(rows))
+    }.stateIn(
+        viewModelScope, SharingStarted.Eagerly,
+        contentFilter.value.personal(_personal.value.copy(newMovies = emptyList(), newEpisodes = emptyList())),
+    )
+
+    private fun newReleaseViewing(view: ReconciledView): NewReleaseViewing {
+        val movies = view.library.mapNotNull { entry ->
+            entry.ref.tmdbId.takeIf { entry.ref.type == "MOVIE" && entry.currentStatus == LibraryStatus.WATCHED }
+        }.toSet()
+        val started = view.library.mapNotNull { it.resume?.winner?.ref }.mapNotNull { ref ->
+            val id = ref.tmdbId ?: return@mapNotNull null
+            val season = ref.season ?: return@mapNotNull null
+            val episode = ref.episode ?: return@mapNotNull null
+            id to EpisodeNumber(season, episode)
+        }.toSet()
+        val episodes = mutableMapOf<Long, MutableSet<EpisodeNumber>>()
+        view.latestWatches.forEach { entry ->
+            val id = entry.ref.tmdbId ?: return@forEach
+            val season = entry.ref.season ?: return@forEach
+            val episode = entry.ref.episode ?: return@forEach
+            val number = EpisodeNumber(season, episode)
+            if ((id to number) !in started) episodes.getOrPut(id) { mutableSetOf() }.add(number)
+        }
+        return NewReleaseViewing(movies, episodes)
+    }
 
     private val configured = tracking.trackers.any { it.isConfigured }
 
@@ -185,7 +217,7 @@ class HomeViewModel @Inject constructor(
                 } catch (_: Exception) {
                     // Păstrăm cel puțin episodul confirmat în fișa serialului.
                 }
-                HomeSections.withEpisodeRange(card, episodes, show.lastSeen)
+                HomeSections.withEpisodeRange(card, episodes, lastSeen = null)
             }
         }.awaitAll()
         if (enriched != rows.newEpisodes) publish(rows.copy(newEpisodes = enriched))
@@ -197,22 +229,22 @@ class HomeViewModel @Inject constructor(
      */
     private suspend fun followed(s: ReleaseInput): List<FollowedTitle> {
         if (!catalog.isConfigured) return emptyList()
-        val wanted = LinkedHashMap<String, Triple<TitleKind, Long, Pair<Int, Int>?>>()
+        val wanted = LinkedHashMap<String, Pair<TitleKind, Long>>()
         s.series.values.sortedByDescending { it.lastAt }.forEach { sum ->
             val id = sum.tmdbId ?: return@forEach
-            wanted.getOrPut("tv:$id") { Triple(TitleKind.TV, id, sum.lastSeason to sum.lastEpisode) }
+            wanted.getOrPut("tv:$id") { TitleKind.TV to id }
         }
         s.list.forEach { w ->
             val id = w.ref.tmdbId ?: return@forEach
             val kind = PersonalMapper.kind(w.ref)
-            wanted.getOrPut("${kind.path}:$id") { Triple(kind, id, null) }
+            wanted.getOrPut("${kind.path}:$id") { kind to id }
         }
         return coroutineScope {
-            wanted.values.take(FOLLOW_LIMIT).map { (kind, id, seen) ->
+            wanted.values.take(FOLLOW_LIMIT).map { (kind, id) ->
                 async {
                     snapshots.releases("${kind.path}:$id:${s.settings.apiLanguage}") {
                         artGate.withPermit { runCatching { catalog.releases(kind, id, s.settings) }.getOrNull() }
-                    }?.let { FollowedTitle(it, seen) }
+                    }?.let { FollowedTitle(it) }
                 }
             }.awaitAll().filterNotNull()
         }

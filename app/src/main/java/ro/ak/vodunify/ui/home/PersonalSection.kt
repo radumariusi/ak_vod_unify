@@ -46,8 +46,6 @@ import ro.ak.vodunify.core.calendar.android.CALENDAR_TO_SERVICE
 import ro.ak.vodunify.ui.components.PosterRatings
 import ro.ak.vodunify.ui.components.PosterViewingStatus
 import ro.ak.vodunify.core.playback.PosterStage
-import ro.ak.vodunify.ui.components.AppIconBadge
-import ro.ak.vodunify.ui.components.CinemaBadge
 import ro.ak.vodunify.core.catalog.ReleaseChannel
 import ro.ak.vodunify.core.catalog.TitleKind
 import androidx.compose.ui.semantics.contentDescription
@@ -313,7 +311,7 @@ private fun releaseBadge(item: PersonalItem): BadgeSpec? {
     val pkg = item.appPackage
     val service = release.serviceName
     return when (release.channel) {
-        ReleaseChannel.CINEMA -> BadgeSpec.Cinema(release.region)
+        ReleaseChannel.CINEMA -> BadgeSpec.Cinema(release.cinemaRegions)
         ReleaseChannel.STREAMING -> when {
             pkg != null -> BadgeSpec.App(pkg, service)
             service != null -> BadgeSpec.Service(release.serviceId?.let { CALENDAR_TO_SERVICE[it] ?: it }, service)
@@ -359,7 +357,11 @@ private fun heroMeta(item: PersonalItem): String {
 private fun releaseText(item: PersonalItem): String? {
     val r = item.release ?: return null
     return when (r.channel) {
-        ReleaseChannel.CINEMA -> if (r.region == "RO") "În cinema în România" else "În cinema în SUA"
+        ReleaseChannel.CINEMA -> when {
+            r.cinemaRegions.size > 1 -> "În cinema în România și SUA"
+            r.region == "RO" -> "În cinema în România"
+            else -> "În cinema în SUA"
+        }
         ReleaseChannel.STREAMING -> "Pe ${r.serviceName ?: "streaming"}" + if (r.region == "US" && !r.mine) " (SUA)" else ""
         ReleaseChannel.DIGITAL -> "Digital, închiriere / cumpărare (${r.region})"
         ReleaseChannel.UNKNOWN -> null

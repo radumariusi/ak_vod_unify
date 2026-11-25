@@ -50,8 +50,7 @@ data class CalendarItem(
     val posterTime: String = "",
     /** Serviciul tău (id din calendar, ex. „netflix”) pe care îl găsești; null = nu e pe platformele tale. */
     val watchAppId: String? = null,
-    /** „US” / „RO” la lansările în cinema (sigla de cinema de pe poster). */
-    val cinema: String? = null,
+    val cinemaRegions: List<String> = emptyList(),
     /** Imaginea panoramică și descrierea, pentru panoul de sus din vederea pe zi. */
     val backdropUrl: String? = null,
     val overview: String = "",
@@ -63,12 +62,32 @@ data class CalendarItem(
         else episodeMembers.filter { now.isBefore(it.releaseAt) }.minByOrNull { it.releaseAt }?.posterTime.orEmpty()
 }
 
-/** O singură copertă pe serial și zi. Intrările originale rămân disponibile pentru acțiuni. */
-internal fun groupSameDayEpisodes(items: List<CalendarItem>): List<CalendarItem> =
+/** O copertă pe zi pentru episoadele unui serial sau lansările în cinematografe ale aceluiași film. */
+internal fun groupSameDayReleases(items: List<CalendarItem>): List<CalendarItem> =
     items.groupBy { item ->
-        if (item.episode == null) item.key else "episodes:${item.date}:${item.tmdbId}"
+        when {
+            item.episode != null -> "episodes:${item.date}:${item.tmdbId}"
+            item.cinemaRegions.isNotEmpty() -> "cinema:${item.date}:${item.tmdbId}"
+            else -> item.key
+        }
     }.map { (key, entries) ->
         val first = entries.first()
+        if (first.cinemaRegions.isNotEmpty()) {
+            val regions = entries.flatMap { it.cinemaRegions }.distinct().sorted()
+            if (regions.size == 1) return@map first.copy(key = key)
+            val primary = entries.firstOrNull { "RO" in it.cinemaRegions } ?: first
+            val label = "Cinema RO și US"
+            return@map primary.copy(
+                key = key,
+                cinemaRegions = regions,
+                subtitle = label,
+                where = "Cinematografe din România și SUA",
+                shortLabel = "${primary.title} ($label)",
+                details = entries.flatMap { it.details }.distinct(),
+                posterLabel = primary.posterLabel.takeIf { entries.all { it.movie?.limited == true } }.orEmpty(),
+                passed = entries.any { it.passed },
+            )
+        }
         if (entries.size == 1) return@map first
         val members = entries.sortedWith(compareBy({ it.episode?.seasonNumber }, { it.episode?.episodeNumber }))
         val label = episodeRange(members.mapNotNull { it.episode?.let { ep -> EpisodeNumber(ep.seasonNumber, ep.episodeNumber) } })
@@ -96,7 +115,10 @@ internal fun monthPreview(items: List<CalendarItem>, now: Instant): List<Calenda
             { entries -> entries.minOf { it.releaseAt } },
             { entries -> entries.first().title },
         ))
-        .map { entries -> entries.firstOrNull { it.posterUrl != null } ?: entries.first() }
+        .map { entries ->
+            entries.firstOrNull { it.cinemaRegions.size > 1 && it.posterUrl != null }
+                ?: entries.firstOrNull { it.posterUrl != null } ?: entries.first()
+        }
 
 fun EpisodeEntry.toItem(watched: Boolean) = CalendarItem(
     key = key,
@@ -156,10 +178,10 @@ fun MovieEntry.toItem(watched: Boolean) = CalendarItem(
     },
     posterTime = if (hasTime) movieTimeLabel(this) else "",
     watchAppId = watchOn?.id,
-    cinema = when (kind) {
-        MovieReleaseKind.CINEMA_US -> "US"
-        MovieReleaseKind.CINEMA_RO -> "RO"
-        else -> null
+    cinemaRegions = when (kind) {
+        MovieReleaseKind.CINEMA_US -> listOf("US")
+        MovieReleaseKind.CINEMA_RO -> listOf("RO")
+        else -> emptyList()
     },
     backdropUrl = backdropUrl,
     overview = overview.orEmpty(),

@@ -56,9 +56,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import ro.ak.vodunify.core.calendar.format.weekLabel
 import ro.ak.vodunify.core.calendar.time.RomaniaTime
 import ro.ak.vodunify.core.prefs.UiPrefs
 import ro.ak.vodunify.ui.components.FixedRowsScroll
+import ro.ak.vodunify.ui.components.CinemaBadges
 import ro.ak.vodunify.ui.components.layoutSpec
 import ro.ak.vodunify.ui.components.returningFocus
 import ro.ak.vodunify.ui.theme.Accent
@@ -193,8 +195,16 @@ internal fun MonthCalendar(
         val posterWidth = minOf(preferredPosterWidth, ((weekHeight - baseHeight) / 1.5f).coerceAtLeast(0.dp))
 
         Column(Modifier.fillMaxSize().padding(vertical = verticalPadding)) {
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                MonthTitleLogos(titlesByDay[selectedDay].orEmpty(), logoLanguage, loadLogo)
+            Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 3.dp), contentAlignment = Alignment.CenterStart) {
+                val monday = focus?.takeIf { it.week }?.monday
+                val titles = if (monday == null) titlesByDay[selectedDay].orEmpty() else emptyList()
+                MonthTitleLogos(titles, logoLanguage, loadLogo)
+                if (monday != null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("Săptămâna ${monthWeekNumber(monday)}", style = MaterialTheme.typography.labelLarge)
+                        Text(weekLabel(monday, monday.plusDays(6)), style = MaterialTheme.typography.titleLarge)
+                    }
+                }
             }
             FixedRowsScroll(spec.isTv) {
                 LazyColumn(
@@ -237,15 +247,17 @@ internal fun MonthCalendar(
                         Row(Modifier.fillMaxWidth().height(weekHeight), horizontalArrangement = Arrangement.spacedBy(gap)) {
                             val number = monthWeekNumber(week.monday)
                             val openWeek = { onOpenWeek(week.monday) }
+                            val weekFocus = MonthFocus(week.monday, week = true)
                             PressableCard(
                                 onClick = openWeek, onLongClick = openWeek, focusScale = 1f, restoreKey = week.key,
                                 modifier = Modifier.width(weekWidth).height(weekHeight)
                                     .focusRequester(requesters.getValue(week.key))
                                     .onFocusChanged {
                                         if (it.isFocused) {
-                                            focus = MonthFocus(week.monday, week = true)
-                                            onSelectDate(week.day(selectedDay.dayOfWeek.value - 1))
+                                            focus = weekFocus
                                             if (restoreKey == week.key) onFocusRestored()
+                                        } else if (focus == weekFocus) {
+                                            focus = null
                                         }
                                     }
                                     .semantics { contentDescription = "Săptămâna $number" },
@@ -344,6 +356,13 @@ private fun MonthDayCell(
                                     Text(item.title, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 } else {
                                     AsyncImage(item.posterUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                }
+                                if (item.cinemaRegions.size > 1 && posterWidth > 4.dp) {
+                                    CinemaBadges(
+                                        item.cinemaRegions,
+                                        Modifier.align(Alignment.BottomStart).padding(1.dp),
+                                        availableWidth = posterWidth - 2.dp,
+                                    )
                                 }
                             }
                         }

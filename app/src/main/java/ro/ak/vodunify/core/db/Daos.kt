@@ -43,7 +43,7 @@ interface TrackingDao {
         if (current != null && current.updatedAt > item.updatedAt) return false
         if (hasWatchAtOrAfter(item.source, item.ref.mediaKey, item.ref.season, item.ref.episode, item.updatedAt)) return false
         if (item.source == LOCAL_SOURCE && hasManualMarkAtOrAfter(item.ref.manualKeys(item.id.substringAfter('|')), item.updatedAt)) return false
-        upsertResume(listOf(item.copy(appPackage = item.appPackage ?: current?.appPackage)))
+        upsertResume(listOf(item.copy(appPackage = item.appPackage?.takeIf { it.isNotBlank() } ?: current?.appPackage)))
         return true
     }
 

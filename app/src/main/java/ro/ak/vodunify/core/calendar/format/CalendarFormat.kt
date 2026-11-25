@@ -26,8 +26,10 @@ fun dayLabel(date: LocalDate): String {
     return prefix + date.format(dayFormat).replaceFirstChar { it.titlecase(romanian) }
 }
 
-fun weekLabel(from: LocalDate, to: LocalDate): String =
-    "${from.format(shortDayFormat)} – ${to.format(shortDayFormat)} ${to.year}"
+fun weekLabel(from: LocalDate, to: LocalDate): String {
+    val start = from.format(shortDayFormat) + if (from.year != to.year) " ${from.year}" else ""
+    return "$start – ${to.format(shortDayFormat)} ${to.year}"
+}
 
 fun timeLabel(entry: EpisodeEntry): String =
     if (entry.hasTime) (if (entry.timeIsApproximate) "≈ " else "") + entry.releaseAt.format(timeFormat) else ""

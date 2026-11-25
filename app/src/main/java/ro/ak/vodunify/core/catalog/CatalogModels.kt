@@ -83,7 +83,10 @@ data class MovieReleaseEvent(
     val serviceId: String? = null,
     val serviceName: String? = null,
     val mine: Boolean = false,
-)
+    val otherCinemaRegions: List<String> = emptyList(),
+) {
+    val cinemaRegions: List<String> get() = listOf(region) + otherCinemaRegions
+}
 
 /** Titlul plus datele de lansare: data filmului, ultimul și următorul episod la seriale. */
 data class TitleReleases(

@@ -162,8 +162,8 @@ fun CalendarScreen(
     }
     val visible = remember(state) { state.visible }
     val inMonth = state.mode == CalendarMode.MONTH
-    val grouped = remember(visible, inMonth) { if (inMonth) emptyList() else groupSameDayEpisodes(visible) }
-    val shown = grouped.firstOrNull { it.key == focusedTitle } ?: grouped.firstOrNull()
+    val grouped = remember(visible) { groupSameDayReleases(visible) }
+    val shown = if (inMonth) null else grouped.firstOrNull { it.key == focusedTitle } ?: grouped.firstOrNull()
     val onFocus: (CalendarItem) -> Unit = { focusedTitle = it.key }
     SideEffect { onBackdropChange(shown?.backdropUrl) }
     DisposableEffect(onBackdropChange) {
@@ -184,7 +184,7 @@ fun CalendarScreen(
                     if (error != null) Info("Unele lansări nu s-au putut încărca.")
                     when {
                         inMonth -> MonthCalendar(
-                            state.from, state.to, visible, monthList, monthReturnKey,
+                            state.from, state.to, grouped, monthList, monthReturnKey,
                             selectedDate = monthSelectedDay,
                             onSelectDate = { monthSelectedDay = it.toString() },
                             onFocusRestored = { monthReturnKey = null },

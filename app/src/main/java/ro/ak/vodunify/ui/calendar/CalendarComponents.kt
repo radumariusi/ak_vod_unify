@@ -13,7 +13,7 @@ import ro.ak.vodunify.ui.components.restoreCardFocus
 import ro.ak.vodunify.ui.components.rememberRestoringRowState
 import ro.ak.vodunify.ui.theme.FocusBorder
 import ro.ak.vodunify.ui.components.AppIconBadge
-import ro.ak.vodunify.ui.components.CinemaBadge
+import ro.ak.vodunify.ui.components.CinemaBadges
 import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
@@ -185,9 +185,8 @@ internal fun Poster(item: CalendarItem, modifier: Modifier) {
 @Composable
 internal fun CalendarPlatformBadge(item: CalendarItem, includeDefaultPlayer: Boolean = false) {
     val icons = LocalCalendarIcons.current
-    val cinema = item.cinema
-    if (cinema != null) {
-        CinemaBadge(cinema)
+    if (item.cinemaRegions.isNotEmpty()) {
+        CinemaBadges(item.cinemaRegions)
     } else {
         val pkg = item.watchAppId?.let { icons.apps[it] } ?: icons.player.takeIf { includeDefaultPlayer }
         pkg?.let { AppIconBadge(it) }

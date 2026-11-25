@@ -8,7 +8,11 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ro.ak.vodunify.core.calendar.engine.loadCalendarTitles
+import ro.ak.vodunify.core.calendar.format.weekLabel
 import ro.ak.vodunify.core.calendar.model.EpisodeEntry
+import ro.ak.vodunify.core.calendar.model.MovieEntry
+import ro.ak.vodunify.core.calendar.model.MovieReleaseKind
+import ro.ak.vodunify.core.calendar.model.Region
 import ro.ak.vodunify.core.calendar.time.RomaniaTime
 import ro.ak.vodunify.core.catalog.CatalogItem
 import ro.ak.vodunify.core.catalog.EpisodeAir
@@ -17,8 +21,9 @@ import ro.ak.vodunify.core.catalog.TitleReleases
 import ro.ak.vodunify.ui.calendar.CalendarMode
 import ro.ak.vodunify.ui.calendar.CalendarPosition
 import ro.ak.vodunify.ui.calendar.MonthLogoGrid
-import ro.ak.vodunify.ui.calendar.groupSameDayEpisodes
+import ro.ak.vodunify.ui.calendar.groupSameDayReleases
 import ro.ak.vodunify.ui.calendar.monthLogoGrid
+import ro.ak.vodunify.ui.calendar.monthLogoRowSizes
 import ro.ak.vodunify.ui.calendar.monthPreview
 import ro.ak.vodunify.ui.calendar.monthWeekKey
 import ro.ak.vodunify.ui.calendar.monthWeekNumber
@@ -51,12 +56,31 @@ class CalendarPresentationTest {
     @Test fun groupsEpisodePostersByRomanianDayAndKeepsGapsAndIndividualActions() {
         val original = listOf(episode(3), episode(1, watched = true), episode(2), episode(5), episode(1, season = 2))
         val next = episode(2, season = 2, date = day.plusDays(1))
-        val (group, tomorrow) = groupSameDayEpisodes(original + next)
+        val (group, tomorrow) = groupSameDayReleases(original + next)
         assertEquals("S01E01–03, E05 · S02E01", group.posterLabel)
         assertEquals(listOf(1, 2, 3, 5, 1), group.episodeMembers.map { it.episode!!.episodeNumber })
         assertTrue(group.inProgress)
         assertFalse(group.watched)
         assertEquals(next, tomorrow)
+    }
+
+    @Test fun calendarCombinesOnlySameDayCinemaMarkets() {
+        fun movie(kind: MovieReleaseKind, region: Region, date: LocalDate = day) = MovieEntry(
+            movieId = 12, title = "Film", originalTitle = null, posterUrl = "https://example.com/12.jpg",
+            backdropUrl = null, overview = null, kind = kind, region = region,
+            releaseAt = date.atStartOfDay(RomaniaTime.ZONE), hasTime = false,
+        ).toItem(false)
+
+        val ro = movie(MovieReleaseKind.CINEMA_RO, Region.RO)
+        val us = movie(MovieReleaseKind.CINEMA_US, Region.US)
+        val digital = movie(MovieReleaseKind.DIGITAL, Region.US)
+        val otherDate = movie(MovieReleaseKind.CINEMA_US, Region.US, day.plusDays(1))
+        val grouped = groupSameDayReleases(listOf(us, ro, digital, otherDate))
+        assertEquals(listOf("RO", "US"), grouped.first().cinemaRegions)
+        assertEquals(groupSameDayReleases(listOf(ro)).single().key, grouped.first().key)
+        assertEquals(digital, grouped[1])
+        assertEquals(day.plusDays(1), grouped[2].date)
+        assertEquals(listOf("US"), grouped[2].cinemaRegions)
     }
 
     @Test fun monthlyPreviewPrefersFollowedUnwatchedShowsAndCountsDistinctFilmsSeparately() {
@@ -88,6 +112,7 @@ class CalendarPresentationTest {
         assertEquals(monday, weekly.anchor)
         assertEquals(53, monthWeekNumber(monday))
         assertEquals(1, monthWeekNumber(monday.plusWeeks(1)))
+        assertTrue(weekLabel(monday, monday.plusDays(6)).contains("2026 –"))
         assertEquals(monthWeekKey(monday), weekly.monthFocusKey)
         assertEquals(january, weekly.back(day))
     }
@@ -114,6 +139,14 @@ class CalendarPresentationTest {
         assertFits(narrowGrid, 320, 88)
         assertTrue(moreRoom.height > largeGrid.height)
         assertEquals(53, monthLogoGrid(1, 880, 192, 53, 8)?.height)
+    }
+
+    @Test fun denseMonthLogoRowsUseMostAvailableWidth() {
+        val grid = requireNotNull(monthLogoGrid(21, 880, 105, 53, 8))
+        val rows = monthLogoRowSizes(21, grid.columns)
+        assertEquals(listOf(11, 10), rows)
+        assertTrue(grid.width * 11 + grid.gap * 10 >= 880 * 9 / 10)
+        assertTrue(grid.height * 2 + grid.gap <= 105)
     }
 
     @Test fun homeRangeIncludesOnlyTheSameReleaseDayAndUnseenEpisodes() {

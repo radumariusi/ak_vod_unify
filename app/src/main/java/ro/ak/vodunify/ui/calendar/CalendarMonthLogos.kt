@@ -36,21 +36,28 @@ import kotlin.math.sqrt
 
 internal data class MonthLogoGrid(val columns: Int, val width: Int, val height: Int, val gap: Int)
 
-/** Caută configurația cu cele mai mari sigle care încap simultan în zona disponibilă. */
+/** Preferă mai puține rânduri când siglele rămân aproape la fel de mari. */
 internal fun monthLogoGrid(count: Int, width: Int, height: Int, maxLogoHeight: Int, preferredGap: Int): MonthLogoGrid? {
     if (count <= 0 || width <= 0 || height <= 0 || maxLogoHeight <= 0) return null
     val gap = minOf(preferredGap, (minOf(width, height) / (2 * sqrt(count.toDouble()))).toInt())
-    var best: MonthLogoGrid? = null
-    for (columns in 1..minOf(count, width)) {
-        val rows = (count + columns - 1) / columns
+    val layouts = (1..minOf(count, height)).mapNotNull { rows ->
+        val columns = (count + rows - 1) / rows
+        if ((count + columns - 1) / columns != rows) return@mapNotNull null
         val roomWidth = (width - gap * (columns - 1)) / columns
         val roomHeight = (height - gap * (rows - 1)) / rows
         val logoHeight = minOf(maxLogoHeight, roomHeight, (roomWidth / 2.6f).toInt())
-        if (logoHeight > (best?.height ?: 0)) {
-            best = MonthLogoGrid(columns, (logoHeight * 2.6f).toInt(), logoHeight, gap)
-        }
+        if (logoHeight <= 0) return@mapNotNull null
+        val aspectLimit = if (rows > 1) 4f else 2.6f
+        MonthLogoGrid(columns, minOf(roomWidth, (logoHeight * aspectLimit).toInt()), logoHeight, gap)
     }
-    return best
+    val tallest = layouts.maxOfOrNull { it.height } ?: return null
+    return layouts.first { it.height * 10 >= tallest * 9 }
+}
+
+internal fun monthLogoRowSizes(count: Int, columns: Int): List<Int> {
+    if (count == 0) return emptyList()
+    val rows = (count + columns - 1) / columns
+    return List(rows) { count / rows + if (it < count % rows) 1 else 0 }
 }
 
 @Composable
@@ -89,7 +96,10 @@ internal fun MonthTitleLogos(
         val height = with(density) { grid.height.toDp() }
         val gap = with(density) { grid.gap.toDp() }
         Column(verticalArrangement = Arrangement.spacedBy(gap)) {
-            titles.chunked(grid.columns).forEach { row ->
+            var start = 0
+            monthLogoRowSizes(titles.size, grid.columns).forEach { count ->
+                val row = titles.subList(start, start + count)
+                start += count
                 Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
                     row.forEach { item ->
                         val id = item.isMovie to item.tmdbId

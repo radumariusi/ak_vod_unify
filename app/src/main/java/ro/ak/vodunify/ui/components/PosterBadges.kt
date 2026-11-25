@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
@@ -158,12 +159,14 @@ private object AppIcons {
 
 /** O siglă pătrată (imagine), cât o etichetă, cu aceleași colțuri, fără chenar. */
 @Composable
-private fun SquareLogo(url: String, fallback: Painter?, modifier: Modifier = Modifier) {
+private fun SquareLogo(url: String, fallback: Painter?, modifier: Modifier = Modifier, onLoadError: () -> Unit = {}) {
     AsyncImage(
         model = url,
         contentDescription = null,
         contentScale = ContentScale.Crop,
+        placeholder = fallback,
         error = fallback,
+        onError = { onLoadError() },
         modifier = modifier.size(BadgeHeight).clip(BadgeShape),
     )
 }
@@ -196,10 +199,11 @@ fun AppIconBadge(packageName: String, modifier: Modifier = Modifier, fallbackLab
     val context = LocalContext.current
     val isService = remember(packageName) { TargetApp.byPackage(packageName)?.role == AppRole.OFFICIAL }
     val (logoUrl, ready) = rememberKeyLookup(LocalServiceLogos.current?.byPackage, packageName.takeIf { isService })
+    var logoFailed by remember(logoUrl, packageName) { mutableStateOf(false) }
     val icon = remember(packageName) { AppIcons.icon(context, packageName) }
     val iconPainter = remember(icon) { icon?.let { BitmapPainter(it) } }
     when {
-        logoUrl != null -> SquareLogo(logoUrl, iconPainter, modifier)
+        logoUrl != null && !logoFailed -> SquareLogo(logoUrl, iconPainter, modifier) { logoFailed = true }
         icon != null -> Image(
             icon,
             contentDescription = null,
@@ -222,8 +226,9 @@ fun AppIconBadge(packageName: String, modifier: Modifier = Modifier, fallbackLab
 @Composable
 fun ServiceLogoBadge(serviceId: String?, name: String, modifier: Modifier = Modifier) {
     val (logoUrl, ready) = rememberKeyLookup(LocalServiceLogos.current?.byService, serviceId)
+    var logoFailed by remember(logoUrl, serviceId) { mutableStateOf(false) }
     when {
-        logoUrl != null -> SquareLogo(logoUrl, null, modifier)
+        logoUrl != null && !logoFailed -> SquareLogo(logoUrl, null, modifier) { logoFailed = true }
         !ready -> Box(modifier.size(BadgeHeight))
         else -> LetterLogo(name, modifier)
     }
@@ -337,7 +342,7 @@ sealed interface BadgeSpec {
     data class PlaybackSource(val packageName: String?) : BadgeSpec
     data class ConfirmedService(val service: ServiceBadge) : BadgeSpec
     data object InProgress : BadgeSpec
-    data class Cinema(val region: String) : BadgeSpec
+    data class Cinema(val regions: List<String>) : BadgeSpec
     data class Service(val serviceId: String?, val name: String) : BadgeSpec
     data class Label(val text: String) : BadgeSpec
 }
@@ -350,11 +355,17 @@ fun TitleBadge(spec: BadgeSpec?, kind: TitleKind, id: Long?, modifier: Modifier 
         is BadgeSpec.ConfirmedService -> PlatformBadge(kind, id, modifier, label = label, confirmedService = spec.service)
         else -> PosterBottomRow(modifier, label) {
             when (spec) {
-                is BadgeSpec.PlaybackSource -> spec.packageName?.let { pkg ->
-                    AppIconBadge(pkg, fallbackLabel = TargetApp.byPackage(pkg)?.displayName ?: pkg)
+                is BadgeSpec.PlaybackSource -> {
+                    val pkg = spec.packageName?.takeIf { it.isNotBlank() }
+                    if (pkg != null) {
+                        val app = TargetApp.byPackage(pkg)?.displayName ?: pkg.substringAfterLast('.')
+                        AppIconBadge(pkg, Modifier.semantics { contentDescription = app }, fallbackLabel = app)
+                    } else {
+                        PosterLabel("▶", Modifier.semantics { contentDescription = "Aplicația de redare necunoscută" })
+                    }
                 }
                 is BadgeSpec.App -> AppIconBadge(spec.packageName, fallbackLabel = spec.label)
-                is BadgeSpec.Cinema -> CinemaBadge(spec.region)
+                is BadgeSpec.Cinema -> CinemaBadges(spec.regions)
                 is BadgeSpec.Service -> ServiceLogoBadge(spec.serviceId, spec.name)
                 is BadgeSpec.Label -> PosterLabel(spec.text)
                 BadgeSpec.InProgress -> Unit
@@ -369,17 +380,27 @@ fun TitleBadge(spec: BadgeSpec?, kind: TitleKind, id: Long?, modifier: Modifier 
  * SUA: dungile și cantonul albastru. Are forma și înălțimea celorlalte etichete de pe poster.
  */
 @Composable
-fun CinemaBadge(region: String, modifier: Modifier = Modifier) {
+internal fun CinemaBadges(regions: List<String>, modifier: Modifier = Modifier, availableWidth: Dp? = null) {
+    if (regions.isEmpty()) return
+    val gap = if (availableWidth == null) 3.dp else 1.dp
+    val width = availableWidth?.let { ((it - gap * (regions.size - 1)) / regions.size).coerceIn(1.dp, 25.dp) }
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(gap)) {
+        regions.forEach { region -> CinemaBadge(region, scale = width?.let { it / 25.dp } ?: 1f) }
+    }
+}
+
+@Composable
+private fun CinemaBadge(region: String, scale: Float) {
     val us = region.equals("US", ignoreCase = true)
     Box(
-        modifier
-            .height(BadgeHeight)
+        Modifier
+            .height(BadgeHeight * scale)
             .background(BadgeBackground, BadgeShape)
-            .padding(horizontal = 3.dp, vertical = 1.5.dp)
+            .padding(horizontal = 3.dp * scale, vertical = 1.5.dp * scale)
             .semantics { contentDescription = if (us) "Cinema SUA" else "Cinema România" },
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.size(width = 19.dp, height = 13.dp)) {
+        Canvas(Modifier.size(width = 19.dp * scale, height = 13.dp * scale)) {
             val w = size.width
             val h = size.height
             val barH = h * 0.28f

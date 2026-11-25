@@ -1,5 +1,7 @@
 package ro.ak.vodunify.core.connector
 
+import kotlinx.serialization.Serializable
+
 import java.time.Instant
 
 enum class MediaType { MOVIE, SHOW, EPISODE }
@@ -84,6 +86,7 @@ data class WatchlistEntry(
     val source: String,
 )
 
+@Serializable
 data class EpisodeNumber(val season: Int, val episode: Int)
 
 /** Progresul pe un serial: câte episoade difuzate ai văzut și care urmează. */
