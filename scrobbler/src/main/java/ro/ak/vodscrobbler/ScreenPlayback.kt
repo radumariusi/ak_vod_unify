@@ -98,6 +98,6 @@ class ScreenPlayback(val packageName: String, val appLabel: String) {
 
         /** Pornim doar pe ecranul unui player: minut + durată (un ceas singur nu e player). */
         fun looksLikePlayer(times: ScreenTimes): Boolean =
-            (times.durationMs != null || times.rawPair != null) && times.position(null) != null
+            times.rawPair != null || (times.durationMs != null && times.position(null) != null)
     }
 }

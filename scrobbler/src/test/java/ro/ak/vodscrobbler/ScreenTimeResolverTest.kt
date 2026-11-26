@@ -28,4 +28,19 @@ class ScreenTimeResolverTest {
         assertNull(resolver.resolve(pair(80, 1720)).durationMs)
         assertEquals(1_800_000L, resolver.resolve(pair(80, 1720), knownDuration = 1_800_000L).durationMs)
     }
+
+    @Test
+    fun voyoReversedTotalThenPositionIsLearned() {
+        val resolver = ScreenTimeResolver()
+        val first = resolver.resolve(ScreenTimes(null, null, null, 2_754_000L to 0L))
+        assertEquals(0L, first.positionMs)
+        assertEquals(2_754_000L, first.durationMs)
+
+        resolver.reset()
+        val pending = resolver.resolve(ScreenTimes(null, null, null, 2_754_000L to 10_000L))
+        assertNull(pending.positionMs)
+        val learned = resolver.resolve(ScreenTimes(null, null, null, 2_754_000L to 29_000L))
+        assertEquals(29_000L, learned.positionMs)
+        assertEquals(2_754_000L, learned.durationMs)
+    }
 }

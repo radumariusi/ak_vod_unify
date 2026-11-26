@@ -166,4 +166,11 @@ class TitleParserTest {
         assertTrue(!MatchRules.compatibleDuration(95 * 60_000L, 4 * 60_000L))
         assertTrue(MatchRules.compatibleDuration(null, 34 * 60_000L))
     }
+
+    @Test
+    fun stripEpisodePartSuffixMatchesMergedPilotsAndParts() {
+        assertEquals("Pilot", MatchRules.stripEpisodePartSuffix("Pilot Part 1 & 2"))
+        assertEquals("Nuca", MatchRules.stripEpisodePartSuffix("Nuca, Partea 1"))
+        assertNull(MatchRules.stripEpisodePartSuffix("Part Two"))
+    }
 }

@@ -130,4 +130,12 @@ class ScreenTextTest {
         assertNull(ScreenText.guess(items("DPAD Top Button", "DPAD Left Button", "peacocktv"), "Peacock TV"))
         assertEquals("Gunsmoke", ScreenText.guess(items("Channel Guide", "Live TV", "Gunsmoke"), "Pluto TV")!!.title)
     }
+
+    @Test
+    fun ignoresScheduleRangesAndDetectsDoubleSpaceAds() {
+        assertTrue(ScreenText.times(items("Live", "00:00 - 02:00")).isEmpty)
+        assertTrue(ScreenText.isAdScreen(items("AD  1 of 4")))
+        assertTrue(ScreenText.hasPlayButton(items("Las Fierbinți", "Redare episod")))
+        assertNull(ScreenText.guess(items("6 EPISODES", "58MIN", "TV-MA")))
+    }
 }

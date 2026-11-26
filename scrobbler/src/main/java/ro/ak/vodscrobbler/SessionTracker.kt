@@ -198,16 +198,17 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
     /** Reclamă detectată (pe ecran sau în metadate): salvăm poziția reală a filmului și ignorăm restul reclamei. */
     fun onAdDetected(now: Long): List<Outgoing> {
         if (inAdBreak || state == PlayState.STOPPED) return emptyList()
-        val currentMedia = media ?: return emptyList()
-        val pos = bestPosition(now)
-        val out = if (currentMedia.hasTitle) listOfNotNull(emit(SendReason.PAUSE, pos, now, currentMedia)) else emptyList()
-        savedMovieMedia = currentMedia
-        savedPlayId = playId
         inAdBreak = true
         if (state == PlayState.PLAYING) {
             playedMs = playedTime(now)
             playingSince = null
         }
+        val currentMedia = media
+        if (currentMedia == null || !currentMedia.hasTitle) return emptyList()
+        val pos = bestPosition(now)
+        val out = listOfNotNull(emit(SendReason.PAUSE, pos, now, currentMedia))
+        savedMovieMedia = currentMedia
+        savedPlayId = playId
         return out
     }
 
@@ -275,7 +276,7 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
         return when {
             newState == PlayState.PAUSED && before != PlayState.PAUSED ->
                 listOfNotNull(emit(SendReason.PAUSE, bestPosition(now), now))
-            newState == PlayState.STOPPED && before != PlayState.STOPPED -> {
+            newState == PlayState.STOPPED && (before == PlayState.PLAYING || before == PlayState.PAUSED) -> {
                 // Unele aplicații resetează poziția la 0 la oprire: păstrăm ultima poziție reală.
                 val reported = bestPosition(now)
                 val p = reported?.takeIf { it > 0 } ?: positionBefore

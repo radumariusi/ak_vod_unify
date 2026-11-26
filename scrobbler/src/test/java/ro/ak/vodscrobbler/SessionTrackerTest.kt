@@ -247,4 +247,12 @@ class SessionTrackerTest {
         assertTrue(t.onTick(1_500).isEmpty())
         assertTrue(t.onPlaybackState(PlayState.STOPPED, 580_001, 2_000, 0f, 2_000).isEmpty())
     }
+
+    @Test
+    fun adScreenWithNoMetadataNeverEmitsStopOnDestroy() {
+        val t = SessionTracker("air.com.vudu.air.DownloaderTablet", "Fandango at Home")
+        t.onPlaybackState(PlayState.PLAYING, 0, 0, 1f, 0)
+        assertTrue(t.onAdDetected(2_000).isEmpty())
+        assertTrue(t.onGone(37_000).isEmpty())
+    }
 }

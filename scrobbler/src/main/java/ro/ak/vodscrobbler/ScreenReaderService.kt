@@ -37,8 +37,13 @@ class ScreenReaderService : AccessibilityService() {
             // Verificăm des și modul cititor de ecran: Netflix nu trebuie să-l vadă niciodată.
             updateReaderMode(front)
             val fg = ScreenState.foregroundPackage
-            if (fg != null && fg in ScreenState.screenOnlyPackages && pendingPackage == null) {
-                runCatching { snapshot(fg) }
+            val target = fg ?: front
+            if (target != null && pendingPackage == null &&
+                (target in ScreenState.screenOnlyPackages ||
+                    (isInteresting(target) && target !in ScreenState.skipScreenForPackages &&
+                        ScrobblerState.live.none { it.packageName == target }))
+            ) {
+                runCatching { snapshot(target) }
             }
             handler.postDelayed(this, POLL_MS)
         }

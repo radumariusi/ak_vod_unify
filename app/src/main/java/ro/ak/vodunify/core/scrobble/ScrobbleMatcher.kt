@@ -58,6 +58,17 @@ object MatchRules {
     fun sameName(a: String?, b: String?): Boolean =
         a != null && b != null && TitleParser.normalize(a).let { it.isNotEmpty() && it == TitleParser.normalize(b) }
 
+    private val EPISODE_PART_SUFFIX = Regex(
+        """(?i)(?:[:,(\s]+(?:part|parts|partea)\s+\d+(?:\s*(?:&|and|și|/|-)\s*\d+)?\)?|\s*\(\d+\))$""",
+    )
+
+    /** Elimină sufixul de părți („Pilot Part 1 & 2” → „Pilot”, „Nuca, Partea 1” → „Nuca”) pentru comparații secundare. */
+    fun stripEpisodePartSuffix(name: String): String? {
+        val base = name.replace(EPISODE_PART_SUFFIX, "").trim(' ', ',', ':', '-', '–', '(', ')')
+        val norm = TitleParser.normalize(base)
+        return base.takeIf { norm.length >= 4 && norm != TitleParser.normalize(name) }
+    }
+
     fun yearOf(date: String?): Int? = date?.take(4)?.toIntOrNull()
 
     /** Verifică dacă durata raportată de player e compatibilă cu durata filmului în TMDb (evită potriviri false episod↔film). */
@@ -191,7 +202,8 @@ class ScrobbleMatcher @Inject constructor(
         val season = g.season
         if (season != null && show.details.seasons.any { it.seasonNumber == season }) {
             for (lang in LANGUAGES) {
-                val ep = season(show.id, season, lang)?.episodes?.firstOrNull { MatchRules.sameName(it.name, g.episodeTitle) } ?: continue
+                val episodes = season(show.id, season, lang)?.episodes ?: continue
+                val ep = pickEpisodeByName(episodes, g.episodeTitle) ?: continue
                 return episodeMatch(show, season, ep.episodeNumber, ep.name, ep.runtime)
             }
         }
@@ -200,15 +212,28 @@ class ScrobbleMatcher @Inject constructor(
     }
 
     private suspend fun findByName(show: TvShow, episodeTitle: String, preferred: Int? = null): ScrobbleMatch? {
-        val seasons = show.details.seasons.filter { it.seasonNumber > 0 && it.seasonNumber != preferred }.take(MAX_SEASONS_SCANNED)
+        val seasons = show.details.seasons
+            .filter { it.seasonNumber > 0 && it.seasonNumber != preferred }
+            .sortedByDescending { it.seasonNumber }
+            .take(MAX_SEASONS_SCANNED)
         for (lang in LANGUAGES) {
             for (s in seasons) {
                 val details = season(show.id, s.seasonNumber, lang) ?: continue
-                val ep = details.episodes.firstOrNull { MatchRules.sameName(it.name, episodeTitle) } ?: continue
+                val ep = pickEpisodeByName(details.episodes, episodeTitle) ?: continue
                 return episodeMatch(show, s.seasonNumber, ep.episodeNumber, ep.name, ep.runtime)
             }
         }
         return null
+    }
+
+    private fun pickEpisodeByName(episodes: List<ro.ak.vodunify.core.tmdb.TmdbEpisode>, target: String): ro.ak.vodunify.core.tmdb.TmdbEpisode? {
+        episodes.firstOrNull { MatchRules.sameName(it.name, target) }?.let { return it }
+        val base = MatchRules.stripEpisodePartSuffix(target) ?: return null
+        val loose = episodes.filter { ep ->
+            val n = ep.name ?: return@filter false
+            MatchRules.sameName(n, base) || MatchRules.sameName(MatchRules.stripEpisodePartSuffix(n), base)
+        }
+        return loose.singleOrNull()
     }
 
     private fun episodeMatch(show: TvShow, season: Int, episode: Int, name: String?, runtime: Int?) = ScrobbleMatch(
@@ -416,6 +441,6 @@ class ScrobbleMatcher @Inject constructor(
 
     private companion object {
         val LANGUAGES = listOf("ro-RO", "en-US")
-        const val MAX_SEASONS_SCANNED = 20
+        const val MAX_SEASONS_SCANNED = 50
     }
 }

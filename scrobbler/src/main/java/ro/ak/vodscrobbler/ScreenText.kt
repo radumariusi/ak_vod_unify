@@ -38,6 +38,8 @@ data class ScreenTimes(
  */
 object ScreenText {
     private val TIME = Regex("""^[-−]?\d{1,2}:\d{2}(:\d{2})?(\s*/\s*[-−]?\d{1,2}:\d{2}(:\d{2})?)?$""")
+    private val SCHEDULE_RANGE = Regex("""^\d{1,2}:\d{2}\s*[–—-]\s*\d{1,2}:\d{2}$""")
+    private val BADGE_TEXT = Regex("""(?i)^(?:\d+\s+(?:episodes?|sezoane|episoade|playlists?)|\d+\s*h(?:\s*\d+\s*m)?|\d+\s*min|tv-[a-z0-9]+|pg-?13|nc-?17|age\s*\d+\s*\+?)$""")
     private val REMAINING = Regex("""(?i)^(\d+\s*(h|ore|oră|min|m|s)\b\s*)+(rămase|remaining|left)?$""")
     private val EPISODE = Regex(
         """(?i)((?<![\p{L}\d])[ST]\d{1,2}\s*[:.,\-·•|/]?\s*(?:E|Ep\.?\s?)\d{1,3}(?!\d))|""" +
@@ -65,6 +67,11 @@ object ScreenText {
         "channel guide", "live tv", "on demand", "kids mode", "hide player controls", "show player controls",
         "play queue", "add to watchlist", "press ok to select", "favorite channel",
         "dpad top button", "dpad bottom button", "dpad left button", "dpad right button",
+        "evalueaza", "redare episod", "repornire", "informatii", "episoade complete", "difuzat la tv", "similare",
+        "profilul principal", "tv live", "shows", "filme", "sport", "copii", "cautare", "sezonul", "episoade",
+        "available in", "availabe in", "preview now", "watch with ads", "rent buy", "bundle save",
+        "cast", "ratings more info", "more like this", "navigation menu", "curated playlists", "new releases",
+        "my lists", "genres", "stream free", "deals", "hubs", "my library",
         "ad", "ads", "advertisement", "reclama", "publicitate", "sponsored", "sponsorizat", "commercial",
         "ad break", "reclame",
     )
@@ -132,7 +139,8 @@ object ScreenText {
     /** Ecranul are un buton de pornire (pagina de detalii a unui titlu, nu un meniu oarecare). */
     fun hasPlayButton(items: List<ScreenItem>): Boolean = items.any { item ->
         val n = normalize(item.text)
-        n in PLAY_WORDS || n.startsWith("play ") || n.startsWith("reda ") || n.startsWith("resume ") || n.startsWith("continua ")
+        n in PLAY_WORDS || n.startsWith("play ") || n.startsWith("reda ") || n.startsWith("redare ") ||
+            n.startsWith("resume ") || n.startsWith("continua ")
     }
 
     private val MERIDIEM = Regex("""(?i)^(am|pm|a\.m\.|p\.m\.)$""")
@@ -173,6 +181,8 @@ object ScreenText {
                 endsAt = endsAt ?: dayMinute(m.groupValues[2].toInt(), m.groupValues[3].toInt(), m.groupValues[4].ifEmpty { null })
             }
             if (t.length > 24) continue
+            // Interval orar EPG („00:00 - 02:00”, „20:00 – 22:00”): nu e poziție/durată de player.
+            if (SCHEDULE_RANGE.matches(t)) continue
             val withMeridiem = WITH_MERIDIEM.matchEntire(t)
             if (withMeridiem != null) {
                 val g = withMeridiem.groupValues
@@ -258,6 +268,11 @@ object ScreenText {
         val d = duration
         val r = remaining
         if (d != null && r != null && position == null) position = (d - r).coerceAtLeast(0)
+        // Când b < a (ex. Voyo „45:54 | 00:29”), lăsăm interpretarea pe seama ScreenTimeResolver.
+        if (values.size >= 2 && hint == null && values[1] < values[0]) {
+            position = null
+            duration = null
+        }
         val pair = if (values.size >= 2 && hint == null) values[0] to values[1] else null
         return ScreenTimes(position, duration, remaining, pair)
     }
@@ -287,7 +302,7 @@ object ScreenText {
     private fun keep(t: String): Boolean {
         if (t.length < 2 || t.length > 120) return false
         if (t.count(Char::isLetter) < 2) return false
-        if (TIME.matches(t) || REMAINING.matches(t)) return false
+        if (TIME.matches(t) || REMAINING.matches(t) || BADGE_TEXT.matches(t)) return false
         if (t.endsWith("%")) return false
         if (RESOURCE_KEY.matches(t)) return false // „ATVE.ScreenReader.Loading”
         return normalize(t) !in UI
