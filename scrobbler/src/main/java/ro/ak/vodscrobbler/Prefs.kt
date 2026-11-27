@@ -8,6 +8,7 @@ import android.graphics.Color
 object Prefs {
     private const val FILE = "settings"
     private const val DOT = "dot"
+    private const val READER_ALL = "reader_all"
     private const val DOT_SIZE = "dot_size"
     private const val DOT_CORNER = "dot_corner"
     private const val DOT_ALPHA = "dot_alpha"
@@ -58,6 +59,13 @@ object Prefs {
     private fun prefs(context: Context) = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
     fun dotEnabled(context: Context) = prefs(context).getBoolean(DOT, true)
+
+    /** Test: mod cititor de ecran pornit pentru toate aplicațiile (vocea lor trebuie oprită din TTS). */
+    fun readerAll(context: Context) = prefs(context).getBoolean(READER_ALL, false)
+
+    fun setReaderAll(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(READER_ALL, value).apply()
+    }
 
     fun setDotEnabled(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean(DOT, value).apply()

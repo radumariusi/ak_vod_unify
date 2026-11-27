@@ -50,7 +50,7 @@ object ScreenText {
     private val UI = setOf(
         "play", "pause", "resume", "redare", "reda", "pauza", "continua", "back", "inapoi", "close", "inchide",
         "subtitles", "subtitrari", "subtitrare", "audio", "audio subtitles", "audio and subtitles", "audio si subtitrari",
-        "audio subtitrari", "skip intro", "omite intro", "sari peste intro", "skip recap", "omite rezumatul",
+        "audio subtitrari", "skip", "skip ad", "skip ads", "omite", "sari peste", "skip intro", "omite intro", "sari peste intro", "skip recap", "omite rezumatul",
         "skip credits", "next episode", "episodul urmator", "urmatorul episod", "episodes", "episoade",
         "more episodes", "alte episoade", "speed", "viteza", "playback speed", "viteza de redare",
         "report a problem", "raporteaza o problema", "settings", "setari", "watch credits", "vezi genericul",
