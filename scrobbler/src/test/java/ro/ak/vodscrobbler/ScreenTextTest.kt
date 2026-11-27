@@ -138,4 +138,26 @@ class ScreenTextTest {
         assertTrue(ScreenText.hasPlayButton(items("Las Fierbinți", "Redare episod")))
         assertNull(ScreenText.guess(items("6 EPISODES", "58MIN", "TV-MA")))
     }
+
+    @Test
+    fun plutoPlayerTitleBeatsSuggestionCarousel() {
+        val g = ScreenText.guess(
+            listOf(
+                ScreenItem("2h 13m left", "tv.pluto.android:id/time_left"),
+                ScreenItem("Rocky", "tv.pluto.android:id/content_title_selected"),
+                ScreenItem("Rocky", "tv.pluto.android:id/content_title_not_selected"),
+                ScreenItem("Movie", "tv.pluto.android:id/content_type"),
+                ScreenItem("Pause, button", "tv.pluto.android:id/play_pause_button"),
+                ScreenItem("A Star Is Born (2018)", "tv.pluto.android:id/content_title"),
+                ScreenItem("0:02:11", "tv.pluto.android:id/current_time_label"),
+            ),
+            "Pluto TV",
+        )
+        assertEquals("A Star Is Born (2018)", g?.title)
+    }
+
+    @Test
+    fun overlayBadgesAndImageLabelsAreNotTitles() {
+        assertEquals(null, ScreenText.guess(items("On Now", "Info, button", "Loading Pluto TV", "Picture of home header logo."), "Pluto TV"))
+    }
 }

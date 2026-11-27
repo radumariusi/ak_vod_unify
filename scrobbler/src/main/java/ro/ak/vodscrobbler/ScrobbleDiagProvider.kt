@@ -24,6 +24,7 @@ import java.util.Locale
  *  - `INSERT /ack` -> confirmă și șterge din coadă ID-urile deja salvate durabil de Unify
  *  - `GET /netflix_recent?trigger=1` -> activitatea recentă Netflix dacă sesiunea e în Scrobbler
  *  - `GET /report` -> jurnalul de diagnostic complet
+ *  - `GET /arm_reader?pkg=com.apple.atve…` -> pornește modul cititor de ecran înainte să se deschidă Apple TV
  */
 class ScrobbleDiagProvider : ContentProvider() {
     override fun onCreate(): Boolean = true
@@ -77,6 +78,15 @@ class ScrobbleDiagProvider : ContentProvider() {
                 MatrixCursor(arrayOf("netflix_json")).apply {
                     if (json != null) addRow(arrayOf(json))
                 }
+            }
+            "arm_reader" -> {
+                // Unify pornește Apple TV: modul cititor de ecran trebuie să fie deja activ.
+                val pkg = uri.getQueryParameter("pkg")?.takeIf { it.startsWith("com.apple.atve.") }
+                if (pkg != null) {
+                    ScreenState.armReader(pkg, 15_000L)
+                    ScreenState.onReaderArm?.invoke()
+                }
+                MatrixCursor(arrayOf("ok")).apply { addRow(arrayOf(if (pkg != null && ScreenState.serviceConnected) "1" else "0")) }
             }
             else -> buildReportCursor(ctx)
         }

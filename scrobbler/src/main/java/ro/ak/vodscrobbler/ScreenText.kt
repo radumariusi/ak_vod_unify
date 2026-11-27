@@ -72,6 +72,9 @@ object ScreenText {
         "available in", "availabe in", "preview now", "watch with ads", "rent buy", "bundle save",
         "cast", "ratings more info", "more like this", "navigation menu", "curated playlists", "new releases",
         "my lists", "genres", "stream free", "deals", "hubs", "my library",
+        // Pluto TV / Xumo: insignele și meniurile peste player (jurnal 27.11).
+        "on now", "info button", "loading pluto tv", "loading content", "live guide", "guide", "more button",
+        "pause button", "play button", "continue watching", "video player view button",
         "ad", "ads", "advertisement", "reclama", "publicitate", "sponsored", "sponsorizat", "commercial",
         "ad break", "reclame",
     )
@@ -96,7 +99,12 @@ object ScreenText {
         if (clean.isEmpty()) return null
 
         // 1) Elemente cu id care spune clar ce sunt.
-        val byIdTitle = clean.firstOrNull { idHas(it, "title") && !idHas(it, "subtitle") && !idHas(it, "episode") && !EPISODE.containsMatchIn(it.text) }
+        // Un id care se termină în „title” (Pluto: #content_title) bate listele de sugestii de sub
+        // player („#content_title_selected” / „_not_selected” = alte filme din carusel).
+        val titleLike = { it: ScreenItem -> idHas(it, "title") && !idHas(it, "subtitle") && !idHas(it, "episode") && !EPISODE.containsMatchIn(it.text) }
+        val byIdTitle = clean.firstOrNull { titleLike(it) && idEndsWith(it, "title") }
+            ?: clean.firstOrNull { titleLike(it) && !idHas(it, "selected") }
+            ?: clean.firstOrNull(titleLike)
         val byIdEpisode = clean.firstOrNull { (idHas(it, "subtitle") || idHas(it, "episode")) && it != byIdTitle }
         if (byIdTitle != null) return ScreenGuess(byIdTitle.text, byIdEpisode?.text ?: clean.firstOrNull { EPISODE.containsMatchIn(it.text) && it != byIdTitle }?.text)
 
@@ -127,6 +135,8 @@ object ScreenText {
         // 3) Film: primul text rămas (de obicei titlul e primul pe ecranul de pauză).
         return ScreenGuess(clean.first().text, null)
     }
+
+    private val IMAGE_LABEL = Regex("""(?i)^(?:picture|image|img|icon|logo)\s+of\b|\bheader logo\b|\bnavigation img\b""")
 
     private val SEASON_ONLY = Regex("""(?i)^(S|T|season|sezonul|sezon)\s*\d{1,2}$""")
     private val RESOURCE_KEY = Regex("""^[A-Z][A-Za-z]*(\.[A-Za-z]+){2,}$""")
@@ -297,6 +307,8 @@ object ScreenText {
         return seconds * 1000
     }
 
+    private fun idEndsWith(item: ScreenItem, word: String) = item.viewId?.substringAfterLast('/')?.lowercase()?.endsWith(word) == true
+
     private fun idHas(item: ScreenItem, word: String) = item.viewId?.substringAfterLast('/')?.lowercase()?.contains(word) == true
 
     private fun keep(t: String): Boolean {
@@ -305,6 +317,7 @@ object ScreenText {
         if (TIME.matches(t) || REMAINING.matches(t) || BADGE_TEXT.matches(t)) return false
         if (t.endsWith("%")) return false
         if (RESOURCE_KEY.matches(t)) return false // „ATVE.ScreenReader.Loading”
+        if (IMAGE_LABEL.containsMatchIn(t)) return false // Xumo: „Picture of home header logo.”
         return normalize(t) !in UI
     }
 
