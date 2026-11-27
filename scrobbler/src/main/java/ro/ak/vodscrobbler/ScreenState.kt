@@ -24,6 +24,24 @@ data class ScreenSnapshot(
 object ScreenState {
     @Volatile var serviceConnected: Boolean = false
 
+    /**
+     * Apple TV își arată textele doar dacă modul cititor de ecran e deja pornit când se deschide.
+     * Unify (înainte să-l pornească) sau lansatorul (cu Apple TV selectat) îl „armează” pentru
+     * câteva secunde; altfel modul rămâne oprit în lansator/Unify, ca Netflix & co. să nu vorbească.
+     */
+    @Volatile var readerArmedFor: String? = null
+    @Volatile var readerArmedUntil: Long = 0L
+
+    /** Serviciul de accesibilitate aplică imediat armarea (pe firul principal). */
+    @Volatile var onReaderArm: (() -> Unit)? = null
+
+    fun armReader(pkg: String?, forMs: Long) {
+        readerArmedFor = pkg
+        readerArmedUntil = if (pkg == null) 0L else android.os.SystemClock.elapsedRealtime() + forMs
+    }
+
+    fun readerArmed(): Boolean = readerArmedFor != null && android.os.SystemClock.elapsedRealtime() < readerArmedUntil
+
     /** Aplicațiile urmărite doar de pe ecran acum (fără sesiune media): le recitim periodic. */
     @Volatile var screenOnlyPackages: Set<String> = emptySet()
 

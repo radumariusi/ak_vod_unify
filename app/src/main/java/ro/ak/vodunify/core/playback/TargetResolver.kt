@@ -92,6 +92,7 @@ class TargetResolver @Inject constructor(@ApplicationContext private val context
 
     /** Pornește ținta; dacă linkul e refuzat la execuție, cade pe simpla pornire a aplicației. */
     fun launch(target: ResolvedLaunch): Boolean {
+        prepareScrobbler(target.installed.packageName)
         if (tryStart(target.intent)) return true
         return launchIntent(target.installed.packageName)?.let(::tryStart) ?: false
     }
@@ -115,7 +116,28 @@ class TargetResolver @Inject constructor(@ApplicationContext private val context
         false
     }
 
-    fun launchApp(packageName: String): Boolean = launchIntent(packageName)?.let(::tryStart) ?: false
+    fun launchApp(packageName: String): Boolean {
+        prepareScrobbler(packageName)
+        return launchIntent(packageName)?.let(::tryStart) ?: false
+    }
+
+    /**
+     * Apple TV își arată titlul către AK Scrobbler doar dacă modul cititor de ecran e deja pornit
+     * când se deschide. Îi cerem Scrobbler-ului să-l pornească acum (doar pentru Apple TV; în rest
+     * modul rămâne oprit, altfel Netflix, Peacock & co. citesc cu voce butoanele).
+     */
+    private fun prepareScrobbler(packageName: String) {
+        if (!packageName.startsWith("com.apple.atve.")) return
+        for (auth in listOf("ro.ak.vodscrobbler.diag", "ro.ak.vodscrobbler.debug.diag")) {
+            val uri = Uri.parse("content://$auth/arm_reader?pkg=${Uri.encode(packageName)}")
+            val armed = runCatching {
+                context.contentResolver.query(uri, null, null, null, null)?.use { c -> c.moveToFirst() && c.getString(0) == "1" }
+            }.getOrNull() ?: continue
+            // Timp ca sistemul să anunțe noua stare înainte să pornească Apple TV.
+            if (armed) runCatching { Thread.sleep(ARM_SETTLE_MS) }
+            return
+        }
+    }
 
     private fun launchIntent(pkg: String): Intent? {
         val leanback = runCatching { pm.getLeanbackLaunchIntentForPackage(pkg) }.getOrNull()
@@ -144,4 +166,8 @@ class TargetResolver @Inject constructor(@ApplicationContext private val context
     private fun labelOf(pkg: String): String? = runCatching {
         pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
     }.getOrNull()
+
+    private companion object {
+        const val ARM_SETTLE_MS = 400L
+    }
 }
