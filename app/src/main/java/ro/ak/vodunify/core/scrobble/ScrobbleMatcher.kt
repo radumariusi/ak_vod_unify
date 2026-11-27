@@ -190,7 +190,8 @@ class ScrobbleMatcher @Inject constructor(
             else -> return null
         }
         val s = season(show.id, seasonNumber, "en-US") ?: return null
-        val ep = s.episodes.firstOrNull { it.episodeNumber == g.episode } ?: return null
+        val ep = s.episodes.firstOrNull { it.episodeNumber == g.episode }
+            ?: return if (strict) null else notYetListed(show, s, g, seasons)
         if (strict) {
             val title = g.episodeTitle ?: return null
             val nameMatches = MatchRules.sameName(ep.name, title) ||
@@ -200,6 +201,25 @@ class ScrobbleMatcher @Inject constructor(
             if (!nameMatches) return null
         }
         return episodeMatch(show, seasonNumber, ep.episodeNumber, ep.name, ep.runtime)
+    }
+
+    /**
+     * Episod încă nelistat în TMDb (VOYO publică episoadele cu o săptămână înaintea TV-ului): dacă
+     * serialul și sezonul curent (ultimul din TMDb) se potrivesc, iar numărul e imediat după ultimul
+     * episod listat, îl păstrăm la serial cu sezonul, episodul și numele de pe ecran.
+     */
+    private fun notYetListed(
+        show: TvShow,
+        s: TmdbSeasonDetails,
+        g: TitleGuess.NumberedEpisode,
+        seasons: List<ro.ak.vodunify.core.tmdb.TmdbSeasonSummary>,
+    ): ScrobbleMatch? {
+        if (g.season == null) return null
+        val latest = seasons.maxOfOrNull { it.seasonNumber } ?: return null
+        if (s.seasonNumber != latest) return null
+        val listed = s.episodes.maxOfOrNull { it.episodeNumber } ?: 0
+        if (g.episode <= listed || g.episode > listed + MAX_UNLISTED_AHEAD) return null
+        return episodeMatch(show, s.seasonNumber, g.episode, g.episodeTitle, null)
     }
 
     private suspend fun named(g: TitleGuess.NamedEpisode): ScrobbleMatch? {
@@ -453,5 +473,6 @@ class ScrobbleMatcher @Inject constructor(
         val LANGUAGES = listOf("ro-RO", "en-US")
         const val MAX_SEASONS_SCANNED = 50
         const val MISS_TTL_MS = 10 * 60_000L
+        const val MAX_UNLISTED_AHEAD = 6
     }
 }
