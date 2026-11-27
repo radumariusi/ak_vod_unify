@@ -100,11 +100,21 @@ class ScrobbleMatcher @Inject constructor(
         },
     )
 
+    private val misses = Collections.synchronizedMap(
+        object : LinkedHashMap<String, Long>(64, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>?) = size > 500
+        },
+    )
+
     val isConfigured: Boolean get() = tmdb.isConfigured
 
     suspend fun match(guesses: List<TitleGuess>, durationMs: Long?): ScrobbleMatch? {
         val key = "${durationMs?.div(60_000)}|${guesses.joinToString("|")}"
         memo[key]?.let { return it }
+        // Aceeași căutare eșuată (ex. un serial fără sezon, scanat în 50 de sezoane) nu o repetăm
+        // pentru fiecare eveniment al aceleiași vizionări: altfel un lot din coadă durează minute.
+        val now = System.currentTimeMillis()
+        misses[key]?.let { at -> if (now - at < MISS_TTL_MS) return null else misses.remove(key) }
         var result: ScrobbleMatch? = null
         // Episoade numerotate: întâi ipotezele în care și numele episodului se potrivește cu TMDb
         // (așa alegem corect care câmp e serialul), apoi oricare cu sezon/episod valid.
@@ -124,7 +134,7 @@ class ScrobbleMatcher @Inject constructor(
                 if (result != null) break
             }
         }
-        if (result != null) memo[key] = result
+        if (result != null) memo[key] = result else misses[key] = now
         return result
     }
 
@@ -442,5 +452,6 @@ class ScrobbleMatcher @Inject constructor(
     private companion object {
         val LANGUAGES = listOf("ro-RO", "en-US")
         const val MAX_SEASONS_SCANNED = 50
+        const val MISS_TTL_MS = 10 * 60_000L
     }
 }

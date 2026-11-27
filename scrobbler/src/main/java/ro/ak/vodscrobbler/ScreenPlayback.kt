@@ -26,8 +26,21 @@ class ScreenPlayback(val packageName: String, val appLabel: String) {
     private var lastForegroundAt = 0L
 
     /** O citire a ecranului aplicației (ea e în prim-plan). [details] = pagina titlului de dinainte. */
-    fun onScreen(g: ScreenGuess?, rawTimes: ScreenTimes, now: Long, details: ScreenGuess? = null): List<Outgoing> {
+    fun onScreen(
+        g: ScreenGuess?,
+        rawTimes: ScreenTimes,
+        now: Long,
+        details: ScreenGuess? = null,
+        detailsScreen: Boolean = false,
+    ): List<Outgoing> {
+        if (finished) return emptyList()
         lastForegroundAt = now
+        // Pagina titlului (buton de redare, fără timpi) după ce am urmărit o redare: utilizatorul a
+        // ieșit din player. Oprim aici, nu pornim o „redare” nouă cu textele paginii (ex. distribuția).
+        if (detailsScreen && rawTimes.isEmpty && rawTimes.rawPair == null && guess != null && g != null && g != guess) {
+            finished = true
+            return tracker.onGone(now)
+        }
         val out = mutableListOf<Outgoing>()
         val duration = tracker.media?.durationMs
         val rawPosition = rawTimes.position(duration)
@@ -50,7 +63,7 @@ class ScreenPlayback(val packageName: String, val appLabel: String) {
         if (changed) {
             guess = title
             val fields = linkedMapOf("title" to title.title, "title_source" to "screen")
-            title.subtitle?.let { fields["display_subtitle"] = it }
+            title.subtitle?.let { fields["display_subtitle"] = withSeason(it, details) }
             out += tracker.onMetadata(MediaInfo(fields, times.durationMs ?: priorDuration), now, correction = continuing)
             if (!continuing) {
                 lastScreenPos = null
@@ -89,6 +102,23 @@ class ScreenPlayback(val packageName: String, val appLabel: String) {
 
     companion object {
         const val GONE_AFTER_MS = 20_000L
+
+        private val SEASON = Regex("""(?i)(?:sezonul|sezon|season)\s*(\d{1,2})(?!\d)""")
+        private val HAS_SEASON = Regex("""(?i)(?<![\p{L}\d])(?:sezonul|sezon|season|S\d{1,2})""")
+
+        /**
+         * Playerul arată doar „Episodul 25: Nuca, Partea 1” (Voyo), dar pagina episodului de dinainte
+         * scrie și „Sezonul 29”: îl adăugăm dacă pagina e a aceluiași episod.
+         */
+        fun withSeason(subtitle: String, details: ScreenGuess?): String {
+            if (details == null || HAS_SEASON.containsMatchIn(subtitle)) return subtitle
+            val detailsText = listOfNotNull(details.title, details.subtitle).joinToString(" ")
+            if (!normalize(detailsText).contains(normalize(subtitle))) return subtitle
+            val season = SEASON.find(detailsText)?.groupValues?.get(1)?.toIntOrNull() ?: return subtitle
+            return "Sezonul $season $subtitle"
+        }
+
+        private fun normalize(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
 
         private val EPISODE_CODE = Regex("""(?i)(?<![\p{L}\d])[ST](\d{1,2})\s*[:.,\-]?\s*(?:E|Ep\.?\s?)(\d{1,3})(?!\d)""")
 

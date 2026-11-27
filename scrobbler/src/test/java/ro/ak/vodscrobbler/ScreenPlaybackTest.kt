@@ -58,4 +58,32 @@ class ScreenPlaybackTest {
         assertEquals(612_000L, preAd.single().positionMs)
         assertTrue(p.onScreen(ScreenGuess("Ad", null), times(15_000, 30_000), 15_000).isEmpty())
     }
+
+    @Test
+    fun voyoSeasonComesFromEpisodePage() {
+        val details = ScreenGuess("Mihai Bobonete, Constantin Dita, Anca Dumitra", "Episodul 25: Nuca, Partea 1Sezonul 29")
+        assertEquals("Sezonul 29 Episodul 25: Nuca, Partea 1", ScreenPlayback.withSeason("Episodul 25: Nuca, Partea 1", details))
+        // Alt episod pe pagină: nu lipim sezonul.
+        assertEquals("Episodul 3: Altul", ScreenPlayback.withSeason("Episodul 3: Altul", details))
+        assertEquals("S1:E2", ScreenPlayback.withSeason("S1:E2", ScreenGuess("X", "Sezonul 4")))
+        val p = ScreenPlayback("net.cme.voyo.ro.tvapp", "VOYO")
+        p.onScreen(ScreenGuess("Las Fierbinți", "Episodul 25: Nuca, Partea 1"), times(500_000, 2_754_000), 0, details = details)
+        assertEquals("Sezonul 29 Episodul 25: Nuca, Partea 1", p.tracker.media?.fields?.get("display_subtitle"))
+    }
+
+    @Test
+    fun episodePageAfterPlaybackStopsWithoutFakeSession() {
+        val p = ScreenPlayback("net.cme.voyo.ro.tvapp", "VOYO")
+        val ep = ScreenGuess("Las Fierbinți", "Episodul 25: Nuca, Partea 1")
+        p.onScreen(ep, times(500_000, 2_754_000), 0)
+        p.onScreen(ep, times(560_000, 2_754_000), 60_000)
+        val out = p.onScreen(
+            ScreenGuess("Mihai Bobonete, Constantin Dita, Anca Dumitra", "Episodul 25: Nuca, Partea 1Sezonul 29"),
+            ScreenTimes(null, null, null), 62_000, detailsScreen = true,
+        )
+        assertTrue(p.finished)
+        assertEquals(SendReason.STOP, out.single().reason)
+        assertEquals("Las Fierbinți", out.single().media.fields["title"])
+        assertTrue(p.onScreen(ep, ScreenTimes(null, null, null), 70_000).isEmpty())
+    }
 }

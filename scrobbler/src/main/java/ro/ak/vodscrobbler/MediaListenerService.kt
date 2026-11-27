@@ -335,6 +335,8 @@ class MediaListenerService : NotificationListenerService() {
             .distinctBy { it.lowercase() }
         if (texts.isEmpty()) return true
         if (texts.size > 1) return false
+        // Peacock trimite la episoade doar numele episodului („Three Turkeys”), fără serial.
+        if (t.tracker.packageName.startsWith("com.peacocktv.")) return true
         return LEADING_EPISODE_RE.containsMatchIn(texts.first())
     }
 
@@ -456,7 +458,7 @@ class MediaListenerService : NotificationListenerService() {
         }
         val details = ScreenState.lastDetails(pkg)?.takeIf { now - it.at < DETAILS_MAX_AGE_MS }?.guess
         val before = p.guess
-        dispatch(p.onScreen(snap.guess, snap.times, now, details))
+        dispatch(p.onScreen(snap.guess, snap.times, now, details, detailsScreen = snap.hasPlayButton))
         if (p.guess != before) DiagLog.add("${p.appLabel}#ecran: titlu de pe ecran: ${p.guess?.title} · ${p.guess?.subtitle ?: "-"}")
         publishLive()
     }
