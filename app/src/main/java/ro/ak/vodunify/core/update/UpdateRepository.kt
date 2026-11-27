@@ -52,7 +52,7 @@ class UpdateRepository @Inject constructor(
     }
 
     /**
-     * Aplicațiile însoțitoare (AK Scrobbler, AK Import RO/US): versiunea instalată și cea din
+     * Aplicațiile însoțitoare (AK Scrobbler): versiunea instalată și cea din
      * ultimul release, ca să le poți instala / actualiza din AK VOD Unify.
      */
     suspend fun companions(): List<CompanionStatus> = withContext(Dispatchers.IO) {

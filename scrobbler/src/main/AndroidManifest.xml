@@ -14,6 +14,7 @@
     <uses-permission android:name="${mainAppId}.permission.SCROBBLE" />
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Serviciul în prim-plan (ca TV-ul să nu închidă scrobblerul) și bulina peste aplicații. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -47,17 +48,25 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.DeviceDefault">
+        android:theme="@style/Theme.AkScrobbler">
 
         <activity
             android:name=".StatusActivity"
-            android:exported="true">
+            android:exported="true"
+            android:theme="@style/Theme.AkScrobbler.Window">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".NetflixLoginActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode"
+            android:exported="false"
+            android:theme="@style/Theme.AkScrobbler.Window"
+            android:windowSoftInputMode="adjustResize" />
 
         <!--
             Ascultătorul de notificări: odată ce îi dai acces, Android îl ține pornit singur
@@ -108,6 +117,12 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <provider
+            android:name=".ScrobbleDiagProvider"
+            android:authorities="${applicationId}.diag"
+            android:exported="true"
+            android:permission="${mainAppId}.permission.SCROBBLE" />
 
     </application>
 </manifest>

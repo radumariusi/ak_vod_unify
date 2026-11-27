@@ -11,6 +11,7 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import ro.ak.vodunify.core.net.readResponse
 import java.util.concurrent.ConcurrentHashMap
 
 /** Source of IMDb ratings. */
@@ -77,12 +78,12 @@ class OmdbClient(
             .build()
         val response = try {
             withContext(Dispatchers.IO) {
-                http.newCall(Request.Builder().url(url).get().build()).execute().use { r ->
+                http.newCall(Request.Builder().url(url).get().build()).readResponse { r ->
                     if (r.code == 401) {
                         block(apiKey)
-                        return@withContext null
+                        return@readResponse null
                     }
-                    if (!r.isSuccessful) return@withContext null
+                    if (!r.isSuccessful) return@readResponse null
                     json.decodeFromString(OmdbResponse.serializer(), r.body?.string().orEmpty())
                 }
             }
@@ -126,12 +127,12 @@ class OmdbClient(
             .build()
         val response = try {
             withContext(Dispatchers.IO) {
-                http.newCall(Request.Builder().url(url).get().build()).execute().use { r ->
+                http.newCall(Request.Builder().url(url).get().build()).readResponse { r ->
                     if (r.code == 401) {
                         block(apiKey)
-                        return@withContext null
+                        return@readResponse null
                     }
-                    if (!r.isSuccessful) return@withContext null
+                    if (!r.isSuccessful) return@readResponse null
                     json.decodeFromString(OmdbSeasonResponse.serializer(), r.body?.string().orEmpty())
                 }
             }

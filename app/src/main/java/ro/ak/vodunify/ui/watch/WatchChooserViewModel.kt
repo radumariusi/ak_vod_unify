@@ -4,15 +4,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import ro.ak.vodunify.core.catalog.MarketAvailability
 import ro.ak.vodunify.core.connector.ExternalIds
@@ -24,6 +25,7 @@ import ro.ak.vodunify.core.publish.summary
 import ro.ak.vodunify.core.playback.InstalledApp
 import ro.ak.vodunify.core.playback.PlaybackPreferences
 import ro.ak.vodunify.core.playback.PlaybackRequest
+import ro.ak.vodunify.core.playback.PlaybackSettings
 import ro.ak.vodunify.core.playback.ResolvedLaunch
 import ro.ak.vodunify.core.playback.ResumeInfo
 import ro.ak.vodunify.core.playback.ResumeLookup
@@ -53,6 +55,7 @@ data class ChooserState(
     /** Dialogul „Setează minutul” e deschis. */
     val editingMinute: Boolean = false,
     val publishing: Boolean = false,
+    val appsUnavailable: Boolean = false,
 ) {
     /** Poți seta minutul / publica doar pentru un film sau un episod. */
     val canSetMinute: Boolean get() = request.type != PlaybackRequest.Type.SHOW
@@ -75,28 +78,39 @@ class WatchChooserViewModel @Inject constructor(
 
     private var loadJob: Job? = null
 
+    private data class AvailableApps(val options: WatchOptions, val launches: Map<TargetApp, ResolvedLaunch>)
+
     /** Pornește direct pe serviciul tău (sau playerul standard); lista apare doar dacă nu se poate. */
     fun play(request: PlaybackRequest, availability: List<MarketAvailability>) = open(request, availability, direct = true)
 
     fun open(request: PlaybackRequest, availability: List<MarketAvailability>, direct: Boolean = false) {
-        _state.value = ChooserState(request, direct = direct)
         loadJob?.cancel()
+        _state.value = ChooserState(request, direct = direct)
         loadJob = viewModelScope.launch {
-            val settings = prefs.settings.first()
-            val (installed, launches) = withContext(Dispatchers.IO) {
-                val apps = resolver.installedApps()
-                apps to resolveAll(apps.values, request)
+            val appsTask = async(Dispatchers.IO) {
+                readOrNull {
+                    val settings = withTimeoutOrNull(750) { readOrNull { prefs.settings.first() } } ?: PlaybackSettings()
+                    val apps = resolver.installedApps()
+                    val options = WatchOptionsBuilder.build(availability, settings, apps.keys)
+                    val targets = (options.services.mapNotNull { it.app } + options.players).distinct()
+                    AvailableApps(options, resolveAll(targets.mapNotNull(apps::get), request))
+                }
             }
-            val options = WatchOptionsBuilder.build(availability, settings, installed.keys)
-            val resume = runCatching { resumeLookup.current(request) }.getOrDefault(ResumeInfo.Manual)
-            val mode = runCatching { publisher.settings.first().active.mode }.getOrDefault(PublishMode.ON_DEMAND)
+            val resumeTask = async(Dispatchers.Default) { readOrNull { resumeLookup.current(request) } }
+            val modeTask = async { readOrNull { publisher.settings.first().active.mode } }
+
+            val apps = appsTask.awaitFor(2_500)
+            val options = apps?.options ?: WatchOptionsBuilder.build(emptyList(), PlaybackSettings(), emptySet())
+            val launches = apps?.launches.orEmpty()
+            // Lista este gata imediat ce știm aplicațiile; minutul și profilul se completează separat.
+            val initialResume = if (direct) resumeTask.awaitFor(750) ?: ResumeInfo.Manual else ResumeInfo.Manual
             _state.update {
                 it?.copy(
-                    publishMode = mode,
                     loading = false,
                     options = options,
                     launches = launches,
-                    resume = resume,
+                    resume = initialResume,
+                    appsUnavailable = apps == null,
                 )
             }
             if (direct) {
@@ -104,7 +118,9 @@ class WatchChooserViewModel @Inject constructor(
                 val serviceApp = service?.app
                 val player = options.recommendedPlayer
                 // Continui standard în aplicația în care ai văzut ultima dată (dacă e printre variante).
-                val last = resume.appPackage?.let { pkg -> installed.entries.firstOrNull { it.value.packageName == pkg }?.key }
+                val last = initialResume.appPackage?.let { pkg ->
+                    launches.entries.firstOrNull { it.value.installed.packageName == pkg }?.key
+                }
                 val lastService = last?.let { app -> options.services.firstOrNull { it.app == app && it.installed } }
                 when {
                     last != null && lastService != null && launches.containsKey(last) -> chooseService(lastService)
@@ -114,7 +130,28 @@ class WatchChooserViewModel @Inject constructor(
                     else -> _state.update { it?.copy(direct = false) }
                 }
             }
+            launch {
+                resumeTask.awaitFor(1_500)?.let { resume ->
+                    _state.update { it?.copy(resume = resume) }
+                }
+            }
+            launch {
+                modeTask.awaitFor(1_500)?.let { mode ->
+                    _state.update { it?.copy(publishMode = mode) }
+                }
+            }
         }
+    }
+
+    private suspend fun <T> Deferred<T?>.awaitFor(millis: Long): T? =
+        withTimeoutOrNull(millis) { await() }.also { if (!isCompleted) cancel() }
+
+    private suspend fun <T> readOrNull(read: suspend () -> T): T? = try {
+        read()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
     }
 
     fun dismiss() {
@@ -263,7 +300,7 @@ class WatchChooserViewModel @Inject constructor(
     }
 
     private fun resolveAll(apps: Collection<InstalledApp>, request: PlaybackRequest): Map<TargetApp, ResolvedLaunch> =
-        apps.mapNotNull { a -> resolver.resolve(a, request)?.let { a.app to it } }.toMap()
+        apps.mapNotNull { a -> runCatching { resolver.resolve(a, request) }.getOrNull()?.let { a.app to it } }.toMap()
 
     private fun say(text: String) {
         _message.value = text

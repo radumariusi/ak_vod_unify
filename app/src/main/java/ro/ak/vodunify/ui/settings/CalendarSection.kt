@@ -1,5 +1,7 @@
 package ro.ak.vodunify.ui.settings
 
+import ro.ak.vodunify.core.prefs.UiPrefs
+
 import ro.ak.vodunify.ui.components.OnOffDropdown
 import ro.ak.vodunify.ui.components.Dropdown
 import ro.ak.vodunify.ui.components.TextInput
@@ -52,6 +54,7 @@ import ro.ak.vodunify.ui.components.readable
 @Composable
 fun CalendarSection(viewModel: CalendarSettingsViewModel = hiltViewModel()) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val monthRows by UiPrefs.calendarMonthRows.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val context = LocalContext.current
     LaunchedEffect(message) {
@@ -68,6 +71,14 @@ fun CalendarSection(viewModel: CalendarSettingsViewModel = hiltViewModel()) {
     ) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Calendar", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Dropdown(
+                label = "Săptămâni vizibile în Lună",
+                value = monthRows,
+                options = listOf(3, 2),
+                optionLabel = { "$it rânduri" },
+                onSelect = UiPrefs::setCalendarMonthRows,
+                optionDetail = { if (it == 2) "Mai mult loc pentru siglele zilei" else "Mai multe zile pe ecran" },
+            )
             val s = settings
             if (s == null) {
                 Text("Se încarcă…")
@@ -97,6 +108,7 @@ fun CalendarSection(viewModel: CalendarSettingsViewModel = hiltViewModel()) {
                 )
             }
             }
+            Hint("Aceleași categorii filtrează și Noutăți, În curând, Populare și În tendințe pe Acasă.")
             Hint("Ce urmărești apare mereu, chiar dacă e într-o categorie ascunsă.")
 
             Label("Notificări și canalul „Azi apare”")

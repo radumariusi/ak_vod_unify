@@ -14,9 +14,13 @@ import ro.ak.vodunify.core.catalog.MovieReleaseEvent
 import ro.ak.vodunify.core.catalog.ReleaseChannel
 import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.core.catalog.TitleReleases
+import ro.ak.vodunify.core.connector.EpisodeNumber
 import ro.ak.vodunify.core.prefs.Market
 import ro.ak.vodunify.ui.home.FollowedTitle
 import ro.ak.vodunify.ui.home.HomeSections
+import ro.ak.vodunify.ui.home.NewReleaseViewing
+import ro.ak.vodunify.ui.home.PersonalRows
+import ro.ak.vodunify.ui.home.PersonalState
 import java.time.LocalDate
 
 class HomeSectionsTest {
@@ -45,6 +49,36 @@ class HomeSectionsTest {
             MovieReleaseEvent(ReleaseChannel.CINEMA, "RO", "2026-12-05"),
         ).releases
         assertEquals(listOf("RO"), HomeSections.homeReleases(t).map { it.region })
+    }
+
+    @Test fun sameDayCinemasShareAHomePoster() {
+        val t = movieWith(
+            1,
+            MovieReleaseEvent(ReleaseChannel.CINEMA, "US", "2026-11-20"),
+            MovieReleaseEvent(ReleaseChannel.CINEMA, "RO", "2026-11-20"),
+        )
+        val release = checkNotNull(HomeSections.newMovies(listOf(t), today).single().release)
+        assertEquals(listOf("RO", "US"), release.cinemaRegions)
+    }
+
+    @Test fun hidesWatchedMoviesAndKeepsOnlyUnseenEpisodesOfTheReleaseDay() {
+        val date = "2026-11-20"
+        val ep = EpisodeAir(1, 3, null, date)
+        val series = show(4, ep, null)
+        val poster = HomeSections.newEpisodes(listOf(series), today).single()
+        val combined = HomeSections.withEpisodeRange(poster, (1..3).map { ep.copy(episode = it) }, null)
+        val rows = PersonalRows(
+            PersonalState.CONNECTED,
+            newMovies = HomeSections.newMovies(listOf(movie(1, date), movie(2, date)), today),
+            newEpisodes = listOf(combined),
+        )
+        val watched = NewReleaseViewing(setOf(1), mapOf(4L to setOf(EpisodeNumber(1, 1), EpisodeNumber(1, 3))))
+        val visible = watched.hideWatched(rows)
+        assertEquals(listOf(2L), visible.newMovies.map { it.tmdbId })
+        assertEquals("S01E02 · 20.11", visible.newEpisodes.single().subtitle)
+        val completed = watched.copy(episodes = mapOf(4L to (1..3).map { EpisodeNumber(1, it) }.toSet()))
+        assertEquals(emptyList<Any>(), completed.hideWatched(rows).newEpisodes)
+        assertEquals(rows, NewReleaseViewing(emptySet(), emptyMap()).hideWatched(rows))
     }
 
     @Test fun movieMovesFromSoonToNewAndCanBeInBoth() {

@@ -14,13 +14,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import dagger.hilt.android.AndroidEntryPoint
 import ro.ak.vodunify.core.device.DeviceInfo
+import ro.ak.vodunify.core.scrobble.ScrobblePuller
 import ro.ak.vodunify.ui.components.LocalLayoutSpec
 import ro.ak.vodunify.ui.components.layoutSpecFor
 import ro.ak.vodunify.ui.navigation.AppNavigation
 import ro.ak.vodunify.ui.theme.VodUnifyTheme
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    @Inject lateinit var scrobblePuller: ScrobblePuller
+
+    override fun onResume() {
+        super.onResume()
+        scrobblePuller.onForegroundChanged(true)
+    }
+
+    override fun onPause() {
+        scrobblePuller.onForegroundChanged(false)
+        super.onPause()
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val isTv = DeviceInfo.isTv(this)

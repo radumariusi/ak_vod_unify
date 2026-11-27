@@ -32,6 +32,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import ro.ak.vodunify.ui.components.readable
+import ro.ak.vodunify.ui.navigation.LocalCatalogActions
 
 /** „AK Scrobbler”: ce a citit aplicația însoțitoare din Netflix, Prime, SkyShowtime etc. */
 @OptIn(ExperimentalLayoutApi::class)
@@ -43,6 +44,7 @@ fun ScrobblerSection(viewModel: ScrobblerSettingsViewModel = hiltViewModel()) {
     val watchedPercent by viewModel.watchedPercent.collectAsStateWithLifecycle()
     val unresolved by viewModel.unresolved.collectAsStateWithLifecycle()
     val netflix by viewModel.netflix.collectAsStateWithLifecycle()
+    val retryStatus by viewModel.retryStatus.collectAsStateWithLifecycle()
     val context = LocalContext.current
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
 
@@ -66,11 +68,14 @@ fun ScrobblerSection(viewModel: ScrobblerSettingsViewModel = hiltViewModel()) {
                 color = if (installed) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
             )
             OnOffDropdown("Primește vizionările", enabled, viewModel::setEnabled, on = "Da", off = "Oprit")
+            val actions = LocalCatalogActions.current
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (installed) {
                     OutlinedButton(onClick = { viewModel.launchIntent()?.let(context::startActivity) }) { Text("Deschide AK Scrobbler") }
                 }
+                OutlinedButton(onClick = actions.openDiagnostics) { Text("Jurnal complet & GitHub") }
                 if (log.isNotEmpty()) OutlinedButton(onClick = viewModel::clearLog) { Text("Golește jurnalul") }
+                if (unresolved > 0) OutlinedButton(onClick = viewModel::retryIdentification) { Text("Reîncearcă identificarea") }
             }
             Dropdown(
                 label = "Marcat ca văzut de la",
@@ -88,8 +93,8 @@ fun ScrobblerSection(viewModel: ScrobblerSettingsViewModel = hiltViewModel()) {
                 )
             }
             Text(
-                "Netflix nu spune titlul: îl iau din „Activitate de vizionare” prin AK Import, după minut. " +
-                    "Conectează-te o dată la Netflix în AK Import (RO sau US, unde e contul tău).",
+                "Pentru titlurile Netflix lipsă, se folosește activitatea profilului tău. Conectează Netflix în AK Scrobbler " +
+                    "sau din Istoric din servicii aici în AK VOD Unify.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.readable(),
@@ -97,6 +102,7 @@ fun ScrobblerSection(viewModel: ScrobblerSettingsViewModel = hiltViewModel()) {
             netflix.forEach { line ->
                 Text("Netflix · $line", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.readable())
             }
+            retryStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.readable()) }
             if (log.isEmpty()) {
                 Text("Primite recent", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 6.dp))
                 Text(

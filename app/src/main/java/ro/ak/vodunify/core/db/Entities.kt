@@ -44,13 +44,26 @@ data class TrackedRef(
 )
 
 /** Istoric: vizionări complete. Id = "<sursă>|<id intrare>" ca să nu se dubleze la resincronizare. */
-@Entity(tableName = "watch_events", indices = [Index("mediaKey"), Index("source"), Index("watchedAt")])
+@Entity(
+    tableName = "watch_events",
+    indices = [
+        Index("mediaKey"),
+        Index("source"),
+        Index("watchedAt"),
+        Index(value = ["source", "mediaKey", "season", "episode", "watchedAt"], name = "idx_watch_events_lookup"),
+        Index(value = ["mediaKey", "season", "episode", "watchedAt"], name = "idx_watch_events_item_time"),
+    ],
+)
 data class WatchEventEntity(
     @PrimaryKey val id: String,
     val source: String,
     @Embedded val ref: TrackedRef,
     val watchedAt: Long,
+    val appPackage: String? = null,
+    val playbackAt: Long? = null,
 )
+
+data class TitlePlaybackApp(val mediaKey: String, val source: String, val appPackage: String?, val at: Long)
 
 /**
  * Puncte de reluare (playback): vizionări începute. Separate de istoric.

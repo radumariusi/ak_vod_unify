@@ -2,6 +2,7 @@ package ro.ak.vodunify.core.catalog
 
 import kotlinx.serialization.Serializable
 import ro.ak.vodunify.core.prefs.Market
+import ro.ak.vodunify.core.playback.StreamingService
 
 enum class TitleKind(val path: String, val label: String) {
     MOVIE("movie", "Film"),
@@ -38,6 +39,7 @@ data class CatalogItem(
     val note: String? = null,
     /** Numărul de episoade (doar la seriale, din pagina titlului). */
     val episodeCount: Int? = null,
+    val origin: TitleOrigin = TitleOrigin(),
 ) {
     /** Cheie stabilă comună cu tabela `media` (ex. "movie:tmdb:603"). */
     val mediaKey: String get() = mediaKey(kind, id)
@@ -45,6 +47,14 @@ data class CatalogItem(
     val subtitle: String
         get() = listOfNotNull(year?.toString(), kind.label, note?.takeIf { it.isNotBlank() }).joinToString(" · ")
 }
+
+@Serializable
+data class TitleOrigin(
+    val language: String? = null,
+    val countries: List<String> = emptyList(),
+    val originalTitle: String? = null,
+    val type: String? = null,
+)
 
 fun mediaKey(kind: TitleKind, id: Long) = "${kind.path}:tmdb:$id"
 
@@ -73,7 +83,10 @@ data class MovieReleaseEvent(
     val serviceId: String? = null,
     val serviceName: String? = null,
     val mine: Boolean = false,
-)
+    val otherCinemaRegions: List<String> = emptyList(),
+) {
+    val cinemaRegions: List<String> get() = listOf(region) + otherCinemaRegions
+}
 
 /** Titlul plus datele de lansare: data filmului, ultimul și următorul episod la seriale. */
 data class TitleReleases(
@@ -109,7 +122,13 @@ data class MarketAvailability(
     val isEmpty: Boolean get() = flatrate.isEmpty() && free.isEmpty() && rent.isEmpty() && buy.isEmpty()
 }
 
-data class SeasonSummary(val number: Int, val name: String, val episodeCount: Int, val year: Int?)
+data class SeasonSummary(
+    val number: Int,
+    val name: String,
+    val episodeCount: Int,
+    val year: Int?,
+    val airDate: String? = null,
+)
 
 data class Episode(
     val season: Int,
@@ -149,10 +168,34 @@ data class TitleDetails(
     val nextEpisode: String?,
     /** Sigla titlului (TMDb logo); null = titlul se scrie cu text. */
     val logoUrl: String? = null,
+    val lastAiredEpisode: EpisodeAir? = null,
 )
 
-/** Un rând „Pe Netflix (RO)” din Acasă: serviciul tău, în biblioteca lui. */
-data class ServiceShelf(val name: String, val providerIds: Set<Int>, val market: Market)
+/** Biblioteca unui serviciu, independent de aplicațiile instalate. */
+data class ServiceLibrary(val service: StreamingService, val market: Market) {
+    val region: String get() = if (service == StreamingService.ARTE) "FR" else market.code
+}
+
+/** Un rând „Pe Netflix (RO)” din Acasă pentru o aplicație instalată. */
+data class ServiceShelf(val service: StreamingService, val packageName: String, val market: Market) {
+    val library: ServiceLibrary get() = ServiceLibrary(service, market)
+    val rowId: String get() = "service_${service.id}_${library.region}"
+    val rowTitle: String get() = "Pe ${service.displayName} (${library.region})"
+
+    fun row(items: List<CatalogItem> = emptyList(), status: ServiceCatalogStatus? = null) =
+        CatalogRow(
+            rowId, rowTitle, items, status?.let { ServiceFallback(packageName, it) },
+            service = if (items.isEmpty()) null else CatalogService(service.id, "${service.displayName} (${library.region})", packageName, market),
+        )
+}
+
+data class ServiceCatalogPage(val items: List<CatalogItem>, val status: ServiceCatalogStatus? = null)
+
+/** Lista furnizorilor pentru tipul de titlu și piața cerută are prioritate peste ID-urile de rezervă. */
+internal fun homeProviderIds(service: StreamingService, directory: List<ProviderInfo>?): Set<Int> =
+    directory?.filter { StreamingService.fromProvider(it.id, it.name) == service }
+        ?.mapTo(linkedSetOf()) { it.id }
+        ?: service.tmdbProviderIds
 
 data class PersonDetails(
     val id: Long,
@@ -179,7 +222,22 @@ data class StudioDetails(
 )
 
 @Serializable
-data class CatalogRow(val id: String, val title: String, val items: List<CatalogItem>)
+data class CatalogRow(
+    val id: String,
+    val title: String,
+    val items: List<CatalogItem>,
+    val serviceFallback: ServiceFallback? = null,
+    val service: CatalogService? = null,
+)
+
+/** Platforma confirmată pentru titlurile din rând. Biblioteca aleasă stabilește ordinea iconiței. */
+@Serializable
+data class CatalogService(val id: String, val label: String, val packageName: String, val market: Market)
+
+@Serializable
+data class ServiceFallback(val packageName: String, val reason: ServiceCatalogStatus)
+
+enum class ServiceCatalogStatus { CHECKING, NO_PROVIDER, NO_TITLES, UNAVAILABLE }
 
 @Serializable
 data class HomeCatalog(val hero: List<CatalogItem>, val rows: List<CatalogRow>)

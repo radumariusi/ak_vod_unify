@@ -11,9 +11,12 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import ro.ak.vodunify.core.catalog.CatalogRow
 import ro.ak.vodunify.core.catalog.HomeCatalog
 import ro.ak.vodunify.core.catalog.MovieReleaseEvent
 import ro.ak.vodunify.core.catalog.TitleReleases
+import ro.ak.vodunify.core.catalog.ServiceCatalogStatus
+import ro.ak.vodunify.core.catalog.ServiceShelf
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -25,7 +28,11 @@ import javax.inject.Singleton
 data class HomeSnapshot(
     val catalog: HomeCatalog? = null,
     val personal: PersonalRows? = null,
+    val releaseRefresh: HomeReleaseRefresh? = null,
 )
+
+@Serializable
+data class HomeReleaseRefresh(val key: String, val at: Long)
 
 /**
  * Memoria filei Acasă, cât trăiește aplicația și pe disc:
@@ -38,6 +45,7 @@ class HomeSnapshotStore @Inject constructor(@ApplicationContext context: Context
     private val file = File(context.filesDir, "home_snapshot.json")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val writeLock = Mutex()
+    private var written: HomeSnapshot? = null
 
     @Volatile var memory: HomeSnapshot? = null
         private set
@@ -57,9 +65,20 @@ class HomeSnapshotStore @Inject constructor(@ApplicationContext context: Context
 
     fun saveCatalog(catalog: HomeCatalog) = save { it.copy(catalog = catalog) }
 
+    fun releasesAreFresh(key: String): Boolean = memory?.releaseRefresh?.let {
+        it.key == key && System.currentTimeMillis() - it.at in 0 until RELEASES_TTL
+    } == true
+
+    fun markReleasesRefreshed(key: String) = save { it.copy(releaseRefresh = HomeReleaseRefresh(key, System.currentTimeMillis())) }
+
     fun savePersonal(rows: PersonalRows) {
         if (rows.state == PersonalState.LOADING) return
-        save { it.copy(personal = rows) }
+        save { snapshot ->
+            val previous = snapshot.personal
+            val sameReleases = previous != null && previous.newMovies == rows.newMovies && previous.newEpisodes == rows.newEpisodes &&
+                previous.soonMovies == rows.soonMovies && previous.soonEpisodes == rows.soonEpisodes
+            snapshot.copy(personal = rows, releaseRefresh = snapshot.releaseRefresh.takeIf { sameReleases })
+        }
     }
 
     private fun save(change: (HomeSnapshot) -> HomeSnapshot) {
@@ -68,13 +87,12 @@ class HomeSnapshotStore @Inject constructor(@ApplicationContext context: Context
         memory = next
         scope.launch {
             writeLock.withLock {
+                val latest = memory ?: return@withLock
+                if (latest == written) return@withLock
                 runCatching {
                     val tmp = File(file.parentFile, file.name + ".tmp")
-                    tmp.writeText(json.encodeToString(HomeSnapshot.serializer(), next))
-                    if (!tmp.renameTo(file)) {
-                        file.delete()
-                        tmp.renameTo(file)
-                    }
+                    tmp.writeText(json.encodeToString(HomeSnapshot.serializer(), latest))
+                    if (tmp.renameTo(file)) written = latest
                 }
             }
         }
@@ -129,6 +147,7 @@ class HomeSnapshotStore @Inject constructor(@ApplicationContext context: Context
         movieReleases.clear()
         popular = null
         packages = null
+        if (memory?.releaseRefresh != null) save { it.copy(releaseRefresh = null) }
     }
 
     private companion object {
@@ -136,4 +155,41 @@ class HomeSnapshotStore @Inject constructor(@ApplicationContext context: Context
         val PACKAGES_TTL = TimeUnit.MINUTES.toMillis(5)
         val json = Json { ignoreUnknownKeys = true }
     }
+}
+
+/** O eroare temporară lasă disponibile titlurile deja încărcate pentru aceeași bibliotecă. */
+internal fun mergeSavedCatalog(current: HomeCatalog, saved: HomeCatalog?): HomeCatalog {
+    if (saved == null) return current
+    val oldRows = saved.rows.associateBy { it.id }
+    val rows = current.rows.map { row ->
+        val cached = oldRows[row.id]?.takeIf { it.items.isNotEmpty() }
+        if (row.serviceFallback?.reason == ServiceCatalogStatus.UNAVAILABLE && cached != null) cached else row
+    }
+    val general = if (rows.none { !it.id.startsWith("service_") } && current.hero.isEmpty()) {
+        saved.rows.filter(::isGeneralRow)
+    } else emptyList()
+    return current.copy(hero = current.hero.ifEmpty { if (general.isNotEmpty()) saved.hero else emptyList() }, rows = general + rows)
+}
+
+
+/** Până când verificăm inventarul, afișăm numai rândurile generale din instantaneu. */
+internal fun HomeCatalog.withoutServiceRows(): HomeCatalog =
+    copy(rows = rows.filter(::isGeneralRow))
+
+private fun isGeneralRow(row: CatalogRow): Boolean =
+    !row.id.startsWith("service_") && row.id != "top_movies"
+
+/** Inventarul local hotărăște ce rânduri de servicii apar. */
+internal fun HomeCatalog.withInstalledServices(shelves: List<ServiceShelf>, status: ServiceCatalogStatus): HomeCatalog {
+    val saved = rows.associateBy { it.id }
+    val services = shelves.map { shelf ->
+        val row = saved[shelf.rowId]
+        when {
+            row == null -> shelf.row(status = status)
+            row.items.isNotEmpty() -> shelf.row(row.items)
+            row.serviceFallback?.reason == ServiceCatalogStatus.CHECKING -> shelf.row(status = status)
+            else -> shelf.row(status = row.serviceFallback?.reason ?: status)
+        }
+    }
+    return copy(rows = rows.filter(::isGeneralRow) + services)
 }

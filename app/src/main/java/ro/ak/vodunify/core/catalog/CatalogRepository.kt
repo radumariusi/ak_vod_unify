@@ -1,9 +1,13 @@
 package ro.ak.vodunify.core.catalog
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.supervisorScope
+import ro.ak.vodunify.core.playback.StreamingService
 import ro.ak.vodunify.core.db.AvailabilityDao
 import ro.ak.vodunify.core.db.AvailabilityEntity
 import ro.ak.vodunify.core.db.MediaDao
@@ -17,6 +21,7 @@ import ro.ak.vodunify.core.tmdb.TmdbListItem
 import ro.ak.vodunify.core.tmdb.TmdbNotConfiguredException
 import ro.ak.vodunify.core.tmdb.TmdbPage
 import ro.ak.vodunify.core.tmdb.TmdbPersonDetails
+import ro.ak.vodunify.core.tmdb.TmdbProviderList
 import ro.ak.vodunify.core.tmdb.TmdbImageList
 import ro.ak.vodunify.core.prefs.Market
 import ro.ak.vodunify.core.tmdb.TmdbSeasonDetails
@@ -24,6 +29,8 @@ import ro.ak.vodunify.core.tmdb.TmdbStudioDetails
 import ro.ak.vodunify.core.tmdb.TmdbTitleDetails
 import ro.ak.vodunify.core.tmdb.TmdbWatchProviders
 import ro.ak.vodunify.core.tmdb.TmdbUnauthorizedException
+import ro.ak.vodunify.core.tracking.SeriesMarker
+import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -33,6 +40,7 @@ class CatalogRepository @Inject constructor(
     private val tmdb: TmdbClient,
     private val mediaDao: MediaDao,
     private val availabilityDao: AvailabilityDao,
+    private val voyo: VoyoCatalogSource,
 ) {
     val isConfigured: Boolean get() = tmdb.isConfigured
 
@@ -43,15 +51,16 @@ class CatalogRepository @Inject constructor(
 
     // ---------- Acasă ----------
 
-    /** [shelves]: serviciile tale (instalate), fiecare cu biblioteca lui: un rând „Pe Netflix (RO)” pentru fiecare. */
-    suspend fun home(settings: CatalogSettings, shelves: List<ServiceShelf>): HomeCatalog = supervisorScope {
+    /** Rândurile generale, disponibile independent de cataloagele serviciilor instalate. */
+    suspend fun home(settings: CatalogSettings): HomeCatalog = supervisorScope {
         val lang = settings.apiLanguage
         val l = settings.language
         val region = Market.RO.code
 
         val movies = async { list("movie/popular", mapOf("language" to lang, "region" to region)) }
         val shows = async { list("tv/popular", mapOf("language" to lang)) }
-        val topMovies = async { list("movie/top_rated", mapOf("language" to lang, "region" to region)) }
+        val trendingMovies = async { list("trending/movie/week", mapOf("language" to lang)) }
+        val trendingShows = async { list("trending/tv/week", mapOf("language" to lang)) }
 
         val errors = mutableListOf<Throwable>()
         suspend fun <T> safe(block: suspend () -> T): T? = try {
@@ -60,32 +69,25 @@ class CatalogRepository @Inject constructor(
             throw e
         } catch (e: TmdbUnauthorizedException) {
             throw e
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             errors += e
             null
         }
 
-        // Fără „În tendințe”: amesteca filme apărute cu filme care încă nu au apărut.
         val rows = mutableListOf<CatalogRow>()
         val popularMovies = safe { TmdbMappers.items(movies.await().results, l, TitleKind.MOVIE) }
         val popularShows = safe { TmdbMappers.items(shows.await().results, l, TitleKind.TV) }
         popularMovies?.let { rows += CatalogRow("movies", "Filme populare", it) }
         popularShows?.let { rows += CatalogRow("shows", "Seriale populare", it) }
-        safe { TmdbMappers.items(topMovies.await().results, l, TitleKind.MOVIE) }?.let { rows += CatalogRow("top_movies", "Filme apreciate", it) }
-
-        val serviceRows = shelves.filter { it.providerIds.isNotEmpty() }.map { shelf ->
-            async {
-                safe {
-                    val (m, t) = serviceCatalog(shelf, settings)
-                    CatalogRow(
-                        "service_${shelf.name}_${shelf.market.code}",
-                        "Pe ${shelf.name} (${shelf.market.code})",
-                        TmdbMappers.interleave(m, t),
-                    )
-                }
-            }
-        }.awaitAll().filterNotNull()
-        rows += serviceRows
+        val today = ro.ak.vodunify.core.calendar.time.RomaniaTime.today().toString()
+        safe {
+            TmdbMappers.items(trendingMovies.await().results.filter { !it.adult && isReleased(it.releaseDate, today) }, l, TitleKind.MOVIE)
+        }?.let { rows += CatalogRow("trending_movies", "Filme în tendințe", it) }
+        safe {
+            TmdbMappers.items(trendingShows.await().results.filter { !it.adult && isReleased(it.firstAirDate, today) }, l, TitleKind.TV)
+        }?.let { rows += CatalogRow("trending_shows", "Seriale în tendințe", it) }
 
         val nonEmpty = rows.filter { it.items.isNotEmpty() }
         if (nonEmpty.isEmpty() && errors.isNotEmpty()) throw errors.first()
@@ -95,28 +97,103 @@ class CatalogRepository @Inject constructor(
         )
     }
 
-    private suspend fun serviceCatalog(shelf: ServiceShelf, settings: CatalogSettings): Pair<List<CatalogItem>, List<CatalogItem>> =
-        coroutineScope {
-            val params = mapOf(
-                "language" to settings.apiLanguage,
-                "watch_region" to shelf.market.code,
-                "with_watch_providers" to shelf.providerIds.joinToString("|"),
-                "with_watch_monetization_types" to "flatrate|free|ads",
-                "sort_by" to "popularity.desc",
-            )
-            val m = async { list("discover/movie", params) }
-            val t = async { list("discover/tv", params) }
-            TmdbMappers.items(m.await().results, settings.language, TitleKind.MOVIE) to
-                TmdbMappers.items(t.await().results, settings.language, TitleKind.TV)
+    private fun isReleased(date: String?, today: String): Boolean = date != null && date.length == 10 && date <= today
+
+    /** Can load any configured service. Home supplies only installed services. */
+    suspend fun streamingCatalogs(
+        libraries: List<ServiceLibrary>,
+        settings: CatalogSettings,
+        page: Int = 1,
+    ): Map<ServiceLibrary, ServiceCatalogPage> = coroutineScope {
+        require(page > 0)
+        val gate = Semaphore(6)
+        suspend fun <T> fetch(block: suspend () -> T): T? = try {
+            gate.withPermit { block() }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
         }
+
+        val directories = libraries.filter { it.service != StreamingService.VOYO }.map { it.region }.distinct()
+            .associateWith { region ->
+                TitleKind.entries.associateWith { kind -> async { fetch { serviceDirectory(region, kind) } } }
+            }
+        libraries.distinct().map { library ->
+            async {
+                val (movies, shows) = TitleKind.entries.map { kind ->
+                    async part@{
+                        if (library.service == StreamingService.VOYO) {
+                            if (library.region != "RO") return@part ServiceCatalogPage(emptyList(), ServiceCatalogStatus.NO_PROVIDER)
+                            val ids = fetch { voyo.ids(kind, page) }
+                                ?: return@part ServiceCatalogPage(emptyList(), ServiceCatalogStatus.UNAVAILABLE)
+                            val items = ids.map { id -> async { fetch { basic(kind, id, settings) } } }
+                                .awaitAll().filterNotNull()
+                            val status = when {
+                                items.isNotEmpty() -> null
+                                ids.isNotEmpty() -> ServiceCatalogStatus.UNAVAILABLE
+                                else -> ServiceCatalogStatus.NO_TITLES
+                            }
+                            return@part ServiceCatalogPage(items, status)
+                        }
+                        val directory = directories.getValue(library.region).getValue(kind).await()
+                        val ids = homeProviderIds(library.service, directory)
+                        val items = if (ids.isEmpty()) emptyList() else fetch {
+                            serviceCatalog(library.region, kind, ids, settings, page)
+                        }
+                        val status = when {
+                            !items.isNullOrEmpty() -> null
+                            items == null || ids.isEmpty() && directory == null -> ServiceCatalogStatus.UNAVAILABLE
+                            ids.isEmpty() -> ServiceCatalogStatus.NO_PROVIDER
+                            else -> ServiceCatalogStatus.NO_TITLES
+                        }
+                        ServiceCatalogPage(items.orEmpty(), status)
+                    }
+                }.awaitAll()
+                val items = TmdbMappers.interleave(movies.items, shows.items)
+                val status = when {
+                    items.isNotEmpty() -> null
+                    ServiceCatalogStatus.UNAVAILABLE in listOf(movies.status, shows.status) -> ServiceCatalogStatus.UNAVAILABLE
+                    ServiceCatalogStatus.NO_TITLES in listOf(movies.status, shows.status) -> ServiceCatalogStatus.NO_TITLES
+                    else -> ServiceCatalogStatus.NO_PROVIDER
+                }
+                library to ServiceCatalogPage(items, status)
+            }
+        }.awaitAll().toMap()
+    }
+
+    private suspend fun serviceDirectory(region: String, kind: TitleKind): List<ProviderInfo> =
+        tmdb.get(
+            "watch/providers/${kind.path}", mapOf("watch_region" to region),
+            TmdbProviderList.serializer(), TmdbClient.LONG_TTL,
+        ).results.map(TmdbMappers::provider)
+
+    private suspend fun serviceCatalog(
+        region: String,
+        kind: TitleKind,
+        ids: Set<Int>,
+        settings: CatalogSettings,
+        page: Int,
+    ): List<CatalogItem> {
+        val params = mapOf(
+            "language" to settings.apiLanguage,
+            "watch_region" to region,
+            "with_watch_providers" to ids.sorted().joinToString("|"),
+            "with_watch_monetization_types" to "flatrate|free|ads",
+            "sort_by" to "popularity.desc",
+            "page" to page.takeIf { it > 1 }?.toString(),
+        )
+        return TmdbMappers.items(list("discover/${kind.path}", params).results, settings.language, kind)
+    }
 
     /**
      * Date minime (titlu în limba aleasă, poster, fundal) pentru un titlu după id-ul TMDb.
      * Folosit pentru rândurile personale (Trakt); cache 7 zile.
      */
     suspend fun basic(kind: TitleKind, id: Long, settings: CatalogSettings): CatalogItem {
-        val dto = tmdb.get("${kind.path}/$id", mapOf("language" to settings.apiLanguage), TmdbTitleDetails.serializer(), TmdbClient.LONG_TTL)
         val isMovie = kind == TitleKind.MOVIE
+        val ttl = if (isMovie) TmdbClient.LONG_TTL else TmdbClient.DEFAULT_TTL
+        val dto = tmdb.get("${kind.path}/$id", mapOf("language" to settings.apiLanguage), TmdbTitleDetails.serializer(), ttl)
         return CatalogItem(
             id = dto.id,
             kind = kind,
@@ -130,13 +207,15 @@ class CatalogRepository @Inject constructor(
             posterUrl = TmdbImages.poster(dto.posterPath),
             backdropUrl = TmdbImages.backdrop(dto.backdropPath),
             rating = dto.voteAverage?.takeIf { it > 0 },
-            episodeCount = dto.numberOfEpisodes,
+            genreIds = dto.genres.map { it.id },
+            episodeCount = if (isMovie) null else totalEpisodeCount(dto),
+            origin = TmdbMappers.origin(dto, kind),
         )
     }
 
-    /** Unde e titlul (RO și US), fără restul detaliilor: pentru sigla de pe postere. Păstrat 7 zile. */
+    /** Unde e titlul (RO și US), fără restul detaliilor. */
     suspend fun watchAvailability(kind: TitleKind, id: Long): List<MarketAvailability> {
-        val providers = tmdb.get("${kind.path}/$id/watch/providers", emptyMap(), TmdbWatchProviders.serializer(), TmdbClient.LONG_TTL)
+        val providers = tmdb.get("${kind.path}/$id/watch/providers", emptyMap(), TmdbWatchProviders.serializer())
         return Market.entries.map { TmdbMappers.availability(it, providers.results[it.code]) }
     }
 
@@ -201,7 +280,9 @@ class CatalogRepository @Inject constructor(
             posterUrl = TmdbImages.poster(dto.posterPath),
             backdropUrl = TmdbImages.backdrop(dto.backdropPath),
             rating = dto.voteAverage?.takeIf { it > 0 },
+            genreIds = dto.genres.map { it.id },
             episodeCount = dto.numberOfEpisodes,
+            origin = TmdbMappers.origin(dto, kind),
         )
         fun air(e: ro.ak.vodunify.core.tmdb.TmdbEpisodeRef?) = e?.let { EpisodeAir(it.seasonNumber, it.episodeNumber, it.name, it.airDate) }
         return TitleReleases(
@@ -291,17 +372,7 @@ class CatalogRepository @Inject constructor(
                 .map { PersonSummary(it.id, it.name, TmdbImages.profile(it.profilePath), it.character) },
             crew = crew,
             studios = studios,
-            seasons = dto.seasons
-                .filter { it.episodeCount > 0 }
-                .sortedWith(compareBy { if (it.seasonNumber == 0) Int.MAX_VALUE else it.seasonNumber })
-                .map {
-                    SeasonSummary(
-                        it.seasonNumber,
-                        it.name?.takeIf { n -> n.isNotBlank() } ?: if (it.seasonNumber == 0) "Speciale" else "Sezonul ${it.seasonNumber}",
-                        it.episodeCount,
-                        TmdbMappers.year(it.airDate),
-                    )
-                },
+            seasons = dto.seasonSummaries(),
             availability = TmdbMappers.availabilityFor(dto),
             recommendations = TmdbMappers.items(dto.recommendations?.results.orEmpty(), settings.language, kind),
             imdbId = dto.imdbId ?: dto.externalIds?.imdbId,
@@ -310,6 +381,7 @@ class CatalogRepository @Inject constructor(
                 "Următorul episod: " + "S%02dE%02d".format(e.seasonNumber, e.episodeNumber) + (e.airDate?.let { " · $it" } ?: "")
             },
             logoUrl = TmdbImages.titleLogo(TmdbMappers.logoPath(dto.images?.logos.orEmpty(), settings.logoLanguage)),
+            lastAiredEpisode = dto.lastEpisodeToAir?.let { EpisodeAir(it.seasonNumber, it.episodeNumber, it.name, it.airDate) },
         )
     }
 
@@ -562,3 +634,29 @@ class CatalogRepository @Inject constructor(
     suspend fun clearCache() = tmdb.clearCache()
 
 }
+
+/** Numărul total de episoade ale serialului (fără „Speciale”), inclusiv episoadele anunțate din sezoanele existente. */
+internal fun totalEpisodeCount(details: TmdbTitleDetails): Int? {
+    val regular = details.seasons.filter { it.seasonNumber > 0 && it.episodeCount > 0 }.sumOf { it.episodeCount }
+    return if (regular > 0) regular else details.numberOfEpisodes
+}
+
+/** TMDb include sezoane anunțate și episoade care încă nu au apărut. */
+internal fun airedEpisodeCount(details: TmdbTitleDetails, today: LocalDate = LocalDate.now()): Int? {
+    val seasons = details.seasonSummaries()
+    if (seasons.none { it.number > 0 }) return details.numberOfEpisodes
+    val last = details.lastEpisodeToAir?.let { EpisodeAir(it.seasonNumber, it.episodeNumber, it.name, it.airDate) }
+    return SeriesMarker.airedCounts(seasons, last, today).values.sum()
+}
+
+private fun TmdbTitleDetails.seasonSummaries() = seasons.filter { it.episodeCount > 0 }
+    .sortedBy { if (it.seasonNumber == 0) Int.MAX_VALUE else it.seasonNumber }
+    .map { season ->
+        SeasonSummary(
+            season.seasonNumber,
+            season.name?.takeIf { it.isNotBlank() } ?: if (season.seasonNumber == 0) "Speciale" else "Sezonul ${season.seasonNumber}",
+            season.episodeCount,
+            TmdbMappers.year(season.airDate),
+            season.airDate,
+        )
+    }

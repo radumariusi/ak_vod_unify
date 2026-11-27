@@ -1,5 +1,10 @@
 package ro.ak.vodunify.core.tracking
 
+import androidx.room.invalidationTrackerFlow
+import androidx.room.withTransaction
+
+import ro.ak.vodunify.core.imports.ImportSources
+import ro.ak.vodunify.core.playback.TargetApp
 import ro.ak.vodunify.core.publish.LOCAL_SOURCE
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -13,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -30,15 +36,20 @@ import ro.ak.vodunify.core.connector.MediaType
 import ro.ak.vodunify.core.connector.ShowProgress
 import ro.ak.vodunify.core.connector.WatchEvent
 import ro.ak.vodunify.core.connector.WatchlistEntry
+import ro.ak.vodunify.core.connector.seasonTrackingKey
 import ro.ak.vodunify.core.connector.supports
 import ro.ak.vodunify.core.db.OwnWriteAction
 import ro.ak.vodunify.core.db.OwnWriteEntity
 import ro.ak.vodunify.core.db.ResumePointEntity
 import ro.ak.vodunify.core.db.SyncStateEntity
 import ro.ak.vodunify.core.db.TrackingDao
+import ro.ak.vodunify.core.db.VodDatabase
 import ro.ak.vodunify.core.db.UpNextEntity
+import ro.ak.vodunify.core.db.WatchEventEntity
+import ro.ak.vodunify.core.db.WatchedTitleEntity
 import ro.ak.vodunify.core.db.WatchlistEntity
 import ro.ak.vodunify.core.reconcile.LibraryEntry
+import ro.ak.vodunify.core.reconcile.LibraryStatus
 import ro.ak.vodunify.core.reconcile.ReconciledView
 import ro.ak.vodunify.core.reconcile.reconcile
 import java.time.Instant
@@ -75,6 +86,7 @@ class TrackingRepository @Inject constructor(
     private val registry: ConnectorRegistry,
     private val dao: TrackingDao,
     private val hidden: HiddenTitles,
+    private val db: VodDatabase,
 ) {
     /** Titlurile scoase de mână din Lista mea (vezi [HiddenTitles]). */
     val hiddenTitles: StateFlow<Map<String, Long>> get() = hidden.all
@@ -97,32 +109,35 @@ class TrackingRepository @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** Tot ce știu sursele, reconciliat (vezi [Reconciler]). Calculat o dată, partajat. */
-    val reconciled: Flow<ReconciledView> = combine(
-        combine(dao.allResume(), dao.latestWatches(), dao.watchedTitles()) { a, b, c -> Triple(a, b, c) },
-        dao.watchlist(),
-        dao.upNext(),
-        dao.ownWrites(),
-    ) { (resume, watches, watched), list, next, own ->
-        reconcile(
-            resume.visible { it.source },
-            watches.visible { it.source },
-            watched.visible { it.source },
-            list.visible { it.source },
-            next.visible { it.source },
-            own.visible { it.source },
-        )
-    }
+    val reconciled: Flow<ReconciledView> = db.invalidationTrackerFlow(
+        "resume_points", "watch_events", "watched_titles", "watchlist", "up_next", "own_writes",
+    ).map { reconcileNow() }
+        .distinctUntilChanged()
         .flowOn(Dispatchers.Default)
         .shareIn(scope, SharingStarted.WhileSubscribed(5_000), replay = 1)
 
     /** Reconcilierea calculată acum, direct din Room (fără valoarea partajată, care poate întârzia). */
-    suspend fun reconcileNow(): ReconciledView = reconcile(
-        dao.allResume().first().visible { it.source },
-        dao.latestWatches().first().visible { it.source },
-        dao.watchedTitles().first().visible { it.source },
-        dao.watchlist().first().visible { it.source },
-        dao.upNext().first().visible { it.source },
-        dao.ownWrites().first().visible { it.source },
+    suspend fun reconcileNow(): ReconciledView {
+        val snapshot = db.withTransaction {
+            TrackingSnapshot(
+                dao.readResume().visible { it.source },
+                dao.latestWatches().visible { it.source },
+                dao.watchedTitles().visible { it.source },
+                dao.watchlist().visible { it.source },
+                dao.upNext().visible { it.source },
+                dao.ownWrites().visible { it.source },
+            )
+        }
+        return reconcile(snapshot.resume, snapshot.history, snapshot.watched, snapshot.watchlist, snapshot.upNext, snapshot.ownWrites)
+    }
+
+    private data class TrackingSnapshot(
+        val resume: List<ResumePointEntity>,
+        val history: List<WatchEventEntity>,
+        val watched: List<WatchedTitleEntity>,
+        val watchlist: List<WatchlistEntity>,
+        val upNext: List<UpNextEntity>,
+        val ownWrites: List<OwnWriteEntity>,
     )
 
     /**
@@ -132,45 +147,37 @@ class TrackingRepository @Inject constructor(
      * episoade diferite), rămâne doar vizionarea cea mai recentă.
      */
     val continueWatching: Flow<List<ResumePointEntity>> =
-        dao.continueWatching().map { list -> latestPerTitle(list.filter { it.source == LOCAL_SOURCE }) }
+        reconciled.map { it.localContinueWatching }.distinctUntilChanged()
 
     val upNext: Flow<List<UpNextEntity>> = reconciled.map { it.upNext }
 
     val watchlist: Flow<List<WatchlistEntity>> = reconciled.map { it.watchlist }
 
-    val library: Flow<List<LibraryEntry>> = reconciled.map { it.library }
-
-    fun titleState(mediaKey: String): Flow<TitleTrackState> =
-        if (ExternalTrackers.ENABLED) {
-            combine(
-                dao.inWatchlist(mediaKey),
-                dao.isWatched(mediaKey),
-                dao.resumeFor(mediaKey),
-            ) { inList, watched, resume -> TitleTrackState(inList, watched, resume.firstOrNull()) }
-        } else {
-            // Doar datele locale: ce a rămas de la Trakt/SIMKL nu mai contează.
-            combine(
-                combine(dao.watchlist(), dao.watchedTitles(), dao.resumeFor(mediaKey)) { a, b, c -> Triple(a, b, c) },
-                dao.lastWatchedAt(mediaKey, protectedSources),
-                hidden.all,
-            ) { (list, watchedList, resumeList), lastWatched, hiddenMap ->
-                val listed = list.filter { it.ref.mediaKey == mediaKey && ExternalTrackers.isVisible(it.source) }
-                val watched = watchedList.filter { it.ref.mediaKey == mediaKey && ExternalTrackers.isVisible(it.source) }
-                val resume = resumeList.firstOrNull { ExternalTrackers.isVisible(it.source) }
-                val lastActivity = maxOf(
-                    lastWatched ?: 0L,
-                    watched.maxOfOrNull { it.lastWatchedAt } ?: 0L,
-                    resume?.updatedAt ?: 0L,
-                )
-                val hasActivity = lastWatched != null || watched.isNotEmpty() || resume != null
-                TitleTrackState(
-                    inWatchlist = listed.isNotEmpty(),
-                    watched = watched.isNotEmpty(),
-                    resume = resume,
-                    inMyList = listed.isNotEmpty() || (hasActivity && !HiddenTitles.isHidden(hiddenMap, mediaKey, lastActivity)),
-                )
+    val completedPlaybackApps = dao.latestPlaybackApps(LOCAL_SOURCE, listOf(ImportSources.NETFLIX, ImportSources.PRIME_VIDEO))
+        .map { list ->
+            list.associateBy({ it.mediaKey }) { app ->
+                val importedPackage = when (app.source) {
+                    ImportSources.NETFLIX -> TargetApp.NETFLIX.packages.first()
+                    ImportSources.PRIME_VIDEO -> TargetApp.PRIME_VIDEO.packages.first()
+                    else -> null
+                }
+                app.copy(appPackage = app.appPackage ?: importedPackage)
             }
         }
+
+    val library: Flow<List<LibraryEntry>> = reconciled.map { it.library }
+
+    fun titleState(mediaKey: String): Flow<TitleTrackState> = combine(reconciled, hidden.all) { view, hiddenMap ->
+        val entry = view.library.firstOrNull { it.titleKey == mediaKey }
+        val series = view.series[mediaKey]
+        val lastActivity = maxOf(entry?.lastActivityAt ?: 0L, series?.lastAt ?: 0L)
+        TitleTrackState(
+            inWatchlist = entry?.statuses?.contains(LibraryStatus.WATCHLIST) == true,
+            watched = entry?.currentStatus == LibraryStatus.WATCHED,
+            resume = entry?.resume?.winner,
+            inMyList = (entry != null || series != null) && !HiddenTitles.isHidden(hiddenMap, mediaKey, lastActivity),
+        )
+    }.distinctUntilChanged()
 
     fun syncState(source: String): Flow<SyncStateEntity?> = dao.syncStateFlow(source)
 
@@ -294,11 +301,18 @@ class TrackingRepository @Inject constructor(
 
     /** Pe fiecare serial: câte episoade ai văzut și ultimul (din istoricul local). */
     val seriesSummaries: Flow<Map<String, SeriesSummary>> =
-        dao.latestWatches().map { LocalProgress.summaries(it.visible { e -> e.source }) }.flowOn(Dispatchers.Default)
+        reconciled.map { it.series }.distinctUntilChanged()
 
     /** Progresul pe serial din istoricul local. [seasonCounts]: sezon → episoade (din TMDb). */
-    suspend fun localShowProgress(show: MediaRef, seasonCounts: Map<Int, Int>): ShowProgress =
-        LocalProgress.show(show, dao.historyFor(show.titleKey).first().visible { it.source }, seasonCounts, LOCAL_SOURCE)
+    fun localShowProgress(show: MediaRef, seasonCounts: Map<Int, Int>): Flow<ShowProgress> =
+        reconciled.map { view ->
+            val active = view.library.firstOrNull { it.titleKey == show.titleKey }?.resume?.winner?.ref
+            val history = view.latestWatches.filter { event ->
+                event.ref.mediaKey == show.titleKey && (active == null ||
+                    event.ref.season != active.season || event.ref.episode != active.episode)
+            }
+            LocalProgress.show(show, history, seasonCounts, LOCAL_SOURCE)
+        }.distinctUntilChanged()
 
     /** Progresul pe serial din prima sursă conectată care îl știe. */
     suspend fun showProgress(show: MediaRef): ShowProgress? {
@@ -326,20 +340,32 @@ class TrackingRepository @Inject constructor(
 
     private suspend fun setWatchedLocally(media: MediaRef, watched: Boolean): Int {
         val now = Instant.now()
-        if (watched) {
-            val event = WatchEvent(media, now, LOCAL_SOURCE)
-            dao.insertHistory(listOf(TrackingEntities.history(event)))
-            if (media.type != MediaType.EPISODE) dao.upsertWatched(listOf(TrackingEntities.watched(event)))
-            dao.deleteResumeById("$LOCAL_SOURCE|${media.itemKey}")
-            if (media.type == MediaType.MOVIE) dao.removeFromWatchlist(media.titleKey)
-        } else {
-            // Din toate sursele (AK Scrobbler, Netflix, Trakt importat), altfel titlurile importate rămân „văzute”.
-            when (media.type) {
-                MediaType.EPISODE -> dao.deleteItemHistory(media.titleKey, media.season, media.episode, protectedSources)
-                else -> dao.deleteTitleHistory(media.titleKey, protectedSources)
+        db.withTransaction {
+            val id = "$LOCAL_SOURCE|${media.itemKey}"
+            dao.putOwnWrites(listOf(manualMark(media.itemKey, watched, now.toEpochMilli())))
+            if (watched) {
+                val event = WatchEvent(media, now, LOCAL_SOURCE)
+                val resume = dao.resumeById(id)
+                val entry = TrackingEntities.history(event).copy(
+                    appPackage = resume?.appPackage,
+                    playbackAt = resume?.updatedAt,
+                )
+                dao.insertHistory(listOf(entry))
+                if (media.type != MediaType.EPISODE) dao.upsertWatched(listOf(TrackingEntities.watched(event)))
+            } else if (media.type == MediaType.EPISODE) {
+                val previouslyWatched = dao.deleteItemHistory(media.titleKey, media.season, media.episode, protectedSources) > 0
+                if (previouslyWatched) {
+                    val remaining = dao.historyFor(media.titleKey).first().visible { it.source }
+                    if (remaining.isNotEmpty()) rememberStartedShow(media.asShow(), now)
+                    else dao.removeWatchedFromVisibleSources(media.titleKey, protectedSources)
+                }
+            } else {
+                dao.deleteTitleHistory(media.titleKey, protectedSources)
+                dao.removeWatchedFromVisibleSources(media.titleKey, protectedSources)
             }
-            if (media.type != MediaType.EPISODE) dao.removeWatched(media.titleKey)
+            if (media.type == MediaType.SHOW) dao.deleteResumeFor(media.titleKey) else dao.deleteResumeById(id)
         }
+        if (watched) hidden.show(media.titleKey)
         return 1
     }
 
@@ -347,28 +373,66 @@ class TrackingRepository @Inject constructor(
      * Marchează mai multe episoade ale unui serial (un sezon întreg sau tot serialul) văzute / nevăzute,
      * doar în baza locală.
      */
-    suspend fun setEpisodesWatched(show: MediaRef, episodes: List<EpisodeNumber>, watched: Boolean) {
+    suspend fun markEpisodesWatched(show: MediaRef, episodes: List<EpisodeNumber>, wholeShow: Boolean = false) {
         if (episodes.isEmpty()) return
         val base = show.copy(type = MediaType.EPISODE, episodeTitle = null)
-        if (watched) {
+        db.withTransaction {
             val now = System.currentTimeMillis()
             val existing = dao.historyFor(show.titleKey).first().visible { it.source }
                 .mapNotNull { e -> e.ref.season?.let { s -> e.ref.episode?.let { EpisodeNumber(s, it) } } }
                 .toSet()
-            // Câte o milisecundă între ele, ca ordinea episoadelor să rămână în istoric; cele deja văzute rămân cum sunt.
+            // Cele deja văzute își păstrează data vizionării.
             val fresh = episodes.filter { it !in existing }
+            val resumes = dao.resumeFor(show.titleKey).first().associateBy { it.id }
+            val keys = episodes.map { n -> base.copy(season = n.season, episode = n.episode).itemKey }
+            val scopes = if (wholeShow) keys + show.titleKey else keys
+            dao.putOwnWrites(scopes.map { key -> manualMark(key, watched = true, at = now) })
             dao.insertHistory(
-                fresh.mapIndexed { i, n ->
-                    TrackingEntities.history(
-                        WatchEvent(base.copy(season = n.season, episode = n.episode), Instant.ofEpochMilli(now - fresh.size + i), LOCAL_SOURCE),
-                    )
+                fresh.map { n ->
+                    val episode = base.copy(season = n.season, episode = n.episode)
+                    val resume = resumes["$LOCAL_SOURCE|${episode.itemKey}"]
+                    val event = WatchEvent(episode, Instant.ofEpochMilli(now), LOCAL_SOURCE)
+                    TrackingEntities.history(event).copy(appPackage = resume?.appPackage, playbackAt = resume?.updatedAt)
                 },
             )
-            episodes.forEach { n -> dao.deleteResumeById("$LOCAL_SOURCE|${base.copy(season = n.season, episode = n.episode).itemKey}") }
-            hidden.show(show.titleKey)
-        } else {
-            episodes.forEach { n -> dao.deleteItemHistory(show.titleKey, n.season, n.episode, protectedSources) }
+            if (wholeShow) {
+                dao.deleteResumeFor(show.titleKey)
+                dao.removeWatchedFromVisibleSources(show.titleKey, protectedSources)
+            } else {
+                keys.chunked(500).forEach { batch -> dao.deleteResumeItems(batch.map { "$LOCAL_SOURCE|$it" }) }
+            }
         }
+        hidden.show(show.titleKey)
+    }
+
+    suspend fun clearSeriesHistory(show: MediaRef, seasons: List<Int>?): Int = db.withTransaction {
+        val now = Instant.now()
+        val keys = seasons?.map { seasonTrackingKey(show.titleKey, it) } ?: listOf(show.titleKey)
+        dao.putOwnWrites(keys.map { manualMark(it, watched = false, at = now.toEpochMilli()) })
+        if (seasons == null) {
+            val removed = dao.deleteTitleHistory(show.titleKey, protectedSources)
+            dao.removeWatchedFromVisibleSources(show.titleKey, protectedSources)
+            dao.deleteResumeFor(show.titleKey)
+            removed
+        } else {
+            val removed = dao.deleteSeasonHistory(show.titleKey, seasons, protectedSources)
+            dao.deleteSeasonResumes(show.titleKey, seasons)
+            if (removed > 0) {
+                val remaining = dao.historyFor(show.titleKey).first().visible { it.source }
+                if (remaining.isNotEmpty()) rememberStartedShow(show, now)
+                else dao.removeWatchedFromVisibleSources(show.titleKey, protectedSources)
+            }
+            removed
+        }
+    }
+
+    private suspend fun rememberStartedShow(show: MediaRef, now: Instant) {
+        dao.upsertWatched(listOf(TrackingEntities.watched(WatchEvent(show, now, LOCAL_SOURCE))))
+    }
+
+    private fun manualMark(key: String, watched: Boolean, at: Long): OwnWriteEntity {
+        val action = if (watched) OwnWriteAction.WATCHED else OwnWriteAction.UNWATCHED
+        return OwnWriteEntity("$LOCAL_SOURCE|$key|${action.name}", LOCAL_SOURCE, key, action.name, null, at)
     }
 
     private suspend fun setInWatchlistLocally(media: MediaRef, inWatchlist: Boolean): Int {
@@ -396,7 +460,3 @@ class TrackingRepository @Inject constructor(
         val OWN_WRITE_TTL_MS: Long = TimeUnit.DAYS.toMillis(7)
     }
 }
-
-/** Cea mai recentă poziție pentru fiecare titlu (serial = toate episoadele lui), cele mai noi întâi. */
-internal fun latestPerTitle(list: List<ResumePointEntity>): List<ResumePointEntity> =
-    list.groupBy { it.ref.mediaKey }.values.map { group -> group.maxBy { it.updatedAt } }.sortedByDescending { it.updatedAt }

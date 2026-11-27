@@ -13,6 +13,8 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
+import org.json.JSONObject
+import ro.ak.vodimport.NetflixRecent
 import ro.ak.vodunify.core.imports.HistoryImportRepository
 import ro.ak.vodunify.core.imports.ImportBatch
 
@@ -55,8 +57,12 @@ class ScrobbleProvider : ContentProvider() {
         // AK Import (RO / US): ce ai văzut recent pe Netflix, pentru vizionările fără titlu.
         if (uri.lastPathSegment == "netflix_recent") {
             return try {
-                val result = entry.json().decodeFromString(NetflixRecentResult.serializer(), payload)
-                runBlocking { withTimeout(TIMEOUT_MS) { entry.repository().applyNetflixRecent(result) } }
+                val status = JSONObject(payload).optString("status")
+                if (status == "not_logged_in" && NetflixRecent.hasSession()) {
+                    NetflixRecentWorker.scanLocal(ctx)
+                } else {
+                    NetflixMatchWorker.enqueue(ctx, payload)
+                }
                 uri.buildUpon().appendPath("ok").build()
             } catch (e: Exception) {
                 Log.w(TAG, "Activitate Netflix invalidă", e)

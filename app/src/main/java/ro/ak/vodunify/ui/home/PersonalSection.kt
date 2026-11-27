@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import ro.ak.vodunify.ui.components.Button
 import androidx.compose.material3.Card
@@ -36,6 +35,7 @@ import ro.ak.vodunify.core.tracking.SyncStatus
 import ro.ak.vodunify.core.connector.ExternalTrackers
 import ro.ak.vodunify.ui.components.DefaultScroll
 import ro.ak.vodunify.ui.components.peekRow
+import ro.ak.vodunify.ui.components.rememberRestoringRowState
 import ro.ak.vodunify.ui.components.FocusCard
 import ro.ak.vodunify.ui.components.FocusedTitle
 import ro.ak.vodunify.ui.components.PosterLabel
@@ -43,12 +43,11 @@ import ro.ak.vodunify.ui.components.RatingChip
 import ro.ak.vodunify.ui.components.BadgeSpec
 import ro.ak.vodunify.ui.components.TitleBadge
 import ro.ak.vodunify.core.calendar.android.CALENDAR_TO_SERVICE
-import ro.ak.vodunify.ui.components.PlatformBadge
 import ro.ak.vodunify.ui.components.PosterRatings
-import ro.ak.vodunify.ui.components.PosterBottomRow
-import ro.ak.vodunify.ui.components.AppIconBadge
-import ro.ak.vodunify.ui.components.CinemaBadge
+import ro.ak.vodunify.ui.components.PosterViewingStatus
+import ro.ak.vodunify.core.playback.PosterStage
 import ro.ak.vodunify.core.catalog.ReleaseChannel
+import ro.ak.vodunify.core.catalog.TitleKind
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import ro.ak.vodunify.ui.components.LocalBackdrop
@@ -112,24 +111,23 @@ private fun SyncFailedRow(status: SyncStatus.Failed, onSync: () -> Unit) {
     }
 }
 
-/**
- * Rândurile personale ca elemente separate ale listei din Acasă: lista desenează doar rândurile de pe ecran,
- * nu pe toate odată (pornire și derulare mai ușoare pe TV).
- */
-fun LazyListScope.personalItems(rows: PersonalRows, status: SyncStatus, onSync: () -> Unit) {
+internal class HomeRow(val key: String, val focusable: Boolean = true, val content: @Composable () -> Unit)
+
+internal fun personalHomeRows(rows: PersonalRows, status: SyncStatus, onSync: () -> Unit): List<HomeRow> = buildList {
     if (rows.state != PersonalState.CONNECTED) {
-        item(key = "personal") { PersonalSection(rows, status, onSync) }
-        return
+        add(HomeRow("personal", focusable = rows.state == PersonalState.DISCONNECTED) { PersonalSection(rows, status, onSync) })
+        return@buildList
     }
-    // Fără nimic început: mesajul (și, la nevoie, eroarea de sincronizare) din PersonalSection.
-    if (rows.continueEmpty) item(key = "p_empty") { PersonalSection(PersonalRows(PersonalState.CONNECTED), status, onSync) }
-    if (rows.continueMovies.isNotEmpty()) item(key = "p_continue_movies") { WideRow("Continuă vizionarea · Filme", rows.continueMovies) }
-    if (rows.continueShows.isNotEmpty()) item(key = "p_continue_shows") { WideRow("Continuă vizionarea · Seriale", rows.continueShows) }
-    if (rows.newMovies.isNotEmpty()) item(key = "p_new_movies") { PosterRow("Noutăți din Lista mea · Filme", rows.newMovies) }
-    if (rows.newEpisodes.isNotEmpty()) item(key = "p_new_episodes") { PosterRow("Noutăți din Lista mea · Episoade noi", rows.newEpisodes) }
-    if (rows.soonMovies.isNotEmpty()) item(key = "p_soon_movies") { PosterRow("În curând · Filme", rows.soonMovies) }
-    if (rows.soonEpisodes.isNotEmpty()) item(key = "p_soon_episodes") { PosterRow("În curând · Episoade", rows.soonEpisodes) }
-    if (status is SyncStatus.Failed && !rows.continueEmpty) item(key = "p_sync_failed") { SyncFailedRow(status, onSync) }
+    if (rows.continueEmpty) {
+        add(HomeRow("p_empty", focusable = status is SyncStatus.Failed) { PersonalSection(PersonalRows(PersonalState.CONNECTED), status, onSync) })
+    }
+    if (rows.continueMovies.isNotEmpty()) add(HomeRow("p_continue_movies") { WideRow("Continuă vizionarea · Filme", rows.continueMovies) })
+    if (rows.continueShows.isNotEmpty()) add(HomeRow("p_continue_shows") { WideRow("Continuă vizionarea · Seriale", rows.continueShows) })
+    if (rows.newMovies.isNotEmpty()) add(HomeRow("p_new_movies") { PosterRow("Noutăți din Lista mea · Filme", rows.newMovies) })
+    if (rows.newEpisodes.isNotEmpty()) add(HomeRow("p_new_episodes") { PosterRow("Noutăți din Lista mea · Episoade noi", rows.newEpisodes) })
+    if (rows.soonMovies.isNotEmpty()) add(HomeRow("p_soon_movies") { PosterRow("În curând · Filme", rows.soonMovies) })
+    if (rows.soonEpisodes.isNotEmpty()) add(HomeRow("p_soon_episodes") { PosterRow("În curând · Episoade", rows.soonEpisodes) })
+    if (status is SyncStatus.Failed && !rows.continueEmpty) add(HomeRow("p_sync_failed") { SyncFailedRow(status, onSync) })
 }
 
 @Composable
@@ -181,7 +179,9 @@ private fun WideRow(title: String, items: List<PersonalItem>) {
     Column(Modifier.peekRow()) {
         SectionTitle(title)
         DefaultScroll {
+            val state = rememberRestoringRowState(title, items) { it.key }
             LazyRow(
+                state = state,
                 contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
             ) {
@@ -216,15 +216,17 @@ private fun WideCard(item: PersonalItem, rowKey: String) {
                     .fillMaxSize()
                     .background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to Color(0xCC000000))),
             )
-            // Fără text sub card. Jos: sigla aplicației în care ai văzut ultima dată (acolo continui standard,
-            // dacă nu alegi altceva), apoi episodul (S01E02) și procentul.
+            // Aplicația redării, episodul și procentul stau pe card.
             PosterRatings(item.kind, item.tmdbId, item.rating, Modifier.align(Alignment.TopStart).padding(6.dp))
-            PosterBottomRow(
+            PosterViewingStatus(
+                item.kind, item.tmdbId, Modifier.align(Alignment.TopEnd).padding(6.dp),
+                stage = PosterStage.IN_PROGRESS,
+            )
+            TitleBadge(
+                wideBadge(item), item.kind, item.tmdbId,
                 Modifier.align(Alignment.BottomStart).padding(start = 6.dp, end = 6.dp, bottom = 10.dp),
                 label = item.subtitle,
-            ) {
-                TitleBadge(wideBadge(item), item.kind, item.tmdbId)
-            }
+            )
             if (item.showsProgress || item.progress != null) {
                 val p = item.progress
                 if (p != null) {
@@ -256,7 +258,9 @@ private fun PosterRow(title: String, items: List<PersonalItem>) {
     Column(Modifier.peekRow()) {
         SectionTitle(title)
         DefaultScroll {
+            val state = rememberRestoringRowState(title, items) { it.key }
             LazyRow(
+                state = state,
                 contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
             ) {
@@ -281,27 +285,33 @@ private fun PersonalPoster(item: PersonalItem, rowKey: String) {
         Box(Modifier.fillMaxSize().semantics { contentDescription = listOfNotNull(item.title, item.subtitle).joinToString(", ") }) {
             NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
             PosterRatings(item.kind, item.tmdbId, item.rating, Modifier.align(Alignment.TopStart).padding(4.dp))
+            PosterViewingStatus(item.kind, item.tmdbId, Modifier.align(Alignment.TopEnd).padding(4.dp))
             // Jos: unde apare (aplicația, cinema RO / SUA) lângă dată.
-            PosterBottomRow(Modifier.align(Alignment.BottomStart).padding(4.dp), label = item.subtitle) {
-                TitleBadge(releaseBadge(item), item.kind, item.tmdbId)
-            }
+            TitleBadge(
+                releaseBadge(item), item.kind, item.tmdbId,
+                Modifier.align(Alignment.BottomStart).padding(4.dp),
+                label = item.subtitle,
+            )
         }
     }
 }
 
-/** Cardurile „Continuă”: sigla aplicației în care ai văzut ultima dată, altfel sigla obișnuită a titlului. */
-private fun wideBadge(item: PersonalItem): BadgeSpec? = item.appPackage?.let { BadgeSpec.App(it) }
+private fun wideBadge(item: PersonalItem): BadgeSpec = BadgeSpec.PlaybackSource(item.appPackage)
 
 /**
  * Sigla posterelor din „În curând” / „Noutăți”: la filme, unde apare la data de jos (cinema România sau SUA,
  * aplicația serviciului de streaming ori „Digital”); altfel (null) sigla obișnuită a titlului.
  */
 private fun releaseBadge(item: PersonalItem): BadgeSpec? {
+    if (item.kind == TitleKind.TV && item.episodeCode != null) return BadgeSpec.InProgress
     val release = item.release ?: return null
+    if (release.channel == ReleaseChannel.STREAMING &&
+        item.eventDate?.let { it <= java.time.LocalDate.now().toString() } == true
+    ) return null
     val pkg = item.appPackage
     val service = release.serviceName
     return when (release.channel) {
-        ReleaseChannel.CINEMA -> BadgeSpec.Cinema(release.region)
+        ReleaseChannel.CINEMA -> BadgeSpec.Cinema(release.cinemaRegions)
         ReleaseChannel.STREAMING -> when {
             pkg != null -> BadgeSpec.App(pkg, service)
             service != null -> BadgeSpec.Service(release.serviceId?.let { CALENDAR_TO_SERVICE[it] ?: it }, service)
@@ -347,7 +357,11 @@ private fun heroMeta(item: PersonalItem): String {
 private fun releaseText(item: PersonalItem): String? {
     val r = item.release ?: return null
     return when (r.channel) {
-        ReleaseChannel.CINEMA -> if (r.region == "RO") "În cinema în România" else "În cinema în SUA"
+        ReleaseChannel.CINEMA -> when {
+            r.cinemaRegions.size > 1 -> "În cinema în România și SUA"
+            r.region == "RO" -> "În cinema în România"
+            else -> "În cinema în SUA"
+        }
         ReleaseChannel.STREAMING -> "Pe ${r.serviceName ?: "streaming"}" + if (r.region == "US" && !r.mine) " (SUA)" else ""
         ReleaseChannel.DIGITAL -> "Digital, închiriere / cumpărare (${r.region})"
         ReleaseChannel.UNKNOWN -> null

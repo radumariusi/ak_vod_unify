@@ -1,6 +1,7 @@
 package ro.ak.vodscrobbler
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.graphics.Color
 
 /** Setările mici ale scrobblerului. */
@@ -44,6 +45,14 @@ object Prefs {
         IDLE(COLOR_IDLE, "activ, nu rulează nimic", 0),
         PLAYING(COLOR_PLAYING, "urmărește acum o redare", 1),
         OFF(COLOR_OFF, "fără acces la sesiunile media", 2),
+    }
+
+    fun observe(context: Context, listener: SharedPreferences.OnSharedPreferenceChangeListener) {
+        prefs(context).registerOnSharedPreferenceChangeListener(listener)
+    }
+
+    fun stopObserving(context: Context, listener: SharedPreferences.OnSharedPreferenceChangeListener) {
+        prefs(context).unregisterOnSharedPreferenceChangeListener(listener)
     }
 
     private fun prefs(context: Context) = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)

@@ -52,11 +52,20 @@ object TmdbMappers {
             rating = dto.voteAverage?.takeIf { it > 0 },
             genreIds = dto.genreIds,
             note = dto.character ?: dto.job,
+            origin = TitleOrigin(dto.originalLanguage, dto.originCountry, if (isMovie) dto.originalTitle else dto.originalName),
         )
     }
 
     fun items(list: List<TmdbListItem>, language: ContentLanguage, fallbackKind: TitleKind? = null): List<CatalogItem> =
         list.filterNot { it.adult }.mapNotNull { item(it, language, fallbackKind) }.distinctBy { it.mediaKey }
+
+    fun origin(details: ro.ak.vodunify.core.tmdb.TmdbTitleDetails, kind: TitleKind): TitleOrigin =
+        TitleOrigin(
+            details.originalLanguage,
+            details.originCountry.ifEmpty { details.productionCountries.map { it.code } },
+            if (kind == TitleKind.MOVIE) details.originalTitle else details.originalName,
+            details.type,
+        )
 
     fun provider(p: TmdbProvider) = ProviderInfo(p.providerId, p.providerName, TmdbImages.logo(p.logoPath))
 

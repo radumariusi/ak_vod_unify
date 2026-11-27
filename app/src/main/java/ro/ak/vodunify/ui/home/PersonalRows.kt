@@ -2,9 +2,13 @@ package ro.ak.vodunify.ui.home
 
 import kotlinx.serialization.Serializable
 import ro.ak.vodunify.core.catalog.CatalogItem
+import ro.ak.vodunify.core.catalog.EpisodeAir
+import ro.ak.vodunify.core.connector.EpisodeNumber
+import ro.ak.vodunify.core.calendar.format.episodeRange
 import ro.ak.vodunify.core.catalog.MovieReleaseEvent
 import ro.ak.vodunify.core.catalog.ReleaseChannel
 import ro.ak.vodunify.core.catalog.TitleKind
+import ro.ak.vodunify.core.catalog.TitleOrigin
 import ro.ak.vodunify.core.catalog.TitleReleases
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -43,6 +47,9 @@ data class PersonalItem(
     val episodeCode: String? = null,
     /** Când ai văzut ultima dată (Continuă vizionarea), epoch ms. */
     val watchedAt: Long? = null,
+    val origin: TitleOrigin = TitleOrigin(),
+    val genreIds: List<Int> = emptyList(),
+    val airingEpisodes: List<EpisodeNumber> = emptyList(),
 ) {
     /** Titlul ca element de catalog (pentru meniul rapid de la OK ținut apăsat). */
     fun asCatalogItem(): CatalogItem? = tmdbId?.let {
@@ -67,6 +74,22 @@ data class PersonalRows(
     val soonEpisodes: List<PersonalItem> = emptyList(),
 ) {
     val continueEmpty: Boolean get() = continueMovies.isEmpty() && continueShows.isEmpty()
+}
+
+/** Starea din bibliotecă, aplicată și la rândurile încărcate din cache. */
+internal data class NewReleaseViewing(val movies: Set<Long>, val episodes: Map<Long, Set<EpisodeNumber>>) {
+    fun hideWatched(rows: PersonalRows): PersonalRows = rows.copy(
+        newMovies = rows.newMovies.filterNot { it.tmdbId in movies },
+        newEpisodes = rows.newEpisodes.mapNotNull { card ->
+            val watched = episodes[card.tmdbId].orEmpty()
+            val unseen = card.airingEpisodes.filterNot { it in watched }
+            when {
+                unseen.isEmpty() -> null
+                unseen.size == card.airingEpisodes.size -> card
+                else -> HomeSections.withAiringEpisodes(card, unseen)
+            }
+        },
+    )
 }
 
 /** Ce urmărești din Lista mea: titlul cu datele lui și (la seriale) ultimul episod văzut. */
@@ -101,8 +124,8 @@ object HomeSections {
     }
 
     /**
-     * Lansările unui film care contează în Acasă: cea în cinema (România bate SUA: dacă are dată în RO, nu mai
-     * arătăm SUA) și cea „acasă” (pe un serviciu de streaming, cu ale tale întâi; altfel digital, SUA întâi).
+     * Lansarea la cinema (cu prioritate RO și ambele țări la aceeași dată) și cea „acasă”
+     * (pe un serviciu de streaming, cu ale tale întâi; altfel digital, SUA întâi).
      * Un film poate apărea astfel și în „Noutăți” (a ieșit în cinema) și în „În curând” (vine digital).
      */
     fun homeReleases(t: TitleReleases): List<MovieReleaseEvent> {
@@ -110,7 +133,11 @@ object HomeSections {
         if (all.isEmpty()) {
             return listOfNotNull(t.releaseDate?.takeIf { date(it) != null }?.let { MovieReleaseEvent(ReleaseChannel.UNKNOWN, "", it) })
         }
-        val cinema = all.filter { it.channel == ReleaseChannel.CINEMA }.let { c -> c.firstOrNull { it.region == "RO" } ?: c.firstOrNull { it.region == "US" } }
+        val cinemas = all.filter { it.channel == ReleaseChannel.CINEMA && it.region in listOf("RO", "US") }
+        val cinema = (cinemas.firstOrNull { it.region == "RO" } ?: cinemas.firstOrNull())?.let { release ->
+            val sameDate = cinemas.filter { it.date == release.date && it.region != release.region }.map { it.region }
+            release.copy(otherCinemaRegions = (release.otherCinemaRegions + sameDate).distinct())
+        }
         val streaming = all.filter { it.channel == ReleaseChannel.STREAMING }
             .sortedWith(compareBy({ !it.mine }, { it.region != "US" }, { it.date }))
             .firstOrNull()
@@ -157,7 +184,24 @@ object HomeSections {
             Triple(f, ep, d)
         }
             .sortedByDescending { it.third }
-            .map { (f, ep, d) -> item(f, "new", "${ep.code} · ${dayLabel(d)}", date = d, code = ep.code) }
+            .map { (f, ep, d) ->
+                item(f, "new", "${ep.code} · ${dayLabel(d)}", date = d, code = ep.code)
+                    .copy(airingEpisodes = listOf(EpisodeNumber(ep.season, ep.episode)))
+            }
+
+    internal fun withEpisodeRange(card: PersonalItem, aired: List<EpisodeAir>, lastSeen: Pair<Int, Int>?): PersonalItem {
+        val episodes = aired.filter { ep ->
+            ep.airDate == card.eventDate && (lastSeen == null || ep.season > lastSeen.first ||
+                (ep.season == lastSeen.first && ep.episode > lastSeen.second))
+        }
+        return withAiringEpisodes(card, episodes.map { EpisodeNumber(it.season, it.episode) }.distinct())
+    }
+
+    internal fun withAiringEpisodes(card: PersonalItem, episodes: List<EpisodeNumber>): PersonalItem {
+        val day = date(card.eventDate) ?: return card
+        val code = episodeRange(episodes).ifEmpty { return card }
+        return card.copy(episodeCode = code, subtitle = "$code · ${dayLabel(day)}", airingEpisodes = episodes)
+    }
 
     /** Seriale cu episodul următor în perioada care vine. */
     fun soonEpisodes(list: List<FollowedTitle>, today: LocalDate): List<PersonalItem> =
@@ -191,6 +235,8 @@ object HomeSections {
             showsProgress = false,
             overview = i.overview,
             rating = i.rating,
+            origin = i.origin,
+            genreIds = i.genreIds,
             release = release?.takeIf { it.channel != ReleaseChannel.UNKNOWN },
             eventDate = date?.toString(),
             episodeCode = code,

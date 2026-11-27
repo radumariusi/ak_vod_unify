@@ -84,6 +84,7 @@ fun OutlinedButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
+    active: Boolean = false,
     content: @Composable RowScope.() -> Unit,
 ) {
     val (interaction, focused) = rememberFocus()
@@ -92,7 +93,7 @@ fun OutlinedButton(
         modifier = modifier,
         enabled = enabled,
         shape = PillShape,
-        colors = pillColors(focused, GlassIdle),
+        colors = pillColors(focused, if (active) GlassActive else GlassIdle),
         contentPadding = contentPadding,
         interactionSource = interaction,
         content = { val row = this; SemiBold { row.content() } },

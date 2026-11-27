@@ -11,10 +11,12 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import ro.ak.vodunify.ui.components.rowSpacing
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import ro.ak.vodunify.ui.navigation.TabBackToStart
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -35,6 +37,7 @@ import ro.ak.vodunify.ui.components.LoadingPanel
 import ro.ak.vodunify.ui.components.OutlinedButton
 import ro.ak.vodunify.ui.components.PosterCard
 import ro.ak.vodunify.ui.components.layoutSpec
+import ro.ak.vodunify.ui.components.rememberRestoringGridState
 
 /**
  * Descoperă: tot catalogul, filtrat cu liste de alegere (ca restul aplicației): filme sau seriale, ordinea,
@@ -46,8 +49,15 @@ fun DiscoverScreen(viewModel: DiscoverViewModel = hiltViewModel()) {
     val spec = layoutSpec()
     val periods = remember { DiscoverPeriod.options() }
 
+    val grid = rememberRestoringGridState { cardKey ->
+        val idx = state.items.indexOfFirst { "discover|${it.mediaKey}" == cardKey }
+        if (idx >= 0) 1 + idx else null
+    }
+    TabBackToStart { grid.scrollToItem(0) }
+
     LazyVerticalGrid(
-        columns = GridCells.FixedSize(spec.posterWidth),
+        state = grid,
+        columns = if (spec.isTv) GridCells.Adaptive(spec.posterWidth - 8.dp) else GridCells.FixedSize(spec.posterWidth),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 12.dp),
         // Aceeași distanță între postere ca în rândurile din Acasă.
@@ -64,7 +74,7 @@ fun DiscoverScreen(viewModel: DiscoverViewModel = hiltViewModel()) {
                 Text("Nimic cu filtrele astea. Încearcă altă combinație.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        items(state.items, key = { it.mediaKey }) { PosterCard(it, rowKey = "discover") }
+        items(state.items, key = { it.mediaKey }) { PosterCard(it, rowKey = "discover", fillCell = spec.isTv) }
         if (state.loading) {
             item(key = "loading", span = { GridItemSpan(maxLineSpan) }) { LoadingPanel() }
         } else if (state.canLoadMore) {

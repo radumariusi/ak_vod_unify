@@ -3,7 +3,6 @@ package ro.ak.vodunify.ui.components
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -17,11 +16,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.unit.dp
-import ro.ak.vodunify.ui.theme.GlassActive
 
 /**
  * Text lung (descrierea din fișă): întreg dacă încape în [collapsedLines] rânduri; altfel tăiat și terminat cu
@@ -38,8 +36,8 @@ fun ExpandableText(
 ) {
     var expanded by rememberSaveable(text) { mutableStateOf(false) }
     // Unde se taie textul ca „… Arată mai mult” să încapă în ultimul rând; null = încape întreg.
-    var cut by remember(text) { mutableStateOf<Int?>(null) }
-    var measured by remember(text) { mutableStateOf(false) }
+    var cut by remember(text, collapsedLines) { mutableStateOf<Int?>(null) }
+    var measured by remember(text, collapsedLines) { mutableStateOf(false) }
     val romanian = remember(text) { text.any { it in "ăâîșțşţĂÂÎȘȚ" } }
     val more = if (romanian) "Arată mai mult" else "Show more"
     val less = if (romanian) "Arată mai puțin" else "Show less"
@@ -81,7 +79,8 @@ fun ExpandableText(
         style = style,
         // La focus doar se deschide întreg (același text alb, fără fundal); la plecare se strânge la loc.
         color = color,
-        maxLines = if (expanded || measured) Int.MAX_VALUE else collapsedLines,
+        maxLines = if (expanded) Int.MAX_VALUE else collapsedLines,
+        overflow = TextOverflow.Ellipsis,
         onTextLayout = { layout ->
             if (!measured && !expanded) {
                 if (layout.hasVisualOverflow) {
@@ -99,7 +98,6 @@ fun ExpandableText(
                             expanded = !expanded
                             openedByFocus = false
                         }
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
                 } else {
                     Modifier
                 },

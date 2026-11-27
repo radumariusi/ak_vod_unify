@@ -15,4 +15,27 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
     }
 }
 
-val ALL_MIGRATIONS = arrayOf(MIGRATION_5_6)
+/** v7: istoricul păstrează aplicația și momentul redării, inclusiv după terminarea unui titlu. */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE watch_events ADD COLUMN appPackage TEXT")
+        db.execSQL("ALTER TABLE watch_events ADD COLUMN playbackAt INTEGER")
+    }
+}
+
+/** v8: indecși compuși pentru agregarea istoricului și curățarea cache-ului TMDb. */
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_watch_events_lookup` ON `watch_events` (`source`, `mediaKey`, `season`, `episode`, `watchedAt`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_watch_events_item_time` ON `watch_events` (`mediaKey`, `season`, `episode`, `watchedAt`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `idx_tmdb_cache_fetched` ON `tmdb_cache` (`fetchedAt`)",
+        )
+    }
+}
+
+val ALL_MIGRATIONS = arrayOf(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)

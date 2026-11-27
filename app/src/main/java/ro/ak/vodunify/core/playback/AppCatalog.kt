@@ -50,8 +50,8 @@ enum class StreamingService(
 
     val tmdbProviderIds: Set<Int> get() = if (isCustom) setOfNotNull(AppRegistry.customProvider(id)) else baseProviderIds
 
-    /** În liste: serviciile din catalog și cele adăugate de tine (locurile libere nu). */
-    val isActive: Boolean get() = !isCustom || AppRegistry.customProvider(id) != null
+    /** Un serviciu adăugat ocupă un loc după asocierea cu aplicația instalată. */
+    val isActive: Boolean get() = !isCustom || TargetApp.byId(appId)?.let(AppRegistry::packageFor) != null
 
     companion object {
         fun byId(id: String): StreamingService? = entries.firstOrNull { it.id == id }
@@ -92,7 +92,7 @@ enum class StreamingService(
                 "fandango" in n || "vudu" in n -> FANDANGO
                 word("pbs") -> PBS
                 "sling" in n -> SLING
-                word("arte") -> ARTE
+                n == "arte" || n == "arte.tv" -> ARTE
                 "magellan" in n -> MAGELLAN
                 "curiosity" in n -> CURIOSITY
                 else -> null
@@ -125,7 +125,7 @@ enum class TargetApp(
 ) {
     NETFLIX(
         "netflix", "Netflix", AppRole.OFFICIAL, listOf("com.netflix.ninja", "com.netflix.mediaclient"), listOf("netflix"),
-        "Minutul din AK Scrobbler, titlul din istoricul Netflix (AK Import, după oră)",
+        "Minutul din AK Scrobbler, titlul din activitatea profilului Netflix",
     ),
     PRIME_VIDEO(
         "primevideo", "Prime Video", AppRole.OFFICIAL,
@@ -141,19 +141,19 @@ enum class TargetApp(
         "Sesiune media (titlu + minut)",
     ),
     APPLE_TV("appletv", "Apple TV", AppRole.OFFICIAL, listOf("com.apple.atve.androidtv.appletv"), listOf("appletv"), "Cititor de ecran (titlul și minutul din player)"),
-    VOYO("voyo", "VOYO", AppRole.OFFICIAL, emptyList(), listOf("voyo", "voyo.ro", "voyoro", "voyoromania")),
+    VOYO("voyo", "VOYO", AppRole.OFFICIAL, listOf("net.cme.voyo.ro.tvapp", "net.cme.voyo.ro"), listOf("voyo", "voyo.ro", "voyoro", "voyoromania", "voyotv")),
     PEACOCK("peacock", "Peacock", AppRole.OFFICIAL, listOf("com.peacocktv.peacockandroid"), listOf("peacock"), "Sesiune media (titlu + minut)"),
     TUBI("tubi", "Tubi", AppRole.OFFICIAL, listOf("com.tubitv"), listOf("tubi", "tubitv")),
     PLUTO("pluto", "Pluto TV", AppRole.OFFICIAL, listOf("tv.pluto.android"), listOf("plutotv")),
     PLEX("plex", "Plex", AppRole.OFFICIAL, listOf("com.plexapp.android"), listOf("plex")),
-    XUMO("xumo", "Xumo Play", AppRole.OFFICIAL, emptyList(), listOf("xumoplay", "xumo")),
-    FAWESOME("fawesome", "Fawesome", AppRole.OFFICIAL, emptyList(), listOf("fawesome")),
+    XUMO("xumo", "Xumo Play", AppRole.OFFICIAL, listOf("com.xumo.xumo.tv", "com.xumo.xumo"), listOf("xumoplay", "xumo")),
+    FAWESOME("fawesome", "Fawesome", AppRole.OFFICIAL, listOf("com.future.moviesByFawesomeAndroidTV"), listOf("fawesome")),
     FANDANGO("fandango", "Fandango at Home", AppRole.OFFICIAL, listOf("air.com.vudu.air.DownloaderTablet"), listOf("fandango", "vudu")),
     PBS("pbs", "PBS", AppRole.OFFICIAL, listOf("com.pbs.video"), listOf("pbsvideo", "pbs")),
     SLING("sling", "Sling TV", AppRole.OFFICIAL, listOf("com.sling"), listOf("sling")),
     ARTE("arte", "ARTE", AppRole.OFFICIAL, listOf("tv.arte.plus7"), listOf("arte")),
-    MAGELLAN("magellan", "MagellanTV", AppRole.OFFICIAL, emptyList(), listOf("magellan")),
-    CURIOSITY("curiosity", "CuriosityStream", AppRole.OFFICIAL, emptyList(), listOf("curiositystream", "curiosity")),
+    MAGELLAN("magellan", "MagellanTV", AppRole.OFFICIAL, listOf("com.abide.magellantv"), listOf("magellan")),
+    CURIOSITY("curiosity", "CuriosityStream", AppRole.OFFICIAL, listOf("com.curiosity.curiositystream.androidtv", "com.curiosity.curiositystream"), listOf("curiositystream", "curiosity")),
 
     NUVIO("nuvio", "Nuvio", AppRole.PLAYER, listOf("com.nuvio.tv", "com.nuvio.app"), listOf("nuvio"), "Cititor de ecran (din ecranul playerului)"),
     STREMIO("stremio", "Stremio", AppRole.PLAYER, listOf("com.stremio.one"), listOf("stremio")),
@@ -176,7 +176,7 @@ enum class TargetApp(
 
     AK_VOD_HUB("akvodhub", "AK VoD Hub", AppRole.IPTV, listOf("io.github.radumariusi.akvodhub"), listOf("akvodhub")),
     WAVEO("waveo", "Waveo", AppRole.IPTV, emptyList(), listOf("waveo")),
-    SHOVA_TV("shovatv", "Shova TV", AppRole.IPTV, emptyList(), listOf("shovatv", "shova")),
+    SHOVA_TV("shovatv", "Sohva TV", AppRole.IPTV, listOf("com.streammate.tv"), listOf("sohvatv", "sohva", "shovatv", "shova")),
     PLAYER_8K_VIP("8kvip", "8K Player VIP+", AppRole.IPTV, emptyList(), listOf("8kplayervip")),
     PLAYER_8K_PRIME("8kprime", "8K Player Prime", AppRole.IPTV, emptyList(), listOf("8kplayerprime")),
 

@@ -7,6 +7,11 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
+import ro.ak.vodunify.core.connector.seasonTrackingKey
+import ro.ak.vodunify.core.publish.LOCAL_SOURCE
+
+private fun TrackedRef.manualKeys(itemKey: String) =
+    listOfNotNull(itemKey, mediaKey, season?.let { seasonTrackingKey(mediaKey, it) })
 
 @Dao
 interface MediaDao {
@@ -29,15 +34,48 @@ interface TrackingDao {
     @Upsert
     suspend fun upsertResume(items: List<ResumePointEntity>)
 
+    @Query("SELECT * FROM resume_points WHERE id = :id")
+    suspend fun resumeById(id: String): ResumePointEntity?
+
+    @Query("UPDATE resume_points SET appPackage = :pkg WHERE id = :id AND updatedAt = :at AND positionMs = :positionMs AND (appPackage IS NULL OR TRIM(appPackage) = '')")
+    suspend fun restoreResumePackage(id: String, at: Long, positionMs: Long, pkg: String): Int
+
+    @Query("UPDATE resume_points SET appPackage = :pkg WHERE id = :id AND (appPackage IS NULL OR TRIM(appPackage) = '')")
+    suspend fun restoreResumePackageAny(id: String, pkg: String): Int
+
+    @Query("SELECT appPackage FROM watch_events WHERE mediaKey = :mediaKey AND appPackage IS NOT NULL AND TRIM(appPackage) != '' ORDER BY COALESCE(playbackAt, watchedAt) DESC LIMIT 1")
+    suspend fun latestAppForMedia(mediaKey: String): String?
+
+    @Transaction
+    suspend fun upsertResumeIfNewer(item: ResumePointEntity): Boolean {
+        val current = resumeById(item.id)
+        if (current != null && current.updatedAt > item.updatedAt) return false
+        if (hasWatchAtOrAfter(item.source, item.ref.mediaKey, item.ref.season, item.ref.episode, item.updatedAt)) return false
+        if (item.source == LOCAL_SOURCE && hasManualMarkAtOrAfter(item.ref.manualKeys(item.id.substringAfter('|')), item.updatedAt)) return false
+        upsertResume(listOf(item.copy(appPackage = item.appPackage?.takeIf { it.isNotBlank() } ?: current?.appPackage)))
+        return true
+    }
+
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM watch_events WHERE source = :source AND mediaKey = :key " +
+            "AND season IS :season AND episode IS :episode AND watchedAt >= :at)",
+    )
+    suspend fun hasWatchAtOrAfter(source: String, key: String, season: Int?, episode: Int?, at: Long): Boolean
+
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM own_writes WHERE source = 'local' AND itemKey IN (:keys) " +
+            "AND action IN ('WATCHED', 'UNWATCHED') AND at >= :at)",
+    )
+    suspend fun hasManualMarkAtOrAfter(keys: List<String>, at: Long): Boolean
+
+    @Query("DELETE FROM resume_points WHERE id = :id AND updatedAt <= :at")
+    suspend fun deleteResumeByIdBefore(id: String, at: Long)
+
     @Transaction
     suspend fun replaceResume(source: String, items: List<ResumePointEntity>) {
         deleteResume(source)
         upsertResume(items)
     }
-
-    /** Peste 95% considerăm terminat (Trakt mută automat în istoric de la 80%+ la scrobble). */
-    @Query("SELECT * FROM resume_points WHERE progress IS NULL OR progress < 0.95 ORDER BY updatedAt DESC")
-    fun continueWatching(): Flow<List<ResumePointEntity>>
 
     @Query("SELECT * FROM resume_points WHERE mediaKey = :mediaKey ORDER BY updatedAt DESC")
     fun resumeFor(mediaKey: String): Flow<List<ResumePointEntity>>
@@ -48,8 +86,17 @@ interface TrackingDao {
     @Query("DELETE FROM resume_points WHERE mediaKey = :mediaKey")
     suspend fun deleteResumeFor(mediaKey: String)
 
+    @Query("DELETE FROM resume_points WHERE id IN (:ids)")
+    suspend fun deleteResumeItems(ids: List<String>)
+
+    @Query("DELETE FROM resume_points WHERE mediaKey = :mediaKey AND season IN (:seasons)")
+    suspend fun deleteSeasonResumes(mediaKey: String, seasons: List<Int>)
+
     @Query("SELECT * FROM resume_points ORDER BY updatedAt DESC")
     fun allResume(): Flow<List<ResumePointEntity>>
+
+    @Query("SELECT * FROM resume_points ORDER BY updatedAt DESC")
+    suspend fun readResume(): List<ResumePointEntity>
 
     // ---------- Watchlist ----------
     @Query("DELETE FROM watchlist WHERE source = :source")
@@ -65,10 +112,7 @@ interface TrackingDao {
     }
 
     @Query("SELECT * FROM watchlist ORDER BY listedAt DESC")
-    fun watchlist(): Flow<List<WatchlistEntity>>
-
-    @Query("SELECT EXISTS(SELECT 1 FROM watchlist WHERE mediaKey = :mediaKey)")
-    fun inWatchlist(mediaKey: String): Flow<Boolean>
+    suspend fun watchlist(): List<WatchlistEntity>
 
     @Query("DELETE FROM watchlist WHERE mediaKey = :mediaKey")
     suspend fun removeFromWatchlist(mediaKey: String)
@@ -90,7 +134,7 @@ interface TrackingDao {
     suspend fun deleteUpNextById(id: String)
 
     @Query("SELECT * FROM up_next ORDER BY lastWatchedAt DESC")
-    fun upNext(): Flow<List<UpNextEntity>>
+    suspend fun upNext(): List<UpNextEntity>
 
     // ---------- Titluri văzute ----------
     @Query("DELETE FROM watched_titles WHERE source = :source")
@@ -105,14 +149,14 @@ interface TrackingDao {
         upsertWatched(items)
     }
 
-    @Query("SELECT EXISTS(SELECT 1 FROM watched_titles WHERE mediaKey = :mediaKey)")
-    fun isWatched(mediaKey: String): Flow<Boolean>
-
     @Query("DELETE FROM watched_titles WHERE mediaKey = :mediaKey")
     suspend fun removeWatched(mediaKey: String)
 
+    @Query("DELETE FROM watched_titles WHERE mediaKey = :mediaKey AND source NOT IN (:keep)")
+    suspend fun removeWatchedFromVisibleSources(mediaKey: String, keep: List<String>)
+
     @Query("SELECT * FROM watched_titles ORDER BY lastWatchedAt DESC")
-    fun watchedTitles(): Flow<List<WatchedTitleEntity>>
+    suspend fun watchedTitles(): List<WatchedTitleEntity>
 
     // ---------- Istoric ----------
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -126,10 +170,28 @@ interface TrackingDao {
 
     /** Ultima vizionare a fiecărui element (film / episod), pe sursă. */
     @Query(
-        "SELECT * FROM watch_events w WHERE w.watchedAt = (SELECT MAX(x.watchedAt) FROM watch_events x " +
-            "WHERE x.source = w.source AND x.mediaKey = w.mediaKey AND x.season IS w.season AND x.episode IS w.episode)",
+        "SELECT w.* FROM watch_events w JOIN (SELECT source, mediaKey, season, episode, MAX(watchedAt) AS lastAt " +
+            "FROM watch_events GROUP BY source, mediaKey, season, episode) latest ON latest.source = w.source " +
+            "AND latest.mediaKey = w.mediaKey AND latest.season IS w.season AND latest.episode IS w.episode " +
+            "AND latest.lastAt = w.watchedAt",
     )
-    fun latestWatches(): Flow<List<WatchEventEntity>>
+    suspend fun latestWatches(): List<WatchEventEntity>
+
+    @Query(
+        "SELECT mediaKey, source, appPackage, MAX(COALESCE(playbackAt, watchedAt)) AS at FROM watch_events " +
+            "WHERE (source = :local AND appPackage IS NOT NULL AND TRIM(appPackage) != '') OR source IN (:imports) " +
+            "GROUP BY mediaKey",
+    )
+    fun latestPlaybackApps(local: String, imports: List<String>): Flow<List<TitlePlaybackApp>>
+
+    @Transaction
+    suspend fun completePlayback(resumeId: String, event: WatchEventEntity, watched: WatchedTitleEntity?): Boolean {
+        if (hasManualMarkAtOrAfter(event.ref.manualKeys(resumeId.substringAfter('|')), event.watchedAt)) return false
+        insertHistory(listOf(event))
+        if (watched != null) upsertWatched(listOf(watched))
+        deleteResumeByIdBefore(resumeId, event.watchedAt)
+        return true
+    }
 
     /** Șterge vizionările unei surse pentru un film/serial (season/episode null) sau un episod anume. */
     @Query("DELETE FROM watch_events WHERE source = :source AND mediaKey = :mediaKey AND season IS :season AND episode IS :episode")
@@ -153,15 +215,14 @@ interface TrackingDao {
         "DELETE FROM watch_events WHERE mediaKey = :mediaKey AND season IS :season AND episode IS :episode " +
             "AND source NOT IN (:keep)",
     )
-    suspend fun deleteItemHistory(mediaKey: String, season: Int?, episode: Int?, keep: List<String>)
+    suspend fun deleteItemHistory(mediaKey: String, season: Int?, episode: Int?, keep: List<String>): Int
+
+    @Query("DELETE FROM watch_events WHERE mediaKey = :mediaKey AND season IN (:seasons) AND source NOT IN (:keep)")
+    suspend fun deleteSeasonHistory(mediaKey: String, seasons: List<Int>, keep: List<String>): Int
 
     /** Șterge tot istoricul unui titlu (film sau toate episoadele serialului), în afară de sursele [keep]. */
     @Query("DELETE FROM watch_events WHERE mediaKey = :mediaKey AND source NOT IN (:keep)")
-    suspend fun deleteTitleHistory(mediaKey: String, keep: List<String>)
-
-    /** Există istoric (din orice sursă afișată) pentru titlu. */
-    @Query("SELECT MAX(watchedAt) FROM watch_events WHERE mediaKey = :mediaKey AND source NOT IN (:hidden)")
-    fun lastWatchedAt(mediaKey: String, hidden: List<String>): Flow<Long?>
+    suspend fun deleteTitleHistory(mediaKey: String, keep: List<String>): Int
 
     /** Câte vizionări ale aceluiași film / episod există deja (din orice sursă) în intervalul dat. */
     @Query(
@@ -175,7 +236,7 @@ interface TrackingDao {
     suspend fun putOwnWrites(items: List<OwnWriteEntity>)
 
     @Query("SELECT * FROM own_writes")
-    fun ownWrites(): Flow<List<OwnWriteEntity>>
+    suspend fun ownWrites(): List<OwnWriteEntity>
 
     @Query("DELETE FROM own_writes WHERE at < :before")
     suspend fun pruneOwnWrites(before: Long)

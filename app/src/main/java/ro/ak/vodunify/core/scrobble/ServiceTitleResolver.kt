@@ -2,9 +2,12 @@ package ro.ak.vodunify.core.scrobble
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.util.concurrent.ConcurrentHashMap
+import java.util.Collections
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -20,11 +23,18 @@ data class ServiceTitle(val show: String, val season: Int? = null, val episode: 
 object ServicePages {
     val PRIME_GTI = Regex("""amzn1\.dv\.gti\.[0-9a-fA-F-]{36}""")
     val NETFLIX_ID = Regex("""^\d{6,9}$""")
+    val ARTE_ID = Regex("""^\d{6}-\d{3}-[A-Z]$""")
+
+    private val ARTE_JSON = Json { ignoreUnknownKeys = true }
 
     private val OG_TITLE = Regex("""<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
     private val OG_TITLE_REV = Regex("""<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']""", RegexOption.IGNORE_CASE)
     private val TITLE_TAG = Regex("""<title[^>]*>([^<]+)</title>""", RegexOption.IGNORE_CASE)
-    private val SEASON = Regex("""(?i)[\s:–—-]*\b(?:season|sezonul|sezon|staffel|temporada|saison)\s*(\d{1,2})\b.*$""")
+    private val SEASON = Regex("""(?i)[\s:–—\-]*\b(?:season|sezonul|sezon|sez\.?|staffel|temporada|saison)\s*(\d{1,2})\b.*$""")
+    private val PRIME_INLINE_EP = Regex("""(?i)\b(?:season|sezonul|sezon|sez\.?)\s*(\d{1,2})\s*[,·•\-:\s]+\s*(?:ep\.?|episode|episodul|episod)\s*(\d{1,3})\b""")
+    private val PRIME_LD_EPISODE = Regex(""""episodeNumber"\s*:\s*"?(\d{1,3})"?""")
+    private val PRIME_LD_SEQ = Regex(""""(?:episodeNumber|sequenceNumber)"\s*:\s*"?(\d{1,3})"?""")
+    private val PRIME_LD_SEASON = Regex(""""seasonNumber"\s*:\s*"?(\d{1,2})"?""")
 
     fun pageTitle(html: String): String? {
         val raw = OG_TITLE.find(html)?.groupValues?.get(1)
@@ -36,22 +46,50 @@ object ServicePages {
 
     /** „Watch The Boys - Season 4 | Prime Video” → The Boys, sezonul 4 (+ episodul, dacă îl găsim lângă cod). */
     fun prime(html: String, gti: String): ServiceTitle? {
-        var t = pageTitle(html) ?: return null
-        t = t.replace(Regex("""(?i)\s*[|–—-]\s*(amazon\s+)?prime\s*video.*$"""), "")
-            .replace(Regex("""(?i)^(prime video:\s*|watch\s+|vizioneaz[aă]\s+|urm[aă]re[sș]te\s+)"""), "")
+        val rawTitle = pageTitle(html) ?: return null
+        val t = rawTitle
+            .replace(Regex("""(?i)\s*[|–—-]\s*(amazon\.com\s*:\s*|amazon\s+)?prime\s*video.*$"""), "")
+            .replace(Regex("""(?i)^(amazon\.com:\s*|prime video:\s*|watch\s+|vizioneaz[aă]\s+|urm[aă]re[sș]te\s+)"""), "")
             .trim()
-        val season = SEASON.find(t)?.groupValues?.get(1)?.toIntOrNull()
-        val show = t.replace(SEASON, "").trim(' ', ':', '-', '–', '—').trim()
-        if (show.isEmpty()) return null
-        return ServiceTitle(show, season, episodeNear(html, gti), null)
+        val inline = PRIME_INLINE_EP.find(t)
+        val escapedGti = Regex.escape(gti)
+        val selfEp = Regex(""""$escapedGti"\s*:\s*\{[^}]{0,350}?"sequenceNumber"\s*:\s*(\d{1,3})\s*,\s*"titleType"\s*:\s*"episode"""").find(html)
+            ?: Regex(""""gti"\s*:\s*"$escapedGti"[^}]{0,250}?"sequenceNumber"\s*:\s*(\d{1,3})\s*,\s*"titleType"\s*:\s*"episode"""").find(html)
+        val selfSeason = Regex(""""sequenceNumber"\s*:\s*(\d{1,2})\s*,\s*"titleType"\s*:\s*"season"""").find(html)
+        val season = inline?.groupValues?.get(1)?.toIntOrNull()
+            ?: SEASON.find(t)?.groupValues?.get(1)?.toIntOrNull()
+            ?: selfSeason?.groupValues?.get(1)?.toIntOrNull()
+            ?: PRIME_LD_SEASON.find(html)?.groupValues?.get(1)?.toIntOrNull()
+        val show = t
+            .replace(PRIME_INLINE_EP, "")
+            .replace(SEASON, "")
+            .trim(' ', ':', '-', '–', '—', ',')
+            .trim()
+        if (show.isEmpty() || show.equals("prime video", ignoreCase = true) || show.equals("amazon.com", ignoreCase = true)) {
+            return null
+        }
+        val ep = inline?.groupValues?.get(2)?.toIntOrNull()
+            ?: selfEp?.groupValues?.get(1)?.toIntOrNull()
+            ?: episodeNear(html, gti)
+            ?: PRIME_LD_EPISODE.find(html)?.groupValues?.get(1)?.toIntOrNull()
+        val epTitle = Regex(""""$escapedGti"\s*:\s*\{\s*"title"\s*:\s*"([^"]+)"""").find(html)
+            ?.groupValues?.get(1)?.let(::unescape)?.trim()?.takeIf { it.isNotEmpty() && !it.equals(show, ignoreCase = true) }
+        return ServiceTitle(show, season, ep, epTitle)
     }
 
-    /** În JSON-ul paginii, numărul episodului e în apropierea codului lui. */
+    /** În JSON-ul paginii, numărul episodului e în obiectul JSON al codului [gti] (nu în linkurile din pagină). */
     private fun episodeNear(html: String, gti: String): Int? {
         var idx = html.indexOf(gti)
         while (idx >= 0) {
-            val window = html.substring(idx, minOf(html.length, idx + 3000))
-            Regex(""""episodeNumber"\s*:\s*(\d{1,3})""").find(window)?.let { return it.groupValues[1].toInt() }
+            val prefix = html.substring((idx - 40).coerceAtLeast(0), idx)
+            if (!prefix.contains("cGTI=", ignoreCase = true) && !prefix.contains("/detail/")) {
+                val from = (idx - 120).coerceAtLeast(0)
+                val to = minOf(html.length, idx + 450)
+                val window = html.substring(from, to)
+                if (!window.contains(""""titleType":"season"""")) {
+                    PRIME_LD_SEQ.find(window)?.let { return it.groupValues[1].toInt() }
+                }
+            }
             idx = html.indexOf(gti, idx + gti.length)
         }
         return null
@@ -67,6 +105,17 @@ object ServicePages {
         return ServiceTitle(show)
     }
 
+    /** API public ARTE (`v2/config/{lang}/{programId}`): titlu + subtitlu într-o limbă internațională. */
+    fun arteConfig(body: String): ServiceTitle? = runCatching {
+        val meta = ARTE_JSON.parseToJsonElement(body).jsonObject["data"]?.jsonObject
+            ?.get("attributes")?.jsonObject?.get("metadata")?.jsonObject ?: return null
+        val title = meta["title"]?.jsonPrimitive?.content?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val subtitle = meta["subtitle"]?.jsonPrimitive?.content?.trim()?.takeIf {
+            it.isNotEmpty() && !it.equals(title, ignoreCase = true)
+        }
+        ServiceTitle(show = title, episodeTitle = subtitle)
+    }.getOrNull()
+
     private fun unescape(s: String) = s.replace("&amp;", "&").replace("&#39;", "'").replace("&#x27;", "'")
         .replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">")
 
@@ -80,6 +129,7 @@ object ServicePages {
             e != null -> put("display_subtitle", "Episodul $e")
             t.episodeTitle != null -> put("display_subtitle", t.episodeTitle)
         }
+        if (s != null && e == null) put("season_hint", s.toString())
     }
 }
 
@@ -91,9 +141,13 @@ object ServicePages {
 @Singleton
 class ServiceTitleResolver @Inject constructor(http: OkHttpClient) {
     private val client = http.newBuilder().callTimeout(12, TimeUnit.SECONDS).followRedirects(true).build()
-    private val cache = ConcurrentHashMap<String, Optional>()
+    private val cache = Collections.synchronizedMap(
+        object : LinkedHashMap<String, Optional>(64, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Optional>?) = size > 500
+        },
+    )
 
-    private data class Optional(val value: ServiceTitle?, val at: Long, val note: String)
+    private data class Optional(val value: ServiceTitle?, val at: Long, val note: String, val transient: Boolean = false)
 
     /** Ce s-a întâmplat la ultima căutare (pentru jurnalul din Setări): „Prime: The Boys S4E3”, „Prime: HTTP 403”… */
     fun noteFor(event: ScrobbleEvent): String? = keyFor(event)?.let { cache[it]?.note }
@@ -101,55 +155,95 @@ class ServiceTitleResolver @Inject constructor(http: OkHttpClient) {
     private fun keyFor(event: ScrobbleEvent): String? {
         val gti = event.fields.values.firstNotNullOfOrNull { ServicePages.PRIME_GTI.find(it)?.value }
         val netflixId = event.fields["netflix_id"]?.takeIf { ServicePages.NETFLIX_ID.matches(it) }
+        val arteId = event.fields["media_id"]?.takeIf { event.pkg.startsWith("tv.arte.") && ServicePages.ARTE_ID.matches(it) }
         return when {
             gti != null -> "prime:$gti"
             netflixId != null -> "netflix:$netflixId"
+            arteId != null -> "arte:$arteId"
             else -> null
         }
     }
-
-    private var lastHttp: String = ""
 
     /** Câmpurile de adăugat la eveniment, sau gol dacă nu avem cod / nu am găsit nimic. */
     suspend fun fieldsFor(event: ScrobbleEvent): Map<String, String> {
         val gti = event.fields.values.firstNotNullOfOrNull { ServicePages.PRIME_GTI.find(it)?.value }
         val netflixId = event.fields["netflix_id"]?.takeIf { ServicePages.NETFLIX_ID.matches(it) }
+        val arteId = event.fields["media_id"]?.takeIf { event.pkg.startsWith("tv.arte.") && ServicePages.ARTE_ID.matches(it) }
+        if (arteId != null) {
+            val title = cached("arte:$arteId") {
+                var parsed: ServiceTitle? = null
+                var lastNote = ""
+                for (lang in listOf("en", "fr", "de")) {
+                    val (body, note) = get("https://api.arte.tv/api/player/v2/config/$lang/$arteId")
+                    lastNote = note
+                    parsed = body?.let(ServicePages::arteConfig)
+                    if (parsed != null) break
+                }
+                parsed to lastNote
+            } ?: return emptyMap()
+            return buildMap {
+                val nativeTitle = event.fields["title"].orEmpty()
+                val nativeSub = event.fields["display_subtitle"].orEmpty()
+                if (nativeTitle.isBlank()) {
+                    put("title", title.show)
+                } else if (!title.show.equals(nativeTitle, ignoreCase = true)) {
+                    put("alt_title", title.show)
+                }
+                title.episodeTitle?.takeIf { it.isNotBlank() && !it.equals(nativeSub, ignoreCase = true) }?.let { ep ->
+                    if (nativeSub.isBlank() && nativeTitle.isBlank()) put("display_subtitle", ep)
+                    else put("alt_subtitle", ep)
+                }
+            }
+        }
         val title = when {
-            gti != null -> cached("prime:$gti") { ServicePages.prime(get("https://www.primevideo.com/detail/$gti/") ?: return@cached null, gti) }
-            netflixId != null -> cached("netflix:$netflixId") { ServicePages.netflix(get("https://www.netflix.com/title/$netflixId") ?: return@cached null) }
+            gti != null -> cached("prime:$gti") {
+                val (html, httpNote) = get("https://www.primevideo.com/detail/$gti/")
+                val parsed = html?.let { ServicePages.prime(it, gti) }
+                if (parsed != null) parsed to httpNote else {
+                    val (fbHtml, fbNote) = get("https://www.amazon.com/gp/video/detail/$gti/")
+                    (fbHtml?.let { ServicePages.prime(it, gti) }) to "$httpNote / amazon: $fbNote"
+                }
+            }
+            netflixId != null -> cached("netflix:$netflixId") {
+                val (html, httpNote) = get("https://www.netflix.com/title/$netflixId")
+                (html?.let { ServicePages.netflix(it) }) to httpNote
+            }
             else -> null
         } ?: return emptyMap()
         return ServicePages.asFields(title)
     }
 
-    private suspend fun cached(key: String, load: suspend () -> ServiceTitle?): ServiceTitle? {
+    private suspend fun cached(key: String, load: suspend () -> Pair<ServiceTitle?, String>): ServiceTitle? {
         val now = System.currentTimeMillis()
         cache[key]?.let { c ->
-            // Eșecurile se reîncearcă după 30 de minute.
-            if (c.value != null || now - c.at < TimeUnit.MINUTES.toMillis(30)) return c.value
+            // Eșecurile temporare (HTTP 503/429) se reîncearcă mai repede (2 min); altele după 30 min.
+            val retryWindowMs = if (c.transient) TimeUnit.MINUTES.toMillis(2) else TimeUnit.MINUTES.toMillis(30)
+            if (c.value != null || now - c.at < retryWindowMs) return c.value
         }
-        lastHttp = ""
         val r = runCatching { load() }
-        val v = r.getOrNull()
+        val pair = r.getOrNull()
+        val v = pair?.first
+        val httpNote = pair?.second.orEmpty()
+        val transient = r.isFailure || httpNote.contains("HTTP 5") || httpNote.contains("HTTP 429")
         val service = key.substringBefore(':').replaceFirstChar { it.uppercase() }
         val note = when {
             v != null -> "$service: ${v.show}" + (v.season?.let { " S$it" } ?: "") + (v.episode?.let { "E$it" } ?: "")
             r.isFailure -> "$service: eroare ${r.exceptionOrNull()?.javaClass?.simpleName} ${r.exceptionOrNull()?.message?.take(60)}"
-            else -> "$service: pagina nu are titlu $lastHttp"
+            else -> "$service: pagina nu are titlu $httpNote"
         }
-        if (cache.size > 500) cache.clear()
-        cache[key] = Optional(v, now, note)
+        if (v == null) ro.ak.vodunify.core.diagnostics.AppDiagLog.add("ServiceTitleResolver ($key): $note")
+        cache[key] = Optional(v, now, note, transient)
         return v
     }
 
-    private suspend fun get(url: String): String? = withContext(Dispatchers.IO) {
+    private suspend fun get(url: String): Pair<String?, String> = withContext(Dispatchers.IO) {
         val req = Request.Builder().url(url)
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
             .header("Accept-Language", "en-US,en;q=0.8,ro;q=0.6")
             .build()
         client.newCall(req).execute().use { r ->
-            lastHttp = "(HTTP ${r.code} ${r.request.url.host}${r.request.url.encodedPath.take(40)})"
-            if (r.isSuccessful) r.body?.string() else null
+            val httpNote = "(HTTP ${r.code} ${r.request.url.host}${r.request.url.encodedPath.take(40)})"
+            (if (r.isSuccessful) r.body?.string() else null) to httpNote
         }
     }
 }

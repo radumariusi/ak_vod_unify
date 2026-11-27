@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Ce ai schimbat tu în lista de aplicații și servicii (Setări → Aplicații și servicii):
- * - aplicația instalată aleasă pentru o intrare din listă (ex. Shova TV, când pachetul nu e cunoscut);
+ * - aplicația instalată aleasă pentru o intrare din listă (când pachetul nu e cunoscut);
  * - intrările eliminate (aplicații dezinstalate sau pe care nu le folosești);
  * - aplicațiile și serviciile adăugate de tine (în locurile libere [TargetApp.isCustom] / [StreamingService.isCustom]):
  *   numele și, la servicii, furnizorul TMDb (pentru disponibilitate și siglă).
@@ -50,11 +50,11 @@ object AppRegistry {
     }
 
     /** Serviciu nou: furnizorul TMDb [providerId] cu numele lui, deschis în aplicația instalată [packageName]. */
-    fun addService(service: StreamingService, providerId: Int, name: String, packageName: String) {
+    fun addService(service: StreamingService, providerId: Int?, name: String, packageName: String) {
         val p = prefs ?: return
         val app = TargetApp.byId(service.appId) ?: return
         p.edit().apply {
-            putInt("provider_${service.id}", providerId)
+            if (providerId == null) remove("provider_${service.id}") else putInt("provider_${service.id}", providerId)
             putString("name_${service.id}", name)
             putString("pkg_${app.id}", packageName)
             putString("name_${app.id}", name)

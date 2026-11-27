@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -33,24 +35,35 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -70,7 +83,6 @@ import ro.ak.vodunify.ui.components.AttributionNote
 import ro.ak.vodunify.ui.components.Button
 import ro.ak.vodunify.ui.components.Dropdown
 import ro.ak.vodunify.ui.components.ErrorPanel
-import ro.ak.vodunify.ui.components.FilledTonalButton
 import ro.ak.vodunify.ui.components.FocusCard
 import ro.ak.vodunify.ui.components.LoadState
 import ro.ak.vodunify.ui.components.LoadingPanel
@@ -84,6 +96,9 @@ import ro.ak.vodunify.ui.components.SectionTitle
 import ro.ak.vodunify.ui.components.TextButton
 import ro.ak.vodunify.ui.components.TitleBackdrop
 import ro.ak.vodunify.ui.components.TitleLogo
+import ro.ak.vodunify.ui.components.KeepFocusedContentVisible
+import ro.ak.vodunify.ui.components.TitleHero
+import ro.ak.vodunify.ui.components.tvTitleHeroHeight
 import ro.ak.vodunify.ui.components.TitleRow
 import ro.ak.vodunify.ui.components.layoutSpec
 import ro.ak.vodunify.ui.components.openUrl
@@ -96,14 +111,22 @@ import ro.ak.vodunify.ui.watch.playbackRequest
 fun DetailsScreen(
     viewModel: DetailsViewModel = hiltViewModel(),
     chooser: WatchChooserViewModel = hiltViewModel(),
+    onBackdropChange: ((String?) -> Unit)? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     // Revenit din altă aplicație (ex. ai instalat un serviciu): recitim ce e instalat.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshInstalled() }
+    val backdropUrl = (state as? LoadState.Data)?.value?.item?.backdropUrl
+    if (onBackdropChange != null) {
+        SideEffect { onBackdropChange(backdropUrl) }
+        DisposableEffect(onBackdropChange) {
+            onDispose { onBackdropChange(null) }
+        }
+    }
     when (val s = state) {
         LoadState.Loading -> LoadingPanel(Modifier.fillMaxSize())
         is LoadState.Failed -> ErrorPanel(s.error, onRetry = viewModel::retry)
-        is LoadState.Data -> DetailsContent(s.value, viewModel, chooser)
+        is LoadState.Data -> DetailsContent(s.value, viewModel, chooser, drawLocalBackdrop = onBackdropChange == null)
     }
     WatchChooserHost(chooser)
 }
@@ -114,7 +137,12 @@ fun DetailsScreen(
  * serial au ecranul lor, grupate pe sezoane (butonul „Episoade”).
  */
 @Composable
-private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel, chooser: WatchChooserViewModel) {
+private fun DetailsContent(
+    details: TitleDetails,
+    viewModel: DetailsViewModel,
+    chooser: WatchChooserViewModel,
+    drawLocalBackdrop: Boolean,
+) {
     val selectedSeason by viewModel.season.collectAsStateWithLifecycle()
     val episodes by viewModel.episodes.collectAsStateWithLifecycle()
     val connected by viewModel.trackerConnected.collectAsStateWithLifecycle()
@@ -130,16 +158,15 @@ private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel, c
             (details.seasons.firstOrNull { it.number == next } ?: details.seasons.firstOrNull())?.let { viewModel.selectSeason(it.number) }
         }
     }
-    LaunchedEffect(details.item.mediaKey, connected) {
-        if (connected) viewModel.loadShowProgress(details)
-    }
     BackHandler(enabled = showingEpisodes) {
         showingEpisodes = false
         backFromEpisodes = true
     }
 
     Box(Modifier.fillMaxSize()) {
-        TitleBackdrop(details.item.backdropUrl, Modifier.fillMaxSize(), opacity = 0.9f, settleMillis = 0)
+        if (drawLocalBackdrop) {
+            TitleBackdrop(details.item.backdropUrl, Modifier.fillMaxSize(), opacity = 0.9f, settleMillis = 0)
+        }
         if (showingEpisodes) {
             EpisodesPane(
                 details = details,
@@ -152,6 +179,7 @@ private fun DetailsContent(details: TitleDetails, viewModel: DetailsViewModel, c
                 onToggle = { ep -> viewModel.toggleEpisode(details, ep) },
                 onToggleSeason = { n, seen -> viewModel.toggleSeason(details, n, seen) },
                 onPlay = { ep -> chooser.play(details.playbackRequest(ep), details.availability) },
+                message = viewModel.message.collectAsStateWithLifecycle().value,
                 onBack = {
                     showingEpisodes = false
                     backFromEpisodes = true
@@ -193,73 +221,84 @@ private fun Overview(
     val message by viewModel.message.collectAsStateWithLifecycle()
     val primaryFocus = remember { FocusRequester() }
     val episodesFocus = remember { FocusRequester() }
+    val listState = rememberLazyListState()
     val isTvShow = details.item.kind == TitleKind.TV && details.seasons.isNotEmpty()
+    val currentWatch by rememberUpdatedState(watch)
     if (spec.isTv) {
-        LaunchedEffect(details.item.mediaKey) {
+        LaunchedEffect(details.item.mediaKey, focusEpisodes) {
+            if (!focusEpisodes) {
+                withTimeoutOrNull(250L) { snapshotFlow { currentWatch != null }.first { it } }
+            }
             withFrameNanos { }
             runCatching { if (focusEpisodes && isTvShow) episodesFocus.requestFocus() else primaryFocus.requestFocus() }
-            onFocused()
+            if (focusEpisodes) onFocused()
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(top = if (spec.isTv) 14.dp else 8.dp)) {
-        TitleLogo(
-            details.item.title,
-            details.logoUrl,
-            height = if (spec.isCompact) 52.dp else 68.dp,
-            modifier = Modifier.padding(horizontal = spec.screenPadding),
-        )
-        LazyColumn(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            item(key = "header") {
-                Header(
-                    details = details,
-                    watch = watch,
-                    modifier = Modifier.padding(horizontal = spec.screenPadding),
-                ) {
-                    PrimaryActions(watch, primaryFocus, onPlay, onChoose)
-                    if (isTvShow) {
-                        OutlinedButton(onClick = onEpisodes, modifier = Modifier.focusRequester(episodesFocus)) { Text("Episoade") }
-                    }
-                    if (connected) {
-                        val inList = track?.inMyList == true
-                        if (inList) {
-                            FilledTonalButton(onClick = { viewModel.toggleWatchlist(details) }, enabled = !busy) { Text("✓ În Lista mea") }
-                        } else {
-                            OutlinedButton(onClick = { viewModel.toggleWatchlist(details) }, enabled = !busy) { Text("+ Lista mea") }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val heroHeight = if (spec.isTv) tvTitleHeroHeight(maxHeight, spec) else 0.dp
+        KeepFocusedContentVisible(spec.isTv) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize().clipToBounds(),
+                contentPadding = PaddingValues(bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item(key = "hero") {
+                    DetailsHero(details, heroHeight)
+                }
+                item(key = "header") {
+                    Header(
+                        details,
+                        watch,
+                        Modifier.padding(horizontal = spec.screenPadding),
+                        actionsModifier = if (spec.isTv) Modifier
+                            .onFocusChanged {
+                                if (it.hasFocus && (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0)) {
+                                    listState.requestScrollToItem(0)
+                                }
+                            }
+                            .focusGroup() else Modifier,
+                    ) {
+                        PrimaryActions(watch, primaryFocus, onPlay, onChoose)
+                        if (isTvShow) {
+                            OutlinedButton(onClick = onEpisodes, modifier = Modifier.focusRequester(episodesFocus)) { Text("Episoade") }
                         }
-                        // Starea, ca la Lista mea: „✓ Văzut” când e văzut, „Nevăzut” când nu; apăsarea o schimbă.
-                        if (details.item.kind == TitleKind.MOVIE) {
-                            WatchedToggle(track?.watched == true, enabled = !busy) { viewModel.toggleWatched(details) }
-                        } else if (isTvShow) {
-                            val seriesWatched = progress?.let { it.aired > 0 && it.completed >= it.aired } == true
-                            WatchedToggle(seriesWatched, enabled = !busy, watchedLabel = "✓ Serial văzut", unwatchedLabel = "Serial nevăzut") {
-                                viewModel.toggleSeries(details, seriesWatched)
+                        if (connected) {
+                            val inList = track?.inMyList == true
+                            OutlinedButton(onClick = { viewModel.toggleWatchlist(details) }, active = inList) {
+                                Text(if (inList) "✓ În Lista mea" else "+ Lista mea")
+                            }
+                            // Starea, ca la Lista mea: „✓ Văzut” când e văzut, „Nevăzut” când nu; apăsarea o schimbă.
+                            if (details.item.kind == TitleKind.MOVIE) {
+                                WatchedToggle(track?.watched == true) { viewModel.toggleWatched(details) }
+                            } else if (isTvShow) {
+                                val seriesWatched = track?.resume == null && progress?.let { it.aired > 0 && it.completed >= it.aired } == true
+                                WatchedToggle(seriesWatched, watchedLabel = "✓ Serial văzut", unwatchedLabel = "Marchează serialul văzut") {
+                                    viewModel.toggleSeries(details, seriesWatched)
+                                }
                             }
                         }
+                        TrailerButton(details)
                     }
-                    TrailerButton(details)
                 }
-            }
-            item(key = "status") {
-                Column(Modifier.padding(horizontal = spec.screenPadding), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    trackSummary(details.item.kind == TitleKind.MOVIE, track, progress)?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                item(key = "status") {
+                    Column(Modifier.padding(horizontal = spec.screenPadding), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        trackSummary(details.item.kind == TitleKind.MOVIE, track, progress)?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                        }
+                        message?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     }
-                    message?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 }
+                item(key = "info") { InfoLines(details, Modifier.padding(horizontal = spec.screenPadding)) }
+                item(key = "cast") { PersonRow("Distribuție", details.cast) }
+                item(key = "recs") { TitleRow("Recomandări", details.recommendations) }
+                item(key = "studios") { StudioRow(details.studios) }
+                item(key = "attribution") { AttributionNote() }
             }
-            item(key = "info") { InfoLines(details, Modifier.padding(horizontal = spec.screenPadding)) }
-            item(key = "cast") { PersonRow("Distribuție", details.cast) }
-            item(key = "recs") { TitleRow("Recomandări", details.recommendations) }
-            item(key = "studios") { StudioRow(details.studios) }
-            item(key = "attribution") { AttributionNote() }
         }
     }
 }
@@ -268,16 +307,15 @@ private fun Overview(
 @Composable
 private fun WatchedToggle(
     watched: Boolean,
-    enabled: Boolean,
     watchedLabel: String = "✓ Văzut",
-    unwatchedLabel: String = "Nevăzut",
+    unwatchedLabel: String = "Marchează văzut",
     onClick: () -> Unit,
 ) {
-    if (watched) {
-        FilledTonalButton(onClick = onClick, enabled = enabled) { Text(watchedLabel) }
-    } else {
-        OutlinedButton(onClick = onClick, enabled = enabled) { Text(unwatchedLabel) }
-    }
+    OutlinedButton(
+        onClick = onClick,
+        active = watched,
+        modifier = Modifier.semantics { stateDescription = if (watched) "Văzut" else "Nevăzut" },
+    ) { Text(if (watched) watchedLabel else unwatchedLabel) }
 }
 
 @Composable
@@ -295,19 +333,32 @@ private fun TrailerButton(details: TitleDetails) {
 @Composable
 private fun PrimaryActions(watch: WatchOptions?, focus: FocusRequester, onPlay: () -> Unit, onChoose: () -> Unit) {
     val target = watch?.recommendedService?.label ?: watch?.recommendedPlayer?.displayName
+    Button(onClick = if (target == null) onChoose else onPlay, modifier = Modifier.focusRequester(focus)) {
+        Icon(Icons.Filled.PlayArrow, contentDescription = null)
+        Spacer(Modifier.width(6.dp))
+        Text(target ?: "Alege unde vezi")
+    }
     if (target != null) {
-        Button(onClick = onPlay, modifier = Modifier.focusRequester(focus)) {
-            Icon(Icons.Filled.PlayArrow, contentDescription = null)
-            Spacer(Modifier.width(6.dp))
-            Text(target)
-        }
         OutlinedButton(onClick = onChoose) { Text("Alege unde vezi") }
-    } else {
-        Button(onClick = onChoose, modifier = Modifier.focusRequester(focus)) {
-            Icon(Icons.Filled.PlayArrow, contentDescription = null)
-            Spacer(Modifier.width(6.dp))
-            Text("Alege unde vezi")
+    }
+}
+
+@Composable
+private fun DetailsHero(details: TitleDetails, heroHeight: Dp) {
+    val item = details.item
+    TitleHero(item.title, details.logoUrl, heroHeight, Modifier.heightIn(min = heroHeight)) { lines ->
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PosterRatings(item.kind, item.id, item.rating)
+            Text(
+                metaLine(details),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
+        val text = item.overview.ifBlank { details.tagline.orEmpty() }
+        if (text.isNotBlank()) ExpandableText(text, collapsedLines = lines)
     }
 }
 
@@ -317,37 +368,23 @@ private fun Header(
     details: TitleDetails,
     watch: WatchOptions?,
     modifier: Modifier = Modifier,
+    actionsModifier: Modifier = Modifier,
     actions: @Composable () -> Unit,
 ) {
-    val item = details.item
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Column(Modifier.widthIn(max = 760.dp).fillMaxWidth(0.86f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PosterRatings(item.kind, item.id, item.rating)
-                Text(
-                    metaLine(details),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            details.originalTitle?.let {
-                Text("Titlu original: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            details.nextEpisode?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
-            }
-            val text = item.overview.ifBlank { details.tagline.orEmpty() }
-            if (text.isNotBlank()) {
-                // Întreagă dacă încape; altfel tăiată, cu „… Arată mai mult” (îngroșat) care o deschide.
-                ExpandableText(text)
-            }
-            WhereToWatch(watch)
-        }
-        // Acțiunile pe un rând (trec pe rândul următor doar dacă nu încap), ca restul fișei să rămână pe ecran.
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(
+            modifier = actionsModifier,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             actions()
+        }
+        WhereToWatch(watch)
+        details.nextEpisode?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+        }
+        details.originalTitle?.let {
+            Text("Titlu original: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -464,6 +501,7 @@ private fun EpisodesPane(
     onToggle: (Episode) -> Unit,
     onToggleSeason: (Int, Boolean) -> Unit,
     onPlay: (Episode) -> Unit,
+    message: String?,
     onBack: () -> Unit,
 ) {
     val spec = layoutSpec()
@@ -477,7 +515,7 @@ private fun EpisodesPane(
         Column(Modifier.fillMaxSize().padding(horizontal = spec.screenPadding, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onBack) { Text("Înapoi la fișă") }
             Dropdown("Sezonul", current, seasons, ::seasonLabel, { onSelectSeason(it.number) })
-            SeasonEpisodes(current, episodes, watched, next, canMark, onToggle, onToggleSeason, onPlay, Modifier.weight(1f))
+            SeasonEpisodes(current, episodes, watched, next, canMark, onToggle, onToggleSeason, onPlay, message, Modifier.weight(1f))
         }
         return
     }
@@ -510,7 +548,7 @@ private fun EpisodesPane(
                 }
             }
         }
-        SeasonEpisodes(current, episodes, watched, next, canMark, onToggle, onToggleSeason, onPlay, Modifier.weight(0.72f))
+        SeasonEpisodes(current, episodes, watched, next, canMark, onToggle, onToggleSeason, onPlay, message, Modifier.weight(0.72f))
     }
 }
 
@@ -550,6 +588,7 @@ private fun SeasonEpisodes(
     onToggle: (Episode) -> Unit,
     onToggleSeason: (Int, Boolean) -> Unit,
     onPlay: (Episode) -> Unit,
+    message: String?,
     modifier: Modifier,
 ) {
     Column(modifier.fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -558,18 +597,23 @@ private fun SeasonEpisodes(
             val loaded = (episodes as? LoadState.Data)?.value?.takeIf { it.number == season.number }
             if (canMark && loaded != null) {
                 val aired = ro.ak.vodunify.core.tracking.SeriesMarker.aired(loaded.episodes)
-                if (aired.isNotEmpty()) {
-                    val seasonWatched = aired.all { EpisodeNumber(it.season, it.number) in watched }
-                    WatchedToggle(seasonWatched, enabled = true, watchedLabel = "✓ Sezon văzut", unwatchedLabel = "Sezon nevăzut") {
+                if (aired.isNotEmpty() || loaded.episodes.any { EpisodeNumber(it.season, it.number) in watched }) {
+                    val seasonWatched = loaded.episodes.isNotEmpty() && loaded.episodes.all { EpisodeNumber(it.season, it.number) in watched }
+                    WatchedToggle(seasonWatched, watchedLabel = "✓ Sezon văzut", unwatchedLabel = "Marchează sezonul văzut") {
                         onToggleSeason(season.number, seasonWatched)
                     }
                 }
             }
         }
+        Box(Modifier.heightIn(min = 22.dp)) {
+            message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        }
         when (episodes) {
             null, LoadState.Loading -> LoadingPanel()
             is LoadState.Failed -> ErrorPanel(episodes.error, onRetry = null)
-            is LoadState.Data -> if (episodes.value.episodes.isEmpty()) {
+            is LoadState.Data -> if (episodes.value.number != season.number) {
+                LoadingPanel()
+            } else if (episodes.value.episodes.isEmpty()) {
                 Text("Nu există episoade listate pentru acest sezon.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 key(episodes.value.number) {
@@ -591,7 +635,7 @@ private fun EpisodeList(
 ) {
     val spec = layoutSpec()
     // Focusul intră pe următorul episod de văzut (sau pe primul).
-    val initial = list.indexOfFirst { EpisodeNumber(it.season, it.number) == next }.coerceAtLeast(0)
+    val initial = remember { list.indexOfFirst { EpisodeNumber(it.season, it.number) == next }.coerceAtLeast(0) }
     val focus = remember { FocusRequester() }
     val state = rememberLazyListState(initial)
     if (spec.isTv) {
@@ -616,7 +660,7 @@ private fun EpisodeList(
                     onClick = { onPlay(ep) },
                 )
                 if (canMark) {
-                    WatchedToggle(number in watched, enabled = true) { onToggle(ep) }
+                    WatchedToggle(number in watched) { onToggle(ep) }
                 }
             }
         }

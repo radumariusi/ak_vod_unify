@@ -25,7 +25,14 @@ class InstallResultReceiver : BroadcastReceiver() {
             else -> {
                 val msg = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
                 Log.w(TAG, "Instalare eșuată ($status): $msg")
-                Toast.makeText(context, "Instalare eșuată: ${msg ?: status}", Toast.LENGTH_LONG).show()
+                val message = when {
+                    msg?.contains("INSTALL_FAILED_VERIFICATION_FAILURE") == true ->
+                        "Android a refuzat instalarea la verificarea de securitate."
+                    status == PackageInstaller.STATUS_FAILURE_BLOCKED ->
+                        "Instalarea a fost blocată de Android sau de politica dispozitivului."
+                    else -> "Instalare eșuată: ${msg ?: status}"
+                }
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
             }
         }
     }

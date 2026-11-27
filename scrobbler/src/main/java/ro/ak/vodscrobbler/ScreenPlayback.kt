@@ -20,9 +20,8 @@ class ScreenPlayback(val packageName: String, val appLabel: String) {
 
     private var lastScreenPos: Long? = null
 
-    /** Ultima pereche de timpi fără indiciu și dacă al doilea s-a dovedit a fi timpul rămas. */
-    private var lastPair: Pair<Long, Long>? = null
-    private var secondIsRemaining: Boolean? = null
+    private val timeResolver = ScreenTimeResolver()
+    private var unchangedSince: Long? = null
     private var lastScreenAt = 0L
     private var lastForegroundAt = 0L
 
@@ -30,32 +29,44 @@ class ScreenPlayback(val packageName: String, val appLabel: String) {
     fun onScreen(g: ScreenGuess?, rawTimes: ScreenTimes, now: Long, details: ScreenGuess? = null): List<Outgoing> {
         lastForegroundAt = now
         val out = mutableListOf<Outgoing>()
-        val times = resolvePair(rawTimes)
         val duration = tracker.media?.durationMs
-        val pos = times.position(duration)
+        val rawPosition = rawTimes.position(duration)
 
         // Titlul: de pe ecranul playerului (cu timpi sau linie de episod), altfel pagina titlului.
-        val title = g?.takeIf { !times.isEmpty || it.subtitle != null } ?: if (guess == null) details else null
+        val title = g?.takeIf { !rawTimes.isEmpty || it.subtitle != null } ?: if (guess == null) details else null
         // Același episod (S2E10) citit din alt panou al playerului („TV-MA · S2:E10”): păstrăm serialul știut.
         val sameEpisode = title != null && guess != null && title.title != guess!!.title &&
             episodeCode(title.subtitle) != null && episodeCode(title.subtitle) == episodeCode(guess!!.subtitle)
-        if (title != null && title != guess && !sameEpisode) {
-            val continuing = guess != null && lastScreenPos != null && pos != null &&
-                kotlin.math.abs(pos - (tracker.position(now) ?: pos)) < 120_000
+        val changed = title != null && title != guess && !sameEpisode
+        val oldCode = episodeCode(guess?.subtitle)
+        val newCode = episodeCode(title?.subtitle)
+        val newEpisode = oldCode != null && newCode != null && oldCode != newCode
+        val continuing = !newEpisode && guess != null && lastScreenPos != null && rawPosition != null &&
+            kotlin.math.abs(rawPosition - (tracker.position(now) ?: rawPosition)) < 120_000
+        if (changed && !continuing) timeResolver.reset()
+        val priorDuration = duration.takeUnless { changed && !continuing }
+        val times = timeResolver.resolve(rawTimes)
+        val pos = times.position(priorDuration)
+        if (changed) {
             guess = title
             val fields = linkedMapOf("title" to title.title, "title_source" to "screen")
             title.subtitle?.let { fields["display_subtitle"] = it }
-            out += tracker.onMetadata(MediaInfo(fields, times.durationMs ?: duration), now, correction = continuing)
+            out += tracker.onMetadata(MediaInfo(fields, times.durationMs ?: priorDuration), now, correction = continuing)
+            if (!continuing) {
+                lastScreenPos = null
+                unchangedSince = null
+            }
         }
         if (times.durationMs != null || pos != null) tracker.onScreenTimes(null, times.durationMs, now, fromScreen = true)
 
         if (pos != null) {
             val prev = lastScreenPos
             val elapsed = now - lastScreenAt
+            unchangedSince = if (prev == pos) unchangedSince ?: lastScreenAt else null
             val state = when {
                 prev == null -> PlayState.PLAYING
                 pos - prev >= 1_000 && pos - prev >= elapsed / 3 -> PlayState.PLAYING
-                kotlin.math.abs(pos - prev) < 1_000 && elapsed >= 1_500 -> PlayState.PAUSED
+                unchangedSince?.let { now - it >= 1_500 } == true -> PlayState.PAUSED
                 else -> tracker.state.takeIf { it == PlayState.PLAYING || it == PlayState.PAUSED } ?: PlayState.PLAYING
             }
             lastScreenPos = pos
@@ -76,31 +87,6 @@ class ScreenPlayback(val packageName: String, val appLabel: String) {
         return tracker.onTick(now)
     }
 
-    /**
-     * Doi timpi fără alt indiciu: dacă între două citiri primul crește și al doilea scade cu cât
-     * a crescut primul (suma rămâne aceeași), al doilea e timpul rămas, nu durata.
-     */
-    private fun resolvePair(t: ScreenTimes): ScreenTimes {
-        val pair = t.rawPair ?: return t
-        val prev = lastPair
-        lastPair = pair
-        if (prev != null && pair.first - prev.first >= 5_000) {
-            val sumNow = pair.first + pair.second
-            val sumBefore = prev.first + prev.second
-            secondIsRemaining = when {
-                kotlin.math.abs(sumNow - sumBefore) <= 3_000 && pair.second < prev.second -> true
-                kotlin.math.abs(pair.second - prev.second) <= 3_000 -> false
-                else -> secondIsRemaining
-            }
-        }
-        return when (secondIsRemaining) {
-            true -> ScreenTimes(pair.first, pair.first + pair.second, pair.second, pair)
-            // Al doilea mai mic decât primul și nu știm încă: nu ghicim durata.
-            null -> if (pair.second > pair.first) t else t.copy(durationMs = null)
-            false -> t
-        }
-    }
-
     companion object {
         const val GONE_AFTER_MS = 20_000L
 
@@ -112,6 +98,6 @@ class ScreenPlayback(val packageName: String, val appLabel: String) {
 
         /** Pornim doar pe ecranul unui player: minut + durată (un ceas singur nu e player). */
         fun looksLikePlayer(times: ScreenTimes): Boolean =
-            times.durationMs != null && times.position(null) != null
+            times.rawPair != null || (times.durationMs != null && times.position(null) != null)
     }
 }

@@ -29,22 +29,31 @@ object LogcatProbe {
     fun probe(context: Context, packageName: String, done: (Result) -> Unit) {
         if (!isAllowed(context)) return
         executor.execute {
-            val lines = runCatching { read() }.getOrElse { listOf("(nu pot citi logcat: ${it.message})") }
-            val relevant = lines.filter { RELEVANT.containsMatchIn(it) }
+            val relevant = runCatching { readRelevant() }
+                .getOrElse { listOf("(nu pot citi logcat: ${it.message})") }
             done(Result(LogcatIds.extract(packageName, relevant), relevant.takeLast(MAX_DIAG_LINES)))
         }
     }
 
-    private fun read(): List<String> {
-        val p = ProcessBuilder("logcat", "-d", "-v", "brief", "-t", "3000").redirectErrorStream(true).start()
-        val out = BufferedReader(InputStreamReader(p.inputStream)).use { r -> r.readLines() }
+    private fun readRelevant(): List<String> {
+        val p = ProcessBuilder("logcat", "-d", "-v", "brief", "-t", "8000").redirectErrorStream(true).start()
+        val matched = ArrayDeque<String>(256)
+        BufferedReader(InputStreamReader(p.inputStream)).useLines { lines ->
+            for (line in lines) {
+                if (RELEVANT.containsMatchIn(line)) {
+                    if (matched.size >= MAX_MATCHED_LINES) matched.removeFirst()
+                    matched.addLast(line)
+                }
+            }
+        }
         p.waitFor(5, TimeUnit.SECONDS)
         p.destroy()
-        return out
+        return matched.toList()
     }
 
     private val RELEVANT = Regex(
         """(?i)(netflix|nf_|movieid|videoid|video_id|movie_id|viewable|episode|title|amzn1\.dv|gti|/watch/|playback|manifest|catalog|content_?id)""",
     )
+    private const val MAX_MATCHED_LINES = 250
     private const val MAX_DIAG_LINES = 40
 }

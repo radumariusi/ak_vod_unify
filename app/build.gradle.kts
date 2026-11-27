@@ -98,6 +98,7 @@ ksp {
 }
 
 dependencies {
+    implementation(project(":importer"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)

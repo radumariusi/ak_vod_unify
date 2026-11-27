@@ -13,7 +13,7 @@ object Scripts {
           if (window.__akHook) return;
           window.__akHook = true;
           window.__akCap = [];
-          var keep = function (url) { return /graphql|viewed|viewing|activity|shakti|pathEvaluator|bookmark/i.test(String(url || "")); };
+          var keep = function (url) { return /graphql|viewed|viewing|activity|shakti|pathEvaluator|bookmark|lolomo/i.test(String(url || "")); };
           window.__akHist = [];
           // Cererile care au adus istoric: le repetăm noi, cu alt cursor, ca să luăm tot istoricul.
           window.__akHistReqs = [];
@@ -183,6 +183,70 @@ object Scripts {
           var diag = "raspunsuri " + bodies.length + (bad ? " (" + bad + " ilizibile)" : "") + " · inregistrari " + R.items.length +
             (R.items.length ? "" : " · video: " + R.info.sample);
           return JSON.stringify({ items: R.items, diag: diag });
+        })()
+    """.trimIndent()
+
+    /**
+     * Netflix `/browse` (Continue Watching): citește din `window.netflix.falcorCache` titlurile aflate
+     * în „Continuă vizionarea” cu secunda exactă (`bookmarkPosition`) și durata totală (`runtime`),
+     * ca să putem separa chiar și 3–4 filme rulate unul după altul la distanță mică de timp.
+     */
+    val NETFLIX_BROWSE_COLLECT = """
+        (function () {
+          try {
+            var fc = window.netflix && window.netflix.falcorCache;
+            if (!fc || !fc.videos) return JSON.stringify({ items: [], diag: "fara falcorCache.videos" });
+            var val = function (x) { return x && typeof x === "object" && "value" in x ? x.value : x; };
+            var refId = function (r) { var v = val(r); return Array.isArray(v) && v.length > 1 ? String(v[v.length - 1]) : null; };
+            var num = function (x) { var n = Number(val(x)); return isFinite(n) ? n : 0; };
+            var showMap = {};
+            var shows = fc.shows || {};
+            for (var sid in shows) {
+              var sh = shows[sid] || {};
+              var cur = refId(sh.currentEpisode);
+              if (cur) showMap[cur] = String(val(sh.title) || val(sh.summary && sh.summary.title) || "");
+            }
+            var items = [], seen = {};
+            var videos = fc.videos || {};
+            for (var id in videos) {
+              var v = videos[id];
+              if (!v || typeof v !== "object") continue;
+              var sum = val(v.summary) || {};
+              var bmObj = val(v.bookmark) || {};
+              var bm = num(bmObj.offset != null ? bmObj.offset : (v.bookmarkPosition != null ? v.bookmarkPosition : bmObj));
+              if (!(bm > 1)) continue;
+              var title = String(val(v.title) || val(sum.title) || "").trim();
+              if (!title) continue;
+              var rt = num(v.runtime || sum.runtime);
+              if (rt > 200000) rt = Math.round(rt / 1000);
+              if (bm > 200000) bm = Math.round(bm / 1000);
+              var lastMod = num(bmObj.lastModified || (v.bookmark && v.bookmark.lastModified) || 0);
+              var type = String(val(sum.type) || val(v.type) || "");
+              var sNum = num(sum.season) || num(v.seasonNumber) || 0;
+              var eNum = num(sum.episode) || num(v.episodeNumber) || 0;
+              var showId = refId(v.ancestor) || refId(v.parentShow);
+              var showTitle = (showId && shows[showId] && String(val(shows[showId].title) || "").trim()) || showMap[String(id)] || "";
+              var isEp = /episode/i.test(type) || !!showTitle || (sNum > 0 && eNum > 0);
+              if (seen[id]) continue;
+              seen[id] = 1;
+              items.push({
+                series: isEp && showTitle ? showTitle : null,
+                season: isEp && sNum > 0 ? ("Season " + sNum) : null,
+                episode: isEp && showTitle ? title : null,
+                title: isEp && showTitle ? (showTitle + (sNum > 0 ? ": Season " + sNum : "") + ": " + title) : title,
+                date: lastMod || Date.now(),
+                watchedAt: lastMod > 1000000000000 ? lastMod : null,
+                bookmark: Math.round(bm),
+                duration: rt > 0 ? Math.round(rt) : null,
+                seasonNumber: sNum > 0 ? sNum : null,
+                episodeNumber: eNum > 0 ? eNum : null,
+                id: String(id)
+              });
+            }
+            return JSON.stringify({ items: items, diag: "falcor=" + items.length });
+          } catch (e) {
+            return JSON.stringify({ items: [], diag: "err:" + String(e && e.message || e) });
+          }
         })()
     """.trimIndent()
 

@@ -1,5 +1,6 @@
 package ro.ak.vodunify.core.calendar.model
 
+import kotlinx.serialization.Serializable
 /**
  * A streaming service the user can have installed on the TV.
  *
@@ -14,6 +15,7 @@ package ro.ak.vodunify.core.calendar.model
  * @property globalDrop true when the service releases its titles at the same moment in
  *   every country, at 00:00 Pacific time (Netflix, Disney+, Prime Video, …).
  */
+@Serializable
 data class StreamingApp(
     val id: String,
     val name: String,

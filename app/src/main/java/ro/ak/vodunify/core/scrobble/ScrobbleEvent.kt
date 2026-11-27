@@ -6,6 +6,7 @@ import kotlinx.serialization.Serializable
 /** Ce trimite AK Scrobbler (JSON în coloana „payload” a insert-ului). */
 @Serializable
 data class ScrobbleEvent(
+    val id: String = "",
     val pkg: String,
     val app: String = pkg,
     /** pause | stop | tick */
@@ -49,4 +50,9 @@ data class ScrobbleLogEntry(
     val positionMs: Long,
     val durationMs: Long? = null,
     val result: String,
+    val itemKey: String? = null,
 )
+
+internal const val SCROBBLE_PREFS = "scrobbler"
+internal const val SCROBBLE_LOG = "log"
+internal const val SCROBBLE_APP_HISTORY = "app_by_key"

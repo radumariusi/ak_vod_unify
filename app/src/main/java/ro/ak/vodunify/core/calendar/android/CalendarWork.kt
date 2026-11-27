@@ -145,8 +145,8 @@ object CalendarWork {
 
     fun start(context: Context) {
         val app = context.applicationContext
-        runCatching { TodayNotifier.createChannel(app) }
-        CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            runCatching { TodayNotifier.createChannel(app) }
             var first = true
             val calendar = app.calendarEntry().calendar()
             calendar.settings

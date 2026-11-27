@@ -12,7 +12,9 @@ import androidx.compose.ui.focus.onFocusChanged
 import ro.ak.vodunify.core.catalog.TitleKind
 import ro.ak.vodunify.ui.components.PosterRatings
 import ro.ak.vodunify.ui.components.LocalPosterLongPress
-import ro.ak.vodunify.ui.components.TitleLogo
+import ro.ak.vodunify.ui.components.TitleHero
+import ro.ak.vodunify.ui.components.tvHomeRowHeight
+import ro.ak.vodunify.ui.components.tvTitleHeroHeight
 import ro.ak.vodunify.ui.components.TitleBadge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -22,16 +24,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -56,11 +55,21 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.delay
+import ro.ak.vodunify.core.catalog.CatalogRow
 import ro.ak.vodunify.core.catalog.CatalogItem
+import ro.ak.vodunify.core.catalog.ServiceCatalogStatus
+import ro.ak.vodunify.ui.components.AppIconBadge
+import ro.ak.vodunify.ui.components.BadgeSpec
+import ro.ak.vodunify.ui.components.SectionTitle
+import ro.ak.vodunify.ui.components.peekRow
 import ro.ak.vodunify.core.catalog.HomeCatalog
 import ro.ak.vodunify.ui.components.AttributionNote
 import ro.ak.vodunify.ui.components.ErrorPanel
@@ -68,13 +77,17 @@ import ro.ak.vodunify.ui.components.LoadState
 import ro.ak.vodunify.ui.components.LoadingPanel
 import ro.ak.vodunify.ui.components.FocusedTitle
 import ro.ak.vodunify.ui.components.LocalBackdrop
-import ro.ak.vodunify.ui.components.LocalFocusRestore
-import ro.ak.vodunify.ui.components.PivotScroll
+import ro.ak.vodunify.ui.components.returningFocus
+import ro.ak.vodunify.ui.components.clearReturningFocus
 import ro.ak.vodunify.ui.components.HomeRows
 import ro.ak.vodunify.ui.components.LocalHomeRows
 import ro.ak.vodunify.ui.components.FixedRowsScroll
-import ro.ak.vodunify.ui.components.homeRowsList
+import ro.ak.vodunify.ui.components.HomeRowFocus
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import ro.ak.vodunify.core.prefs.UiPrefs
+import ro.ak.vodunify.core.playback.PosterBadge
+import ro.ak.vodunify.core.playback.ServiceBadge
 import ro.ak.vodunify.ui.components.RatingChip
 import ro.ak.vodunify.ui.components.TitleBackdrop
 import ro.ak.vodunify.ui.components.TitleRow
@@ -84,62 +97,54 @@ import ro.ak.vodunify.ui.navigation.LocalCatalogActions
 @Composable
 fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshApps() }
     val personal by viewModel.personal.collectAsStateWithLifecycle()
     val sync by viewModel.syncStatus.collectAsStateWithLifecycle()
-    val personalRows: LazyListScope.() -> Unit = { personalItems(personal, sync, viewModel::syncNow) }
-    // Siglele titlurilor din rândurile personale (Continuă, Noutăți, În curând) se pregătesc din timp, ca hero-ul
-    // să le arate pe loc la focus.
-    LaunchedEffect(personal) {
-        val p = personal
-        viewModel.prefetchLogos(
-            (p.continueMovies + p.continueShows + p.newMovies + p.newEpisodes + p.soonMovies + p.soonEpisodes)
-                .mapNotNull { item -> item.tmdbId?.let { item.kind to it } },
-        )
+    val personalRows = remember(personal, sync, viewModel) { personalHomeRows(personal, sync, viewModel::syncNow) }
+    val catalog = (state as? LoadState.Data)?.value ?: EmptyCatalog
+    val statusRow = when (val current = state) {
+        LoadState.Loading -> HomeRow("home-loading", false) { LoadingPanel() }
+        is LoadState.Failed -> HomeRow("home-error", true) { ErrorPanel(current.error, onRetry = viewModel::retry) }
+        is LoadState.Data -> null
     }
-    when (val s = state) {
-        LoadState.Loading -> LazyColumn(Modifier.fillMaxSize()) {
-            personalRows()
-            item { LoadingPanel() }
-        }
-        is LoadState.Failed -> LazyColumn(Modifier.fillMaxSize()) {
-            item { ErrorPanel(s.error, onRetry = viewModel::retry) }
-            personalRows()
-        }
-        is LoadState.Data -> HomeContent(s.value, personalRows, viewModel, personalReady = personal.state != PersonalState.LOADING)
-    }
+    HomeContent(catalog, personalRows, statusRow, viewModel, personalReady = personal.state != PersonalState.LOADING)
 }
+
+private val EmptyCatalog = HomeCatalog(emptyList(), emptyList())
 
 @Composable
 private fun HomeContent(
     catalog: HomeCatalog,
-    personalRows: LazyListScope.() -> Unit,
+    personalRows: List<HomeRow>,
+    statusRow: HomeRow?,
     viewModel: HomeViewModel,
     personalReady: Boolean,
 ) {
     val spec = layoutSpec()
     val listFocus = remember { FocusRequester() }
-    val restore = LocalFocusRestore.current
+    val returning = returningFocus()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-
-    // Siglele titlurilor din rânduri se pregătesc din timp (adresa + imaginea în cache).
-    LaunchedEffect(catalog) {
-        viewModel.prefetchLogos((catalog.hero + catalog.rows.flatMap { it.items.take(12) }).map { it.kind to it.id })
-    }
 
     // Pe TV focusul pornește pe primul poster (nu mai e buton „Detalii”: OK pe orice poster deschide fișa);
     // la întoarcerea dintr-o fișă focusul revine pe cardul deschis (vezi FocusRestore).
     // Acasă pornește mereu de sus, de la Continuă vizionarea: focusul se pune abia după ce rândurile personale
     // sunt pe ecran (altfel ar cădea pe primul rând din catalog, iar rândurile apărute deasupra l-ar lăsa jos).
     if (spec.isTv) {
-        var started by remember { mutableStateOf(false) }
-        LaunchedEffect(personalReady) {
+        var started by rememberSaveable { mutableStateOf(false) }
+        val hasRows = personalRows.any { it.focusable } || catalog.rows.isNotEmpty() || statusRow?.focusable == true
+        LaunchedEffect(personalReady, hasRows, returning) {
             if (started) return@LaunchedEffect
-            if (restore.pending != null) {
+            if (returning != null) {
                 started = true
                 return@LaunchedEffect
             }
+            if (!hasRows) return@LaunchedEffect
             if (!personalReady) delay(PERSONAL_WAIT_MS)
+            if (listState.firstVisibleItemIndex != 0) {
+                started = true
+                return@LaunchedEffect
+            }
             started = true
             listState.scrollToItem(0)
             runCatching { listFocus.requestFocus() }
@@ -147,7 +152,9 @@ private fun HomeContent(
     }
     // Înapoi de pe un rând de jos urcă la primul rând; abia de acolo întreabă dacă ieși din aplicație.
     val scrolled by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 } }
-    BackHandler(enabled = spec.isTv && scrolled) {
+    val clearFocus = clearReturningFocus()
+    BackHandler(enabled = scrolled) {
+        clearFocus()
         scope.launch {
             listState.scrollToItem(0)
             runCatching { listFocus.requestFocus() }
@@ -161,17 +168,31 @@ private fun HomeContent(
         BoxWithConstraints(Modifier.fillMaxSize()) {
             // Poziții fixe: fiecare rând are aceeași înălțime (titlu + cel mai înalt card + spațiu), deci titlul
             // rândului cu focus și titlul rândului următor stau mereu în același loc, oricare ar fi cardurile.
-            val slot = ROW_TITLE_HEIGHT + maxOf(spec.posterHeight, spec.cardHeight) + ROW_CARDS_PADDING + ROW_GAP
-            val listHeight = slot + ROW_TITLE_HEIGHT
-            val heroHeight = (maxHeight - listHeight).coerceAtLeast(140.dp)
+            val slot = tvHomeRowHeight(spec)
+            val heroHeight = tvTitleHeroHeight(maxHeight, spec)
+            val listHeight = maxHeight - heroHeight
             val animate by UiPrefs.rowAnimation.collectAsStateWithLifecycle()
-            val rows = remember(slot, animate) { HomeRows(slot, listState, scope, animate) }
+            val rows = remember(slot, listState, scope) { HomeRows(slot, listState, scope) }
+            val allRows = personalRows + catalog.rows.map { row ->
+                HomeRow(row.id, row.items.isNotEmpty() || row.serviceFallback != null) {
+                    CatalogHomeRow(row, viewModel::openService)
+                }
+            } + listOfNotNull(statusRow)
+            val keys = allRows.map { row -> row.key.takeIf { row.focusable } }
+            val returningRow = keys.indexOf(returning?.homeRow).takeIf { returning?.homeRow != null }
+            LaunchedEffect(returning, returningRow) {
+                if (returningRow != null && returningRow >= 0 &&
+                    (listState.firstVisibleItemIndex != returningRow || listState.firstVisibleItemScrollOffset != 0)
+                ) {
+                    listState.scrollToItem(returningRow)
+                }
+            }
             Column(Modifier.fillMaxSize()) {
                 Hero(
                     catalog.hero,
                     viewModel,
+                    heroHeight,
                     Modifier.fillMaxWidth().height(heroHeight),
-                    compact = heroHeight < 200.dp,
                 )
                 // Se vede doar rândul cu focus și, dedesubt, titlul rândului următor (lista e exact atât de înaltă).
                 FixedRowsScroll {
@@ -181,14 +202,15 @@ private fun HomeContent(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(listHeight)
-                                .homeRowsList(rows)
+                                .onPreviewKeyEvent { rows.move(it, keys, animate) }
                                 .focusRequester(listFocus),
                             // Și ultimul rând poate urca sus.
                             contentPadding = PaddingValues(bottom = slot),
                         ) {
-                            personalRows()
-                            items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
-                            item(key = "attribution") { AttributionNote() }
+                            itemsIndexed(allRows, key = { _, row -> row.key }) { index, row ->
+                                if (row.focusable) HomeRowFocus(row.key, index, row.content) else row.content()
+                            }
+                            item(key = "attribution") { HomeAttribution(catalog) }
                         }
                     }
                 }
@@ -202,11 +224,58 @@ private fun HomeContent(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (catalog.hero.isNotEmpty()) {
-                item(key = "hero") { Hero(catalog.hero, viewModel, Modifier.fillMaxWidth().height(spec.heroHeight)) }
+                item(key = "hero") { Hero(catalog.hero, viewModel, spec.heroHeight, Modifier.fillMaxWidth().height(spec.heroHeight)) }
             }
-            personalRows()
-            items(catalog.rows, key = { it.id }) { row -> TitleRow(row.title, row.items) }
-            item(key = "attribution") { AttributionNote() }
+            items(personalRows, key = { it.key }) { it.content() }
+            items(catalog.rows, key = { it.id }) { row -> CatalogHomeRow(row, viewModel::openService) }
+            statusRow?.let { item(key = it.key) { it.content() } }
+            item(key = "attribution") { HomeAttribution(catalog) }
+        }
+    }
+}
+
+@Composable
+private fun HomeAttribution(catalog: HomeCatalog) {
+    AttributionNote(
+        includeWhatToWatch = catalog.rows.any { it.id == "service_voyo_RO" && it.items.isNotEmpty() },
+        includeHomeCharts = true,
+    )
+}
+
+@Composable
+private fun CatalogHomeRow(row: CatalogRow, openService: (String) -> Boolean) {
+    val fallback = row.serviceFallback
+    if (fallback == null) {
+        val badge = row.service?.let {
+            BadgeSpec.ConfirmedService(ServiceBadge(PosterBadge(it.packageName, it.label, it.id), it.market))
+        }
+        TitleRow(row.title, row.items, badge = badge)
+        return
+    }
+    val context = LocalContext.current
+    val padding = layoutSpec().screenPadding
+    Column(Modifier.peekRow()) {
+        SectionTitle(row.title)
+        Column(
+            Modifier.padding(horizontal = padding, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Button(onClick = {
+                if (!openService(fallback.packageName)) {
+                    android.widget.Toast.makeText(context, "Aplicația nu a putut fi deschisă.", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }) {
+                AppIconBadge(fallback.packageName, fallbackLabel = row.title)
+                Spacer(Modifier.width(8.dp))
+                Text("Deschide aplicația")
+            }
+            val status = when (fallback.reason) {
+                ServiceCatalogStatus.CHECKING -> "Se verifică disponibilitatea titlurilor…"
+                ServiceCatalogStatus.NO_PROVIDER -> "Sursa de catalog nu acoperă această bibliotecă."
+                ServiceCatalogStatus.NO_TITLES -> "Nu sunt listate momentan titluri pentru această bibliotecă."
+                ServiceCatalogStatus.UNAVAILABLE -> "Catalogul nu s-a putut încărca acum."
+            }
+            Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -219,8 +288,8 @@ private fun HomeContent(
 private fun Hero(
     items: List<CatalogItem>,
     viewModel: HomeViewModel,
+    heroHeight: Dp,
     modifier: Modifier = Modifier,
-    compact: Boolean = false,
 ) {
     val spec = layoutSpec()
     val actions = LocalCatalogActions.current
@@ -239,7 +308,7 @@ private fun Hero(
     LaunchedEffect(promoted?.id) {
         if (backdrop != null && backdrop.focused == null) backdrop.url = promoted?.backdropUrl
     }
-    // Sigla: pe loc dacă e deja știută (pregătită din timp), fără să apară întâi numele; altfel se cere după
+    // Sigla: pe loc dacă e deja în cache; altfel se cere după
     // un focus scurt stabil (nu la fiecare poster peste care treci). Numele apare doar dacă titlul n-are siglă.
     val cached = remember(shown.kind, shown.id) { viewModel.cachedLogo(shown.kind, shown.id) }
     var fetched by remember(shown.kind, shown.id) { mutableStateOf<String?>(null) }
@@ -254,23 +323,12 @@ private fun Hero(
     // Pe telefon, atingerea hero-ului deschide fișa (pe TV hero-ul doar arată titlul cu focus).
     Box(if (spec.isTv) modifier else modifier.clickable { actions.openTitle(shown.kind, shown.id) }) {
         if (backdrop == null) TitleBackdrop(shown.backdropUrl, Modifier.matchParentSize())
-        Column(
-            Modifier
-                .align(Alignment.TopStart)
-                .fillMaxHeight()
-                .padding(start = spec.screenPadding, end = spec.screenPadding, top = 4.dp, bottom = 8.dp)
-                .widthIn(max = 620.dp)
-                .fillMaxWidth(if (spec.isCompact) 1f else 0.6f),
-            // Lipit de jos: descrierea ține mereu 3 rânduri, deci sigla stă la aceeași înălțime la orice titlu.
-            verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Bottom),
-        ) {
-            TitleLogo(
-                shown.title,
-                logo?.ifEmpty { null },
-                pending = logo == null,
-                height = if (compact) 48.dp else 60.dp,
-                textStyle = if (compact) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineSmall,
-            )
+        TitleHero(
+            title = shown.title,
+            logoUrl = logo?.ifEmpty { null },
+            pendingLogo = logo == null,
+            heroHeight = heroHeight,
+        ) { lines ->
             // Ca pe poster: notele, sigla aplicației / serviciului / cinema, apoi data sau episodul.
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 PosterRatings(shown.kind, shown.id, shown.rating)
@@ -288,8 +346,8 @@ private fun Hero(
                     shown.overview,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onBackground,
-                    minLines = if (spec.isTv) 3 else 1,
-                    maxLines = 3,
+                    minLines = if (spec.isTv) lines else 1,
+                    maxLines = lines,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -312,15 +370,6 @@ private fun Hero(
         }
     }
 }
-
-/** Cât ocupă titlul unui rând (SectionTitle): atât se vede din rândul de sub cel cu focus. */
-private val ROW_TITLE_HEIGHT = 40.dp
-
-/** Spațiul de deasupra și de dedesubt al cardurilor dintr-un rând (LazyRow, 10dp + 10dp). */
-private val ROW_CARDS_PADDING = 20.dp
-
-/** Spațiul în plus până la titlul rândului următor. */
-private val ROW_GAP = 22.dp
 
 /** Cât așteptăm rândurile personale înainte să punem focusul oricum (prima pornire, fără nimic salvat). */
 private const val PERSONAL_WAIT_MS = 4_000L

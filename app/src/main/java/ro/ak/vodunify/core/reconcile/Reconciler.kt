@@ -1,5 +1,6 @@
 package ro.ak.vodunify.core.reconcile
 
+import ro.ak.vodunify.core.connector.seasonTrackingKey
 import ro.ak.vodunify.core.db.OwnWriteAction
 import ro.ak.vodunify.core.db.OwnWriteEntity
 import ro.ak.vodunify.core.db.ResumePointEntity
@@ -8,6 +9,7 @@ import ro.ak.vodunify.core.db.UpNextEntity
 import ro.ak.vodunify.core.db.WatchEventEntity
 import ro.ak.vodunify.core.db.WatchedTitleEntity
 import ro.ak.vodunify.core.db.WatchlistEntity
+import ro.ak.vodunify.core.publish.LOCAL_SOURCE
 import java.util.concurrent.TimeUnit
 
 /** O dovadă dintr-o sursă pentru un eveniment logic. */
@@ -64,7 +66,11 @@ data class LibraryEntry(
     val resume: ReconciledResume?,
     /** „Următorul episod” câștigător, dacă există. */
     val upNext: UpNextEntity?,
-)
+) {
+    /** Istoricul și lista de vizionare sunt dovezi; un titlu are o singură stare curentă. */
+    val currentStatus: LibraryStatus?
+        get() = LibraryStatus.entries.firstOrNull { it in statuses }
+}
 
 /**
  * Reguli de reconciliere între Trakt, SIMKL și WeTrakr (pure, fără Android):
@@ -97,6 +103,8 @@ object Reconciler {
     class OwnWrites(writes: List<OwnWriteEntity>) {
         private val byKey = writes.groupBy { Triple(it.source, it.itemKey, it.action) }
         private val latestByItemAction = writes.groupBy { it.itemKey to it.action }.mapValues { (_, v) -> v.maxOf { it.at } }
+        private val localMarks = writes.filter { it.source == LOCAL_SOURCE }
+            .associate { (it.itemKey to it.action) to it.at }
 
         fun isEcho(source: String, itemKey: String, action: OwnWriteAction, at: Long, progress: Float? = null): Boolean =
             byKey[Triple(source, itemKey, action.name)].orEmpty().any { w ->
@@ -106,6 +114,12 @@ object Reconciler {
 
         /** Ultima dată când aplicația a făcut [action] pe element (în orice sursă). */
         fun latest(itemKey: String, action: OwnWriteAction): Long? = latestByItemAction[itemKey to action.name]
+
+        fun manualCutoff(itemKey: String, titleKey: String, season: Int?, unwatchedOnly: Boolean = false): Long =
+            listOfNotNull(itemKey, titleKey, season?.let { seasonTrackingKey(titleKey, it) }).maxOf { key ->
+                val unwatched = localMarks[key to OwnWriteAction.UNWATCHED.name] ?: Long.MIN_VALUE
+                if (unwatchedOnly) unwatched else maxOf(unwatched, localMarks[key to OwnWriteAction.WATCHED.name] ?: Long.MIN_VALUE)
+            }
     }
 
     // ---------- Istoric ----------
@@ -168,7 +182,9 @@ object Reconciler {
             val finishedAt = lastWatched[itemKey]
             when {
                 finishedAt != null && finishedAt >= winner.updatedAt -> null
-                winner.progress != null && winner.progress >= FINISHED_PROGRESS -> null
+                writes.manualCutoff(itemKey, keys.titleKey(winner.ref), winner.ref.season) >= winner.updatedAt -> null
+                // AK Scrobbler are un prag configurabil și scrie explicit terminarea în istoric.
+                winner.appPackage == null && winner.progress != null && winner.progress >= FINISHED_PROGRESS -> null
                 else -> ReconciledResume(itemKey, keys.titleKey(winner.ref), winner, evidences.sortedByDescending { it.at })
             }
         }.sortedByDescending { it.updatedAt }
@@ -278,9 +294,13 @@ object Reconciler {
             val unwatched = writes.latest(key, OwnWriteAction.UNWATCHED)
             val valid = group.filter { unwatched == null || it.lastWatchedAt > unwatched }
             if (valid.isEmpty()) return@forEach
-            val newest = valid.maxBy { it.lastWatchedAt }
             entry(key).apply {
-                add(LibraryStatus.WATCHED, valid.map { it.source }.toSet(), newest.ref, newest.lastWatchedAt)
+                valid.groupBy {
+                    if (it.ref.type != MOVIE && it.source == LOCAL_SOURCE) LibraryStatus.IN_PROGRESS else LibraryStatus.WATCHED
+                }.forEach { (status, group) ->
+                    val newest = group.maxBy { it.lastWatchedAt }
+                    add(status, group.map { it.source }.toSet(), newest.ref, newest.lastWatchedAt)
+                }
                 refs += valid.map { it.ref }
             }
         }

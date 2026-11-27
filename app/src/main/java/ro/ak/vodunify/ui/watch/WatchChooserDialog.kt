@@ -42,7 +42,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import ro.ak.vodunify.core.playback.LinkPrecision
 import ro.ak.vodunify.core.playback.ResumeInfo
 import ro.ak.vodunify.core.playback.ResumeState
 import ro.ak.vodunify.core.playback.ServiceOption
@@ -110,11 +109,14 @@ private fun ChooserList(s: ChooserState, options: WatchOptions, vm: WatchChooser
     val entries = buildList {
         options.services.forEachIndexed { i, opt ->
             val app = opt.app
+            val launch = app?.let { s.launches[it] }
             val detail = when {
-                app != null && opt.usesPreferredPlayer -> "Se deschide în ${app.displayName}"
-                else -> app?.let { s.launches[it]?.precision?.label } ?: LinkPrecision.APP.label
+                launch == null -> "Nu poate fi pornit"
+                opt.usesPreferredPlayer -> "Se deschide în ${launch.installed.label}"
+                else -> launch.precision.label
             }
-            add(ChoiceOption(opt.label + if (isLast(app)) lastMark else "", detail, heading = if (i == 0) "Serviciile tale" else null) to ChooserAction.Service(opt))
+            add(ChoiceOption(opt.label + if (isLast(app)) lastMark else "", detail, enabled = launch != null,
+                heading = if (i == 0) "Serviciile tale" else null) to ChooserAction.Service(opt))
         }
         options.elsewhere.forEachIndexed { i, opt ->
             add(
@@ -142,8 +144,9 @@ private fun ChooserList(s: ChooserState, options: WatchOptions, vm: WatchChooser
     }
     val title = if (s.request.type == PlaybackRequest.Type.EPISODE) "${s.request.title} · ${s.request.label}" else s.request.label
     val footer = buildList {
-        if (options.services.isEmpty() && options.elsewhere.isEmpty()) add("Nu e pe niciun serviciu de streaming din bibliotecile tale (RO / US).")
-        if (options.players.isEmpty()) add("Niciun player instalat (Stremio, Nuvio, DebridStream, AK VoD Hub…).")
+        if (s.appsUnavailable) add("Aplicațiile instalate nu au putut fi verificate. Închide lista și încearcă din nou.")
+        if (!s.appsUnavailable && options.services.isEmpty() && options.elsewhere.isEmpty()) add("Nu e pe niciun serviciu de streaming din bibliotecile tale (RO / US).")
+        if (!s.appsUnavailable && options.players.isEmpty()) add("Niciun player instalat (Stremio, Nuvio, DebridStream, AK VoD Hub…).")
         s.resume.positionMs?.takeIf { s.resume.hasPosition }?.let { pos ->
             add("Reiei de la ${formatPosition(pos)}" + (s.resume.source?.let { " ($it)" } ?: ""))
         }

@@ -23,7 +23,7 @@ data class CompanionsUi(
     val needsPermission: Boolean = false,
 )
 
-/** Instalează / actualizează AK Scrobbler și AK Import RO/US din ultimul release. */
+/** Instalează / actualizează AK Scrobbler din ultimul release. */
 @HiltViewModel
 class CompanionsViewModel @Inject constructor(
     private val updates: UpdateRepository,
@@ -65,7 +65,7 @@ class CompanionsViewModel @Inject constructor(
         viewModelScope.launch {
             runCatching {
                 val apk = updates.downloadCompanion(item) { p -> _state.value = _state.value.copy(progress = p) }
-                installer.install(apk)
+                installer.install(apk, expectedPackage = item.companion.packageName)
             }.onSuccess {
                 _state.value = _state.value.copy(downloading = null, message = "Confirmă instalarea ${item.companion.label} în fereastra sistemului.")
             }.onFailure {

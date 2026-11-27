@@ -1,5 +1,6 @@
 package ro.ak.vodunify.ui.components
 
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -194,7 +195,13 @@ private fun BrandRating(rating: Double, modifier: Modifier, logo: @Composable ()
  * pe acest card la întoarcerea din fișă.
  */
 @Composable
-fun PosterCard(item: CatalogItem, modifier: Modifier = Modifier, rowKey: String = "") {
+fun PosterCard(
+    item: CatalogItem,
+    modifier: Modifier = Modifier,
+    rowKey: String = "",
+    fillCell: Boolean = false,
+    badge: BadgeSpec? = null,
+) {
     val spec = layoutSpec()
     val actions = LocalCatalogActions.current
     val backdrop = LocalBackdrop.current
@@ -203,15 +210,17 @@ fun PosterCard(item: CatalogItem, modifier: Modifier = Modifier, rowKey: String 
         onClick = { actions.openTitle(item.kind, item.id) },
         // wrapContentSize: în grile (Caută, Lista mea, actori) celula e mai lată decât posterul; fără el
         // posterul s-ar lăți și s-ar tăia sus-jos. Așa are peste tot același format 2:3.
-        modifier = modifier.wrapContentSize().size(spec.posterWidth, spec.posterHeight),
+        modifier = if (fillCell) modifier.fillMaxWidth().aspectRatio(2f / 3) else
+            modifier.wrapContentSize().size(spec.posterWidth, spec.posterHeight),
         restoreKey = "$rowKey|${item.mediaKey}",
-        onFocused = { backdrop?.focus(FocusedTitle.of(item)) },
+        onFocused = { backdrop?.focus(FocusedTitle.of(item).copy(badge = badge)) },
         onLongClick = longPress ?: { actions.titleMenu(item) },
     ) {
         Box(Modifier.fillMaxSize().semantics { contentDescription = item.title }) {
             NetworkImage(item.posterUrl, item.title, Modifier.fillMaxSize(), fallbackText = item.title)
             PosterRatings(item.kind, item.id, item.rating, Modifier.align(Alignment.TopStart).padding(4.dp))
-            PlatformBadge(item.kind, item.id, Modifier.align(Alignment.BottomStart).padding(4.dp))
+            PosterViewingStatus(item.kind, item.id, Modifier.align(Alignment.TopEnd).padding(4.dp), episodeCount = item.episodeCount)
+            TitleBadge(badge, item.kind, item.id, Modifier.align(Alignment.BottomStart).padding(4.dp))
         }
     }
 }
@@ -227,17 +236,19 @@ val LocalPosterLongPress = staticCompositionLocalOf<(() -> Unit)?> { null }
 fun rowSpacing() = if (layoutSpec().isTv) 18.dp else 12.dp
 
 @Composable
-fun TitleRow(title: String, items: List<CatalogItem>, modifier: Modifier = Modifier) {
+fun TitleRow(title: String, items: List<CatalogItem>, modifier: Modifier = Modifier, badge: BadgeSpec? = null) {
     if (items.isEmpty()) return
     val spec = layoutSpec()
     Column(modifier.peekRow()) {
         SectionTitle(title)
         DefaultScroll {
+            val state = rememberRestoringRowState(title, items) { it.mediaKey }
             LazyRow(
+                state = state,
                 contentPadding = PaddingValues(horizontal = spec.screenPadding, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(rowSpacing()),
             ) {
-                items(items, key = { it.mediaKey }) { PosterCard(it, rowKey = title) }
+                items(items, key = { it.mediaKey }) { PosterCard(it, rowKey = title, badge = badge) }
             }
         }
     }
@@ -367,11 +378,18 @@ fun PlaceholderRow(title: String, message: String) {
 
 /** Atribuirea cerută de TMDb și JustWatch. */
 @Composable
-fun AttributionNote(modifier: Modifier = Modifier, includeJustWatch: Boolean = true) {
+fun AttributionNote(
+    modifier: Modifier = Modifier,
+    includeJustWatch: Boolean = true,
+    includeWhatToWatch: Boolean = false,
+    includeHomeCharts: Boolean = false,
+) {
     Text(
         buildString {
             append("Date despre titluri: TMDb. Acest produs folosește API-ul TMDb, dar nu este aprobat sau certificat de TMDb.")
             if (includeJustWatch) append(" Disponibilitatea pe servicii este furnizată de JustWatch.")
+            if (includeWhatToWatch) append(" Catalog VOYO România: WhatToWatch.ro.")
+            if (includeHomeCharts) append(" Topuri pe țări: Netflix Tudum.")
         },
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,

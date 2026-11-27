@@ -18,7 +18,7 @@ data class MediaInfo(
         fun randomKey(): String = java.lang.Long.toHexString(random.nextLong() and 0xffffffffffL)
 
         val IDENTITY_KEYS = listOf(
-            "title", "display_title", "display_subtitle", "artist", "album", "album_artist",
+            "title", "display_title", "display_subtitle", "screen_title", "artist", "album", "album_artist",
             // Codurile titlului (Prime Video GTI, Netflix id): se schimbă la alt film / episod.
             "media_id", "netflix_id", "prime_gti",
         )
@@ -72,6 +72,15 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
 
     /** Aplicația ne-a dat măcar o dată poziția (altfel o luăm de pe ecran sau o numărăm noi). */
     private var positionFromSession = false
+    val hasSessionPosition: Boolean get() = positionFromSession
+
+    /** Pauză publicitară detectată (reclamă în mijlocul filmului/episodului): nu suprascriem progresul real. */
+    private var inAdBreak = false
+    private var savedMovieMedia: MediaInfo? = null
+    private var savedPlayId: String? = null
+
+    /** Playerul tocmai a golit metadatele la oprire: ignorăm evenimentele `STOPPED` fără titlu imediat după. */
+    private var clearedAtStop = false
 
     /** Redare urmărită doar de pe ecran (fără sesiune media): durata de pe ecran se poate corecta. */
     var screenOnly = false
@@ -115,26 +124,70 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
      * îl înlocuim fără să închidem vizionarea.
      */
     fun onMetadata(info: MediaInfo?, now: Long, correction: Boolean = false): List<Outgoing> {
+        if (inAdBreak) {
+            if (info == null || isAdContent(info, savedMovieMedia)) return emptyList()
+            val saved = savedMovieMedia
+            val cleanInfo = info.withoutAdFlags()
+            if (saved != null && (saved.identity == cleanInfo.identity || (!cleanInfo.hasTitle && saved.hasTitle))) {
+                media = saved.copy(durationMs = cleanInfo.durationMs ?: saved.durationMs)
+                savedPlayId?.let { playId = it }
+                inAdBreak = false
+                savedMovieMedia = null
+                savedPlayId = null
+                if (state == PlayState.PLAYING && playingSince == null) playingSince = now
+                return emptyList()
+            }
+            // A început alt film/episod după reclamă: nu mai emitem STOP pe poziția reclamei (PAUSE pre-reclamă a salvat deja).
+            inAdBreak = false
+            savedMovieMedia = null
+            savedPlayId = null
+            media = cleanInfo
+            basePositionMs = null
+            positionFromSession = false
+            playedMs = 0L
+            playingSince = if (state == PlayState.PLAYING) now else null
+            playId = "$sessionKey-${++playCounter}"
+            lastSentAt = Long.MIN_VALUE
+            lastSentPositionMs = null
+            lastSentReason = null
+            return emptyList()
+        }
         val previous = media
+        if (isAdContent(info, previous)) {
+            if (previous != null && previous.hasTitle && state != PlayState.STOPPED) {
+                return onAdDetected(now)
+            }
+            // Reclamă pre-roll (înainte să pornească filmul, la 0:00): nu pornim cronometrul reclamei.
+            savedMovieMedia = info?.withoutAdFlags()?.takeIf { it.hasTitle }
+            savedPlayId = playId
+            inAdBreak = true
+            playingSince = null
+            return emptyList()
+        }
         if (previous != null && info != null && previous.identity == info.identity) {
             // Același titlu: doar actualizăm durata / câmpurile noi.
             media = info.copy(durationMs = info.durationMs ?: previous.durationMs)
             return emptyList()
         }
         if (previous != null && info != null && ((!previous.hasTitle && info.hasTitle) || correction)) {
-            // Am aflat (sau corectat) titlul pentru redarea în curs: păstrăm poziția.
+            // Am aflat (sau corectat) titlul pentru redarea în curs: păstrăm poziția și, dacă e pe pauză, retrimitem imediat.
             media = info.copy(durationMs = info.durationMs ?: previous.durationMs)
+            if (state == PlayState.PAUSED && info.hasTitle && (!previous.hasTitle || correction)) {
+                return listOfNotNull(emit(SendReason.PAUSE, bestPosition(now), now, media, forceTitleUpdate = true))
+            }
             return emptyList()
         }
         val out = mutableListOf<Outgoing>()
-        if (previous != null && previous.hasTitle && state != PlayState.STOPPED) {
+        val hadRealTitle = previous != null && previous.hasTitle && state != PlayState.STOPPED
+        if (hadRealTitle) {
             emit(SendReason.STOP, bestPosition(now), now, previous)?.let(out::add)
         }
+        clearedAtStop = hadRealTitle && (info == null || !info.hasTitle)
         media = info
         basePositionMs = null
         positionFromSession = false
         playedMs = 0L
-        playingSince = if (state == PlayState.PLAYING) now else null
+        playingSince = if (state == PlayState.PLAYING && !clearedAtStop) now else null
         playId = "$sessionKey-${++playCounter}"
         lastSentAt = Long.MIN_VALUE
         lastSentPositionMs = null
@@ -142,7 +195,63 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
         return out
     }
 
+    /** Reclamă detectată (pe ecran sau în metadate): salvăm poziția reală a filmului și ignorăm restul reclamei. */
+    fun onAdDetected(now: Long): List<Outgoing> {
+        if (inAdBreak || state == PlayState.STOPPED) return emptyList()
+        inAdBreak = true
+        if (state == PlayState.PLAYING) {
+            playedMs = playedTime(now)
+            playingSince = null
+        }
+        val currentMedia = media
+        if (currentMedia == null || !currentMedia.hasTitle) return emptyList()
+        val pos = bestPosition(now)
+        val out = listOfNotNull(emit(SendReason.PAUSE, pos, now, currentMedia))
+        savedMovieMedia = currentMedia
+        savedPlayId = playId
+        return out
+    }
+
+    private fun isAdContent(info: MediaInfo?, reference: MediaInfo?): Boolean {
+        if (info == null) return false
+        val adFlag = info.fields["advertisement"]
+        val isAdExtra = info.fields["is_ad"]
+        if (adFlag == "1" || adFlag.equals("true", ignoreCase = true) ||
+            isAdExtra == "1" || isAdExtra.equals("true", ignoreCase = true)
+        ) return true
+        val titleText = listOfNotNull(info.fields["title"], info.fields["display_title"], info.fields["artist"]).joinToString(" ")
+        if (titleText.isNotBlank() && AD_TITLE_RE.containsMatchIn(titleText)) return true
+        val refDuration = reference?.durationMs ?: 0L
+        val adDuration = info.durationMs ?: 0L
+        return refDuration >= 20 * 60_000L && adDuration in 5_000L..180_000L && info.identity != reference?.identity
+    }
+
+    private fun MediaInfo.withoutAdFlags(): MediaInfo =
+        copy(fields = fields.filterKeys { it != "advertisement" && it != "is_ad" })
+
     fun onPlaybackState(newState: PlayState, positionMs: Long?, updateTime: Long, newSpeed: Float, now: Long): List<Outgoing> {
+        if (inAdBreak) {
+            state = newState
+            speed = if (newSpeed > 0f) newSpeed else 1f
+            if (newState == PlayState.STOPPED) {
+                inAdBreak = false
+                savedMovieMedia = null
+                savedPlayId = null
+            }
+            return emptyList()
+        }
+        if (clearedAtStop) {
+            if (newState == PlayState.PLAYING && media?.hasTitle == true) {
+                clearedAtStop = false
+            } else if (newState == PlayState.STOPPED || media?.hasTitle != true) {
+                state = newState
+                playingSince = null
+                if (newState == PlayState.STOPPED) clearedAtStop = false
+                return emptyList()
+            } else {
+                clearedAtStop = false
+            }
+        }
         val before = state
         val positionBefore = bestPosition(now)
         val realBefore = position(now)
@@ -167,7 +276,7 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
         return when {
             newState == PlayState.PAUSED && before != PlayState.PAUSED ->
                 listOfNotNull(emit(SendReason.PAUSE, bestPosition(now), now))
-            newState == PlayState.STOPPED && before != PlayState.STOPPED -> {
+            newState == PlayState.STOPPED && (before == PlayState.PLAYING || before == PlayState.PAUSED) -> {
                 // Unele aplicații resetează poziția la 0 la oprire: păstrăm ultima poziție reală.
                 val reported = bestPosition(now)
                 val p = reported?.takeIf { it > 0 } ?: positionBefore
@@ -179,6 +288,7 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
     }
 
     fun onTick(now: Long): List<Outgoing> {
+        if (inAdBreak || clearedAtStop) return emptyList()
         if (state != PlayState.PLAYING) return emptyList()
         if (lastSentAt != Long.MIN_VALUE && now - lastSentAt < TICK_INTERVAL_MS) return emptyList()
         if (lastSentAt == Long.MIN_VALUE) {
@@ -194,6 +304,14 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
 
     /** Sesiunea a dispărut (aplicația s-a închis). */
     fun onGone(now: Long): List<Outgoing> {
+        if (inAdBreak) {
+            inAdBreak = false
+            savedMovieMedia = null
+            savedPlayId = null
+            state = PlayState.STOPPED
+            playingSince = null
+            return emptyList()
+        }
         if (state == PlayState.STOPPED) return emptyList()
         val out = listOfNotNull(emit(SendReason.STOP, bestPosition(now), now))
         if (state == PlayState.PLAYING) {
@@ -204,13 +322,19 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
         return out
     }
 
-    private fun emit(reason: SendReason, positionMs: Long?, now: Long, info: MediaInfo? = media): Outgoing? {
+    private fun emit(
+        reason: SendReason,
+        positionMs: Long?,
+        now: Long,
+        info: MediaInfo? = media,
+        forceTitleUpdate: Boolean = false,
+    ): Outgoing? {
         // Fără titlu trimitem oricum: AK VOD Unify îl păstrează ca „neidentificat” (aplicație + durată + minut).
         val m = info ?: MediaInfo(emptyMap(), null)
         val pos = positionMs ?: return skip(reason, "poziție necunoscută (aplicația nu o trimite)")
         if (pos < MIN_POSITION_MS) return skip(reason, "poziție ${pos / 1000}s, sub ${MIN_POSITION_MS / 1000}s")
         val last = lastSentPositionMs
-        if (last != null && lastSentReason != SendReason.TICK && reason != SendReason.TICK &&
+        if (!forceTitleUpdate && last != null && lastSentReason != SendReason.TICK && reason != SendReason.TICK &&
             kotlin.math.abs(last - pos) < SAME_POSITION_MS
         ) {
             return skip(reason, "același minut ca trimiterea precedentă")
@@ -226,8 +350,9 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
      * aplicația nu ne-o dă prin sesiunea media (aceea e mai precisă).
      */
     fun onScreenTimes(positionMs: Long?, durationMs: Long?, now: Long, fromScreen: Boolean = false) {
+        if (inAdBreak) return
         // Durata de pe ecran o actualizăm la fiecare citire (prima poate fi greșită); cea din sesiune rămâne.
-        if (durationMs != null && durationMs > 0 && (media?.durationMs == null || (fromScreen && screenOnly))) {
+        if (durationMs != null && durationMs > 0 && (media?.durationMs == null || fromScreen)) {
             media = (media ?: MediaInfo(emptyMap(), null)).copy(durationMs = durationMs)
         }
         if (positionMs != null && positionMs >= 0 && !positionFromSession) {
@@ -255,5 +380,9 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
 
         /** Două pauze la mai puțin de 3 s distanță sunt aceeași poziție. */
         const val SAME_POSITION_MS = 3_000L
+
+        private val AD_TITLE_RE = Regex(
+            """(?i)\b(reclam[ăa]|commercial|advertisement|sponsored|ad\s*break|publicitate)\b|^(ads?|pub)(\s+\d+)?$""",
+        )
     }
 }

@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import ro.ak.vodunify.core.playback.InstalledApp
 import ro.ak.vodunify.core.playback.PlaybackSettings
 import ro.ak.vodunify.core.playback.StreamingService
+import ro.ak.vodunify.core.catalog.ServiceLibrary
 import ro.ak.vodunify.core.playback.TargetApp
 import ro.ak.vodunify.core.prefs.Market
 import ro.ak.vodunify.core.scrobble.AppProof
@@ -53,7 +54,8 @@ fun AppsSection(viewModel: PlaybackSettingsViewModel = hiltViewModel()) {
     val installed by viewModel.installed.collectAsStateWithLifecycle()
     val proofs by viewModel.proofs.collectAsStateWithLifecycle()
     // Recitește numele și listele după fiecare aplicație adăugată / eliminată.
-    viewModel.registryVersion.collectAsStateWithLifecycle().value
+    val registryVersion by viewModel.registryVersion.collectAsStateWithLifecycle()
+    val groupedProofs = remember(proofs, installed, registryVersion) { viewModel.groupProofs(proofs.values, installed) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshInstalled() }
 
     ManageAppsCard(viewModel, installed)
@@ -71,9 +73,10 @@ fun AppsSection(viewModel: PlaybackSettingsViewModel = hiltViewModel()) {
             compareBy<TargetApp> { it !in installed }.thenBy { it.role.ordinal },
         )
         sorted.forEach { app ->
-            AppMethodRow(app, installed[app], viewModel.proofFor(app, proofs, installed), onRemove = { viewModel.remove(app) })
+            val proof = groupedProofs[app]?.maxByOrNull { it.at }
+            AppMethodRow(app, installed[app], proof, onRemove = { viewModel.remove(app) })
         }
-        val unknown = viewModel.unknownProofs(proofs, installed)
+        val unknown = groupedProofs[null].orEmpty().sortedByDescending { it.at }
         if (unknown.isNotEmpty()) {
             Text("Alte aplicații prinse de AK Scrobbler", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 8.dp))
             unknown.forEach { p ->
@@ -81,7 +84,7 @@ fun AppsSection(viewModel: PlaybackSettingsViewModel = hiltViewModel()) {
                 ProofLine(p)
             }
         }
-        OutlinedButton(onClick = viewModel::refreshInstalled) { Text("Detectează din nou") }
+        OutlinedButton(onClick = viewModel::refreshInstalled) { Text("Actualizează lista aplicațiilor instalate") }
     }
 
     SettingsCard(
@@ -89,13 +92,10 @@ fun AppsSection(viewModel: PlaybackSettingsViewModel = hiltViewModel()) {
         collapsible = true,
         summary = StreamingService.active
             .filter { s -> TargetApp.byId(s.appId)?.let { it in installed } == true }
-            .joinToString(", ") { "${it.displayName} (${settings.marketOf(it).code})" }
+            .joinToString(", ") { "${it.displayName} (${ServiceLibrary(it, settings.marketOf(it)).region})" }
             .ifEmpty { "Niciun serviciu instalat" },
     ) {
-        SettingHint(
-            "Fiecare titlu se caută doar în biblioteca serviciului: dacă treci Disney+ pe RO, verificăm catalogul " +
-                "Disney+ din România (date TMDb / JustWatch). Serviciile tale sunt cele instalate.",
-        )
+        SettingHint("Pe Acasă apar serviciile instalate. Folosim biblioteca aleasă pentru fiecare serviciu, iar pentru ARTE folosim catalogul JustWatch Franța.")
         val (mine, others) = StreamingService.active.filter { s -> TargetApp.byId(s.appId)?.isActive == true }.partition { s -> TargetApp.byId(s.appId)?.let { it in installed } == true }
         Text("Serviciile tale (instalate)", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
         if (mine.isEmpty()) SettingHint("Niciun serviciu instalat.")
@@ -136,8 +136,11 @@ private fun AppMethodRow(app: TargetApp, installed: InstalledApp?, proof: AppPro
             fontWeight = FontWeight.Medium,
         )
         InstallLine(installed)
-        Text("Metoda: ${app.method}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.readable())
-        if (proof != null) ProofLine(proof)
+        if (proof != null) {
+            ProofLine(proof)
+        } else {
+            Text("Metoda: ${app.method}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.readable())
+        }
     }
     OutlinedButton(onClick = onRemove) { Text("Elimină") }
     }
@@ -181,6 +184,12 @@ private fun ServiceRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.readable(),
             )
+            val source = when (service) {
+                StreamingService.ARTE -> "Catalog Franța · JustWatch"
+                StreamingService.VOYO -> "Catalog România · WhatToWatch.ro"
+                else -> null
+            }
+            source?.let { SettingHint(it) }
         }
         Dropdown(
             label = null,
@@ -189,7 +198,14 @@ private fun ServiceRow(
             optionLabel = { if (it == Market.US) "US (VPN)" else "RO" },
             onSelect = { viewModel.setServiceMarket(service, it) },
             dialogTitle = "Biblioteca pentru ${service.displayName}",
-            optionDetail = { if (it == Market.US) "Cauți titlurile în catalogul american, prin VPN" else "Catalogul din România" },
+            optionDetail = { market ->
+                when {
+                    service == StreamingService.ARTE -> "Rândul de pe Acasă folosește catalogul din Franța"
+                    service == StreamingService.VOYO && market == Market.US -> "Sursa VOYO are catalog pentru România"
+                    market == Market.US -> "Catalogul din SUA"
+                    else -> "Catalogul din România"
+                }
+            },
         )
         if (app != null) {
             Spacer(Modifier.width(8.dp))
@@ -199,7 +215,7 @@ private fun ServiceRow(
 }
 
 /**
- * Adaugă o aplicație instalată (ca intrare cunoscută nerecunoscută, ex. Shova TV, ca player nou sau ca serviciu
+ * Adaugă o aplicație instalată (ca intrare cunoscută nerecunoscută, ca player nou sau ca serviciu
  * de streaming nou) și readuce ce ai eliminat.
  */
 @Composable
@@ -263,7 +279,7 @@ private fun ManageAppsCard(viewModel: PlaybackSettingsViewModel, installed: Map<
                 listOf(
                     ChoiceOption("Player nou (tip Stremio)", label, heading = "Nouă"),
                     ChoiceOption("Player IPTV nou", label),
-                    ChoiceOption("Serviciu de streaming nou", "Alegi apoi serviciul (pentru disponibilitate și siglă)"),
+                    ChoiceOption("Serviciu de streaming nou", "Poți alege și furnizorul TMDb"),
                 )
             ChoiceDialog(
                 title = "Ce este $label?",
@@ -295,15 +311,16 @@ private fun ManageAppsCard(viewModel: PlaybackSettingsViewModel, installed: Map<
             val (pkg, label) = picked ?: return
             ChoiceDialog(
                 title = "Ce serviciu este $label?",
-                options = if (providers.isEmpty()) {
-                    listOf(ChoiceOption("Se încarcă lista TMDb…", enabled = false))
-                } else {
-                    providers.map { ChoiceOption(it.second) }
-                },
+                options = listOf(ChoiceOption("Adaugă fără furnizor TMDb", "Apare pe Acasă cu buton de deschidere")) +
+                    providers.map { ChoiceOption(it.second) },
                 selected = null,
                 onPick = { i ->
-                    providers.getOrNull(i)?.let { (id, name) ->
-                        message = if (viewModel.addService(id, name, pkg)) "Am adăugat serviciul $name ($label)." else "Nu mai sunt locuri libere pentru servicii: elimină unul adăugat."
+                    val provider = providers.getOrNull(i - 1)
+                    val name = provider?.second ?: label
+                    message = if (viewModel.addService(provider?.first, name, pkg)) {
+                        "Am adăugat serviciul $name."
+                    } else {
+                        "Nu mai sunt locuri libere pentru servicii. Elimină unul adăugat."
                     }
                     step = 0
                 },

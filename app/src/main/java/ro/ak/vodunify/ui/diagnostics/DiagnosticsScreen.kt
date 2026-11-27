@@ -6,6 +6,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,16 +18,21 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import ro.ak.vodunify.ui.components.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import ro.ak.vodunify.ui.components.OutlinedButton
+import ro.ak.vodunify.ui.components.QrCode
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import ro.ak.vodunify.ui.components.TextInput
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -50,6 +57,7 @@ import java.time.format.DateTimeFormatter
  * „Diagnostic rute”: pentru fiecare film / episod început, poziția din fiecare sursă,
  * ce câștigă, starea publicării și ce primește fiecare player. Merge cu D-pad și touch.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DiagnosticsScreen(viewModel: DiagnosticsViewModel = hiltViewModel()) {
     val spec = layoutSpec()
@@ -58,8 +66,42 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel = hiltViewModel()) {
     val sync by viewModel.sync.collectAsStateWithLifecycle()
     val busy by viewModel.busy.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
+    val githubToken by viewModel.githubToken.collectAsStateWithLifecycle()
+    val uploadedGistUrl by viewModel.uploadedGistUrl.collectAsStateWithLifecycle()
+    var showTokenDialog by remember { mutableStateOf(false) }
     val firstFocus = remember { FocusRequester() }
     val profile = settings.active
+
+    if (showTokenDialog) {
+        var draft by remember(githubToken) { mutableStateOf(githubToken) }
+        AlertDialog(
+            onDismissRequest = { showTokenDialog = false },
+            title = { Text("Token GitHub (scope: gist)") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Introdu un Personal Access Token GitHub cu permisiunea „gist”. Jurnalele se încarcă privat (unlisted) ca să le pot citi direct.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextInput(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        label = "Token GitHub",
+                        placeholder = "ghp_... sau github_pat_...",
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.saveGithubToken(draft)
+                    showTokenDialog = false
+                }) { Text("Salvează") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showTokenDialog = false }) { Text("Renunță") }
+            },
+        )
+    }
 
     LaunchedEffect(Unit) { if (spec.isTv) runCatching { firstFocus.requestFocus() } }
 
@@ -82,15 +124,45 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel = hiltViewModel()) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     OutlinedButton(
                         onClick = viewModel::syncAndVerify,
                         enabled = busy == null && sync !is SyncStatus.Running,
                         modifier = Modifier.focusRequester(firstFocus),
                     ) { Text("Sincronizează și verifică") }
-                    if (busy == "sync" || sync is SyncStatus.Running) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    OutlinedButton(
+                        onClick = {
+                            if (githubToken.isBlank()) showTokenDialog = true else viewModel.uploadLogsToGitHub()
+                        },
+                        enabled = busy == null,
+                    ) { Text("Încarcă jurnal complet pe GitHub") }
+                    OutlinedButton(
+                        onClick = viewModel::saveLogsLocally,
+                        enabled = busy == null,
+                    ) { Text("Salvează local (.txt)") }
+                    OutlinedButton(
+                        onClick = { showTokenDialog = true },
+                        enabled = busy == null,
+                    ) { Text(if (githubToken.isBlank()) "Setează token GitHub" else "Schimbă token GitHub") }
+                    if (busy != null || sync is SyncStatus.Running) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                 }
                 message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary) }
+                uploadedGistUrl?.let { url ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(top = 6.dp),
+                    ) {
+                        QrCode(content = url, size = 120.dp)
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Link jurnal GitHub Gist:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                            Text(url, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
             }
         }
         val list = items

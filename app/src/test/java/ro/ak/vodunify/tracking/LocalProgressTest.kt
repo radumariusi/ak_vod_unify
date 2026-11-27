@@ -3,6 +3,10 @@ package ro.ak.vodunify.tracking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import ro.ak.vodunify.core.catalog.EpisodeAir
+import ro.ak.vodunify.core.catalog.SeasonSummary
+import ro.ak.vodunify.core.catalog.airedEpisodeCount
+import ro.ak.vodunify.core.catalog.totalEpisodeCount
 import ro.ak.vodunify.core.connector.EpisodeNumber
 import ro.ak.vodunify.core.connector.ExternalIds
 import ro.ak.vodunify.core.connector.MediaRef
@@ -10,8 +14,13 @@ import ro.ak.vodunify.core.connector.MediaType
 import ro.ak.vodunify.core.db.TrackedRef
 import ro.ak.vodunify.core.db.WatchEventEntity
 import ro.ak.vodunify.core.reconcile.LibraryStatus
+import ro.ak.vodunify.core.tmdb.TmdbEpisodeRef
+import ro.ak.vodunify.core.tmdb.TmdbSeasonSummary
+import ro.ak.vodunify.core.tmdb.TmdbTitleDetails
 import ro.ak.vodunify.core.tracking.LocalProgress
+import ro.ak.vodunify.core.tracking.SeriesMarker
 import ro.ak.vodunify.ui.library.LibraryLogic
+import java.time.LocalDate
 
 class LocalProgressTest {
     private val show = MediaRef(MediaType.SHOW, ExternalIds(tmdb = 1), "Serial")
@@ -46,5 +55,60 @@ class LocalProgressTest {
         val done = LibraryLogic.mergeSeries(emptyList(), summaries, mapOf("tv:tmdb:1" to 2))
         assertEquals(setOf(LibraryStatus.WATCHED), done.single().statuses)
         assertEquals("S1E2 · 2/10 episoade", LibraryLogic.seriesLabel(s, 10))
+    }
+
+    @Test
+    fun markingAllAiredEpisodesCompletesASeriesWithFutureEpisodes() {
+        val counts = SeriesMarker.airedCounts(
+            listOf(SeasonSummary(0, "Speciale", 3, null), SeasonSummary(1, "Sezon 1", 3, null),
+                SeasonSummary(2, "Sezon 2", 10, null), SeasonSummary(3, "Sezon 3", 6, null)),
+            EpisodeAir(2, 2, null, null),
+        )
+        val previous = listOf(ep(1, 1, 1), ep(1, 2, 2), ep(1, 3, 3), ep(2, 1, 4))
+        assertEquals(mapOf(1 to 3, 2 to 2), counts)
+        assertEquals(4, LocalProgress.show(show, previous, counts, "local").completed)
+        val marked = LocalProgress.show(show, previous + ep(2, 2, 5), counts, "local")
+        assertEquals(marked.aired, marked.completed)
+        assertEquals(0, LocalProgress.show(show, emptyList(), counts, "local").completed)
+    }
+
+    @Test
+    fun announcedSeasonDoesNotReopenSeriesUntilItsFirstEpisodeAirs() {
+        val premiere = LocalDate.of(2026, 12, 10)
+        val show = TmdbTitleDetails(
+            id = 1,
+            numberOfEpisodes = 12,
+            seasons = listOf(
+                TmdbSeasonSummary(1, episodeCount = 4, airDate = "2025-01-01"),
+                TmdbSeasonSummary(2, episodeCount = 8, airDate = premiere.toString()),
+            ),
+            lastEpisodeToAir = TmdbEpisodeRef(1, 4),
+        )
+        assertEquals(4, airedEpisodeCount(show, premiere.minusDays(1)))
+        assertEquals(5, airedEpisodeCount(show.copy(lastEpisodeToAir = TmdbEpisodeRef(2, 1)), premiere))
+        assertEquals(12, totalEpisodeCount(show))
+    }
+
+    @Test
+    fun partialSeasonRemainsInProgressEvenIfRemainingEpisodesUnaired() {
+        val showWithThreeSeasons = TmdbTitleDetails(
+            id = 2,
+            numberOfEpisodes = 24,
+            seasons = listOf(
+                TmdbSeasonSummary(1, episodeCount = 8, airDate = "2022-09-01"),
+                TmdbSeasonSummary(2, episodeCount = 8, airDate = "2024-08-29"),
+                TmdbSeasonSummary(3, episodeCount = 8, airDate = "2026-10-01"),
+            ),
+            lastEpisodeToAir = TmdbEpisodeRef(3, 6),
+        )
+        val total = totalEpisodeCount(showWithThreeSeasons)!!
+        assertEquals(24, total)
+        val watched22 = (1..8).map { ep(1, it, it.toLong()) } +
+            (1..8).map { ep(2, it, 10L + it) } +
+            (1..6).map { ep(3, it, 20L + it) }
+        val summary = LocalProgress.summaries(watched22).getValue("tv:tmdb:1")
+        val merged = LibraryLogic.mergeSeries(emptyList(), mapOf("tv:tmdb:1" to summary), mapOf("tv:tmdb:1" to total))
+        assertEquals(setOf(LibraryStatus.IN_PROGRESS), merged.single().statuses)
+        assertEquals("S3E6 · 22/24 episoade", LibraryLogic.seriesLabel(summary, total))
     }
 }

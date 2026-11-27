@@ -27,6 +27,14 @@ import ro.ak.vodunify.core.calendar.engine.EpisodeCalendarRepository
 import ro.ak.vodunify.core.calendar.engine.MovieCalendarRepository
 import ro.ak.vodunify.core.calendar.model.CalendarResult
 import ro.ak.vodunify.core.calendar.model.CalendarSettings
+import ro.ak.vodunify.core.calendar.model.DefaultMovieThresholds
+import ro.ak.vodunify.core.calendar.model.EpisodeEntry
+import ro.ak.vodunify.core.calendar.model.MovieEntry
+import ro.ak.vodunify.core.calendar.model.MovieReleaseKind
+import ro.ak.vodunify.core.calendar.model.NotificationSettings
+import ro.ak.vodunify.core.calendar.model.QualityThresholds
+import ro.ak.vodunify.core.db.TmdbCacheDao
+import java.security.MessageDigest
 import ro.ak.vodunify.core.calendar.model.MovieCalendarResult
 import ro.ak.vodunify.core.calendar.model.MovieRelease
 import ro.ak.vodunify.core.calendar.model.SavedShow
@@ -36,7 +44,6 @@ import ro.ak.vodunify.core.calendar.tmdb.TmdbCalendarApi
 import ro.ak.vodunify.core.calendar.tmdb.TmdbFetch
 import ro.ak.vodunify.core.calendar.today.TodayDigest
 import ro.ak.vodunify.core.connector.MediaType
-import ro.ak.vodunify.core.db.TrackingDao
 import ro.ak.vodunify.core.prefs.CatalogPreferences
 import ro.ak.vodunify.core.reconcile.LibraryStatus
 import ro.ak.vodunify.core.tmdb.TmdbClient
@@ -77,9 +84,9 @@ class CalendarRepository @Inject constructor(
     private val prefs: CalendarPreferences,
     private val catalogPrefs: CatalogPreferences,
     private val tracking: TrackingRepository,
-    private val trackingDao: TrackingDao,
     private val playback: PlaybackPreferences,
     private val resolver: TargetResolver,
+    cache: TmdbCacheDao,
     http: OkHttpClient,
 ) {
     private val omdb = OmdbClient(http)
@@ -145,10 +152,10 @@ class CalendarRepository @Inject constructor(
         s.copy(trackedShows = shows.distinctBy { it.id }, trackedMovies = movies.distinctBy { it.id })
     }.distinctUntilChanged()
 
-    val watched: Flow<WatchedSet> = trackingDao.latestWatches().map { list ->
+    val watched: Flow<WatchedSet> = tracking.reconciled.map { view ->
         val episodes = mutableSetOf<String>()
         val movies = mutableSetOf<Int>()
-        list.filter { ro.ak.vodunify.core.connector.ExternalTrackers.isVisible(it.source) }.forEach { w ->
+        view.latestWatches.forEach { w ->
             val id = w.ref.tmdbId?.toInt() ?: return@forEach
             if (w.ref.season != null && w.ref.episode != null) {
                 episodes += "$id-${w.ref.season}-${w.ref.episode}"
@@ -165,41 +172,71 @@ class CalendarRepository @Inject constructor(
 
     private suspend fun language(): String = catalogPrefs.settings.first().apiLanguage
 
-    // Ultimele rezultate, ținute în memorie cât trăiește aplicația: fila Calendar apare pe loc când revii pe ea
-    // (sau după ce Acasă a pregătit ziua de azi), apoi „Reîncarcă” le cere din nou.
-    private data class MemoKey(val from: LocalDate, val to: LocalDate, val settings: CalendarSettings, val language: String)
-    private class Memo<T>(val at: Long, val value: T)
-    private val episodeMemo = ConcurrentHashMap<MemoKey, Memo<CalendarResult>>()
-    private val movieMemo = ConcurrentHashMap<MemoKey, Memo<MovieCalendarResult>>()
-    private fun <T> Memo<T>?.fresh(): T? = this?.takeIf { System.currentTimeMillis() - it.at < MEMO_TTL_MS }?.value
+    private val episodeCache = CalendarReleaseCache(
+        cache, CalendarResult.serializer(),
+        slice = { result, date ->
+            result.copy(entries = result.entries.filter { it.releaseDate == date }, rejected = result.rejected.filter { it.releaseDate == date })
+        },
+        merge = ::mergeEpisodes,
+        complete = CalendarResult::complete,
+    )
+    private val movieCache = CalendarReleaseCache(
+        cache, MovieCalendarResult.serializer(),
+        slice = { result, date ->
+            result.copy(entries = result.entries.filter { it.releaseDate == date }, rejected = result.rejected.filter { it.releaseDate == date })
+        },
+        merge = ::mergeMovies,
+        complete = MovieCalendarResult::complete,
+    )
 
-    /** Rezultatul păstrat pentru perioada asta (fără nicio cerere), dacă e destul de nou. */
-    suspend fun cachedEpisodes(from: LocalDate, to: LocalDate, s: CalendarSettings): CalendarResult? =
-        episodeMemo[MemoKey(from, to, s, language())].fresh()
+    internal suspend fun storedEpisodes(from: LocalDate, to: LocalDate, s: CalendarSettings): CachedCalendar<CalendarResult> =
+        episodeCache.read(releaseKey(s, language(), movies = false), CalendarPeriod(from, to))
 
-    suspend fun cachedMovies(from: LocalDate, to: LocalDate, s: CalendarSettings): MovieCalendarResult? =
-        movieMemo[MemoKey(from, to, s, language())].fresh()
+    internal suspend fun storedMovies(from: LocalDate, to: LocalDate, s: CalendarSettings): CachedCalendar<MovieCalendarResult> =
+        movieCache.read(releaseKey(s, language(), movies = true), CalendarPeriod(from, to))
 
-    suspend fun episodes(from: LocalDate, to: LocalDate, s: CalendarSettings, force: Boolean = false): CalendarResult {
-        val key = MemoKey(from, to, s, language())
-        if (!force) episodeMemo[key].fresh()?.let { return it }
-        return episodeRepo(key.language).episodesBetween(from, to, s, apiKey = "", omdbKey = omdbKey(s))
-            .also { episodeMemo[key] = Memo(System.currentTimeMillis(), it) }
+    suspend fun episodes(
+        from: LocalDate, to: LocalDate, s: CalendarSettings, force: Boolean = false,
+        onProgress: (suspend (CalendarResult) -> Unit)? = null,
+    ): CalendarResult {
+        val language = language()
+        return episodeCache.load(releaseKey(s, language, movies = false), CalendarPeriod(from, to), force, onProgress) { dates, progress ->
+            episodeRepo(language).episodesBetween(dates.from, dates.to, s, apiKey = "", omdbKey = omdbKey(s), onProgress = progress)
+        }
     }
 
-    suspend fun movies(from: LocalDate, to: LocalDate, s: CalendarSettings, force: Boolean = false): MovieCalendarResult {
-        val key = MemoKey(from, to, s, language())
-        if (!force) movieMemo[key].fresh()?.let { return it }
-        return movieRepo(key.language).moviesBetween(from, to, s, apiKey = "", omdbKey = omdbKey(s))
-            .also { movieMemo[key] = Memo(System.currentTimeMillis(), it) }
+    suspend fun movies(
+        from: LocalDate, to: LocalDate, s: CalendarSettings, force: Boolean = false,
+        onProgress: (suspend (MovieCalendarResult) -> Unit)? = null,
+    ): MovieCalendarResult {
+        val language = language()
+        return movieCache.load(releaseKey(s, language, movies = true), CalendarPeriod(from, to), force, onProgress) { dates, progress ->
+            movieRepo(language).moviesBetween(dates.from, dates.to, s, apiKey = "", omdbKey = omdbKey(s), onProgress = progress)
+        }
     }
 
-    /** Pregătește în fundal ziua de azi (seriale), cum o deschide fila Calendar. */
-    suspend fun prewarmToday() {
-        if (!isConfigured) return
-        val s = settings.first()
-        val today = RomaniaTime.today()
-        episodes(today, today, s)
+    /** Limba și filtrele care schimbă rezultatele. Numele din Lista mea și notificările nu schimbă lansările. */
+    private fun releaseKey(settings: CalendarSettings, language: String, movies: Boolean): String {
+        fun List<SavedShow>.byId() = map { it.id }.distinct().sorted().map { SavedShow(it, "") }
+        val filter = settings.copy(
+            omdbApiKey = omdbKey(settings),
+            apps = settings.apps.filter { it.installed },
+            hiddenCategories = settings.hiddenCategories.sortedBy { it.ordinal }.toSet(),
+            thresholds = if (movies) QualityThresholds() else settings.thresholds,
+            followedShows = if (movies) emptyList() else settings.followedShows.byId(),
+            hiddenShows = if (movies) emptyList() else settings.hiddenShows.byId(),
+            trackedShows = if (movies) emptyList() else settings.trackedShows.byId(),
+            movieThresholds = if (movies) settings.movieThresholds else DefaultMovieThresholds,
+            movieKinds = if (movies) settings.movieKinds.sortedBy { it.ordinal }.toSet() else MovieReleaseKind.entries.toSet(),
+            followedMovies = if (movies) settings.followedMovies.byId() else emptyList(),
+            hiddenMovies = if (movies) settings.hiddenMovies.byId() else emptyList(),
+            trackedMovies = if (movies) settings.trackedMovies.byId() else emptyList(),
+            notifications = NotificationSettings(),
+            tvChannel = true,
+        )
+        val encoded = "$movies|$language|" + json.encodeToString(CalendarSettings.serializer(), filter)
+        return MessageDigest.getInstance("SHA-256").digest(encoded.encodeToByteArray())
+            .joinToString("") { it.toUByte().toString(16).padStart(2, '0') }
     }
 
     /** Notele IMDb ale episoadelor unui sezon (episod → notă); gol fără cheie OMDb. */
@@ -249,7 +286,51 @@ class CalendarRepository @Inject constructor(
     }
 
     private companion object {
-        const val MEMO_TTL_MS = 30 * 60 * 1000L
         val json = Json { ignoreUnknownKeys = true; coerceInputValues = true; explicitNulls = false }
     }
+}
+
+
+private fun mergeEpisodes(parts: List<CalendarResult>, summary: CalendarResult?): CalendarResult {
+    val (entries, rejected) = mergeCalendarEntries(
+        parts, CalendarResult::entries, CalendarResult::rejected, EpisodeEntry::key,
+        compareBy({ it.releaseAt }, { it.showName }, { it.seasonNumber }, { it.episodeNumber }),
+    )
+    return (summary ?: CalendarResult(emptyList())).copy(
+        entries = entries,
+        rejected = rejected,
+        usedImdb = parts.any { it.usedImdb },
+        anticipatedSource = parts.first().anticipatedSource,
+        complete = parts.all { it.complete },
+    )
+}
+
+private fun mergeMovies(parts: List<MovieCalendarResult>, summary: MovieCalendarResult?): MovieCalendarResult {
+    val (entries, rejected) = mergeCalendarEntries(
+        parts, MovieCalendarResult::entries, MovieCalendarResult::rejected, MovieEntry::key, MovieCalendarRepository.movieOrder,
+    )
+    return (summary ?: MovieCalendarResult(emptyList())).copy(
+        entries = entries,
+        rejected = rejected,
+        usedImdb = parts.any { it.usedImdb },
+        anticipatedSource = parts.first().anticipatedSource,
+        complete = parts.all { it.complete },
+    )
+}
+
+private fun <T, E> mergeCalendarEntries(
+    parts: List<T>,
+    passed: (T) -> List<E>,
+    rejected: (T) -> List<E>,
+    key: (E) -> String,
+    order: Comparator<E>,
+): Pair<List<E>, List<E>> {
+    val seen = HashSet<String>()
+    val accepted = mutableListOf<E>()
+    val hidden = mutableListOf<E>()
+    parts.forEach { part ->
+        passed(part).filterTo(accepted) { seen.add(key(it)) }
+        rejected(part).filterTo(hidden) { seen.add(key(it)) }
+    }
+    return accepted.sortedWith(order) to hidden.sortedWith(order)
 }

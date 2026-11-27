@@ -13,6 +13,8 @@ data class ScreenSnapshot(
     /** Pagina de detalii a unui titlu (are buton „Redă”/„Play”). */
     val hasPlayButton: Boolean,
     val textCount: Int,
+    /** Ecranul arată o reclamă / pauză publicitară (nu conținutul principal). */
+    val isAd: Boolean = false,
 )
 
 /**
@@ -25,6 +27,9 @@ object ScreenState {
     /** Aplicațiile urmărite doar de pe ecran acum (fără sesiune media): le recitim periodic. */
     @Volatile var screenOnlyPackages: Set<String> = emptySet()
 
+    /** Aplicații care au deja titlul și poziția în sesiunea media: nu consumăm CPU citind ecranul. */
+    @Volatile var skipScreenForPackages: Set<String> = emptySet()
+
     /** Aplicația din prim-plan, după accesibilitate. */
     @Volatile var foregroundPackage: String? = null
 
@@ -36,6 +41,13 @@ object ScreenState {
 
     /** Ascultătorul de sesiuni media se abonează aici. */
     var listener: ((ScreenSnapshot) -> Unit)? = null
+
+    /** Serviciul de accesibilitate se abonează aici pentru citiri la cerere (ex. la pauză fără titlu). */
+    var onSnapshotRequest: ((String) -> Unit)? = null
+
+    fun requestSnapshot(pkg: String) {
+        main.post { onSnapshotRequest?.invoke(pkg) }
+    }
 
     private const val PREFS = "screen"
     private const val KEY_MEDIA_APPS = "media_apps"
@@ -66,8 +78,11 @@ object ScreenState {
     val KNOWN_VIDEO_PREFIXES = listOf(
         "com.netflix.", "com.amazon.amazonvideo", "com.amazon.avod", "com.hbo.", "com.wbd.", "com.disney.",
         "com.skyshowtime.", "com.peacocktv.", "com.apple.atve.", "com.stremio.", "com.cbs.", "com.paramount",
-        "tv.pluto.", "ro.antenaplay", "ro.voyo", "com.voyo.", "net.pro.voyo", "com.nuvio", "app.nuvio",
-        "com.debridstream", "com.wuplay", "com.mubi", "com.crunchyroll", "com.plexapp", "org.jellyfin",
+        "tv.pluto.", "com.tubitv", "com.streammate.tv", "ro.antenaplay",
+        "ro.voyo", "com.voyo.", "net.pro.voyo", "net.cme.voyo", "com.cme.voyo",
+        "com.curiosity.", "com.xumo.", "com.future.moviesByFawesome", "tv.fawesome", "com.fawesome",
+        "com.abide.magellan", "com.pbs.", "air.com.vudu.", "com.fandango.", "com.sling", "tv.arte.",
+        "com.nuvio", "app.nuvio", "com.debridstream", "com.wuplay", "com.mubi", "com.crunchyroll", "com.plexapp", "org.jellyfin",
         "org.xbmc.kodi", "com.syncler", "com.tivimate", "is.xyz.mpv", "org.videolan.vlc", "com.mxtech.",
         "com.google.android.videos", "com.canal", "com.hbogo", "com.orange.", "ro.digionline", "ro.rcsrds",
     )

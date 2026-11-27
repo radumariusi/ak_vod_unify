@@ -31,9 +31,9 @@ fun CompanionsPanel(viewModel: CompanionsViewModel = hiltViewModel()) {
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshInstalled() }
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 12.dp)) {
-        Text("Aplicațiile AK (Scrobbler, Import RO / US)", fontWeight = FontWeight.Medium)
+        Text("AK Scrobbler", fontWeight = FontWeight.Medium)
         OutlinedButton(onClick = viewModel::check, enabled = !state.loading) {
-            Text(if (state.loading) "Verific…" else "Verifică aplicațiile AK")
+            Text(if (state.loading) "Verific…" else "Verifică AK Scrobbler")
         }
         if (state.needsPermission) {
             Text("Permite AK VOD Unify să instaleze aplicații, apoi apasă din nou.", color = MaterialTheme.colorScheme.error)

@@ -43,9 +43,7 @@ sealed interface UpdateState {
 
 /** Aplicațiile mici care merg cu AK VOD Unify (pachetele de release). */
 enum class CompanionApp(val label: String, val packageName: String, val assetPrefix: String, val hint: String) {
-    SCROBBLER("AK Scrobbler", "ro.ak.vodscrobbler", "ak-scrobbler-", "vede ce rulează pe TV; fără VPN"),
-    IMPORT_RO("AK Import RO", "ro.ak.vodimport.ro", "ak-import-ro-", "conturi din România; fără VPN"),
-    IMPORT_US("AK Import US", "ro.ak.vodimport.us", "ak-import-us-", "conturi americane; pune-o în tunelul VPN US"),
+    SCROBBLER("AK Scrobbler", "ro.ak.vodscrobbler", "ak-scrobbler-", "înregistrează progresul și poate identifica vizionările Netflix"),
 }
 
 data class CompanionStatus(

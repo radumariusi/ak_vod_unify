@@ -10,8 +10,21 @@ object ScrobbleRules {
     /** Pragurile „văzut” din care alegi în Setări (procente). */
     val WATCHED_CHOICES = listOf(80, 85, 90, 95)
 
-    /** Sub 10 minute nu e film sau episod (muzică, trailere, clipuri). */
+    /** Sub 10 minute nu e film sau episod (muzică, trailere, clipuri). Documentarele scurte (ARTE, CuriosityStream): 3 minute. */
     val MIN_DURATION_MS: Long = TimeUnit.MINUTES.toMillis(10)
+    val MIN_DOCUMENTARY_DURATION_MS: Long = TimeUnit.MINUTES.toMillis(3)
+
+    private val DOC_APPS = listOf("tv.arte.", "com.curiosity.", "com.abide.magellan")
+
+    fun minDurationFor(pkg: String, fields: Map<String, String>): Long {
+        if (DOC_APPS.none { pkg.startsWith(it) }) return MIN_DURATION_MS
+        val title = listOfNotNull(fields["title"], fields["display_title"], fields["display_subtitle"]).joinToString(" ")
+        return if (title.contains("trailer", ignoreCase = true) || title.contains("preview", ignoreCase = true)) {
+            MIN_DURATION_MS
+        } else {
+            MIN_DOCUMENTARY_DURATION_MS
+        }
+    }
 
     /** Aplicații de muzică / clipuri: nu le trimitem în TMDb. */
     private val IGNORED_PREFIXES = listOf(

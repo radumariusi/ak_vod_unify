@@ -2,11 +2,15 @@ package ro.ak.vodunify.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.layout.ContentScale
@@ -22,6 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,6 +42,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
@@ -45,10 +51,19 @@ import android.content.Context
 import android.util.LruCache
 import androidx.compose.ui.graphics.painter.Painter
 import coil.compose.AsyncImage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import ro.ak.vodunify.core.playback.AppRole
 import ro.ak.vodunify.core.playback.TargetApp
 import ro.ak.vodunify.core.catalog.TitleKind
+import ro.ak.vodunify.core.catalog.mediaKey
+import ro.ak.vodunify.core.playback.PosterActivity
 import ro.ak.vodunify.core.playback.PosterBadge
+import ro.ak.vodunify.core.playback.PosterBadgeRequest
+import ro.ak.vodunify.core.playback.ServiceBadge
+import ro.ak.vodunify.core.playback.PosterStage
 
 /*
  * Etichetele de pe postere (nota TMDb, sigla platformei, cinema, „S02E05 · 25 nov”) au aceeași formă:
@@ -121,39 +136,37 @@ private fun rememberKeyLookup(lookup: KeyLookup?, key: String?): Pair<String?, B
 }
 
 /**
- * Iconițele aplicațiilor, citite o singură dată din sistem (citirea e lentă și se făcea la fiecare poster
- * desenat, pe firul interfeței: derularea sacada).
+ * Iconițele aplicațiilor, citite din sistem în fundal și partajate între postere.
  */
 private object AppIcons {
-    private val icons = LruCache<String, Any>(64)
-    private val labels = LruCache<String, String>(64)
-    private val NONE = Any()
+    data class InstalledIcon(val bitmap: ImageBitmap?, val label: String?)
 
-    fun icon(context: Context, packageName: String): ImageBitmap? {
-        icons.get(packageName)?.let { return it as? ImageBitmap }
-        val bitmap = runCatching { context.packageManager.getApplicationIcon(packageName).toBitmap(96, 96).asImageBitmap() }.getOrNull()
-        icons.put(packageName, bitmap ?: NONE)
-        return bitmap
-    }
+    private val cache = LruCache<String, InstalledIcon>(64)
+    private val lock = Mutex()
 
-    fun label(context: Context, packageName: String): String? {
-        labels.get(packageName)?.let { return it.ifEmpty { null } }
-        val label = runCatching {
-            context.packageManager.let { pm -> pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString() }
-        }.getOrNull()
-        labels.put(packageName, label.orEmpty())
-        return label
+    fun peek(packageName: String): InstalledIcon? = cache.get(packageName)
+
+    suspend fun load(context: Context, packageName: String): InstalledIcon = lock.withLock {
+        peek(packageName) ?: withContext(Dispatchers.IO) {
+            val pm = context.packageManager
+            val app = runCatching { pm.getApplicationInfo(packageName, 0) }.getOrNull()
+            val bitmap = app?.let { runCatching { pm.getApplicationIcon(it).toBitmap(96, 96).asImageBitmap() }.getOrNull() }
+            val label = app?.let { runCatching { pm.getApplicationLabel(it).toString() }.getOrNull() }
+            InstalledIcon(bitmap, label).also { cache.put(packageName, it) }
+        }
     }
 }
 
 /** O siglă pătrată (imagine), cât o etichetă, cu aceleași colțuri, fără chenar. */
 @Composable
-private fun SquareLogo(url: String, fallback: Painter?, modifier: Modifier = Modifier) {
+private fun SquareLogo(url: String, fallback: Painter?, modifier: Modifier = Modifier, onLoadError: () -> Unit = {}) {
     AsyncImage(
         model = url,
         contentDescription = null,
         contentScale = ContentScale.Crop,
+        placeholder = fallback,
         error = fallback,
+        onError = { onLoadError() },
         modifier = modifier.size(BadgeHeight).clip(BadgeShape),
     )
 }
@@ -182,25 +195,32 @@ private fun LetterLogo(name: String, modifier: Modifier = Modifier) {
  * sau bannerul lat al aplicației.
  */
 @Composable
-fun AppIconBadge(packageName: String, modifier: Modifier = Modifier, fallbackLabel: String? = null) {
+fun AppIconBadge(
+    packageName: String,
+    modifier: Modifier = Modifier,
+    fallbackLabel: String? = null,
+    preferInstalledIcon: Boolean = false,
+) {
     val context = LocalContext.current
+    var installed by remember(packageName) { mutableStateOf(AppIcons.peek(packageName)) }
+    if (installed == null) LaunchedEffect(packageName) { installed = AppIcons.load(context, packageName) }
+    val icon = installed?.bitmap
     val isService = remember(packageName) { TargetApp.byPackage(packageName)?.role == AppRole.OFFICIAL }
-    val (logoUrl, ready) = rememberKeyLookup(LocalServiceLogos.current?.byPackage, packageName.takeIf { isService })
-    val icon = remember(packageName) { AppIcons.icon(context, packageName) }
+    val lookupOnline = isService && (!preferInstalledIcon || installed != null && icon == null)
+    val (logoUrl, _) = rememberKeyLookup(LocalServiceLogos.current?.byPackage, packageName.takeIf { lookupOnline })
+    var logoFailed by remember(logoUrl, packageName) { mutableStateOf(false) }
     val iconPainter = remember(icon) { icon?.let { BitmapPainter(it) } }
+    val name = fallbackLabel ?: installed?.label
     when {
-        logoUrl != null -> SquareLogo(logoUrl, iconPainter, modifier)
-        !ready -> Box(modifier.size(BadgeHeight))
+        logoUrl != null && !logoFailed -> SquareLogo(logoUrl, iconPainter, modifier) { logoFailed = true }
         icon != null -> Image(
             icon,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = modifier.size(BadgeHeight).clip(BadgeShape),
         )
-        else -> {
-            val label = fallbackLabel ?: remember(packageName) { AppIcons.label(context, packageName) }
-            label?.takeIf { it.isNotBlank() }?.let { LetterLogo(it, modifier) }
-        }
+        !name.isNullOrBlank() -> LetterLogo(name, modifier)
+        else -> Box(modifier.size(BadgeHeight))
     }
 }
 
@@ -211,32 +231,112 @@ fun AppIconBadge(packageName: String, modifier: Modifier = Modifier, fallbackLab
 @Composable
 fun ServiceLogoBadge(serviceId: String?, name: String, modifier: Modifier = Modifier) {
     val (logoUrl, ready) = rememberKeyLookup(LocalServiceLogos.current?.byService, serviceId)
+    var logoFailed by remember(logoUrl, serviceId) { mutableStateOf(false) }
     when {
-        logoUrl != null -> SquareLogo(logoUrl, null, modifier)
+        logoUrl != null && !logoFailed -> SquareLogo(logoUrl, null, modifier) { logoFailed = true }
         !ready -> Box(modifier.size(BadgeHeight))
         else -> LetterLogo(name, modifier)
     }
 }
 
-/** Cum află un poster sigla lui (platforma ta pe care e titlul sau playerul standard); dat de AppNavigation. */
-val LocalPosterBadge = staticCompositionLocalOf<TitleLookup<PosterBadge>?> { null }
+class PosterBadgeLookup(
+    val peek: (PosterBadgeRequest) -> List<PosterBadge>?,
+    val load: suspend (PosterBadgeRequest) -> List<PosterBadge>,
+)
+
+val LocalPosterBadge = staticCompositionLocalOf<PosterBadgeLookup?> { null }
+val LocalPosterActivity = compositionLocalOf<Map<String, PosterActivity>> { emptyMap() }
+val LocalPosterEpisodeTotal = staticCompositionLocalOf<TitleLookup<Int>?> { null }
 
 /** O informație despre titlu: ce se știe deja din primul cadru, restul în fundal. */
 @Composable
-private fun <T : Any> rememberTitleLookup(lookup: TitleLookup<T>?, kind: TitleKind, id: Long?): T? {
+private fun <T : Any> rememberTitleLookup(lookup: TitleLookup<T>?, kind: TitleKind, id: Long?, refresh: Boolean = false): T? {
     val initial = remember(lookup, kind, id) { if (lookup == null || id == null) null else lookup.peek(kind, id) }
     var value by remember(lookup, kind, id) { mutableStateOf(initial) }
-    if (initial == null && lookup != null && id != null) {
-        LaunchedEffect(lookup, kind, id) { value = runCatching { lookup.load(kind, id) }.getOrNull() }
+    if ((initial == null || refresh) && lookup != null && id != null) {
+        LaunchedEffect(lookup, kind, id) { lookup.load(kind, id)?.let { value = it } }
     }
     return value
 }
 
-/** Sigla platformei / playerului pe un poster din catalog; nimic până se află (sau dacă nu e de unde). */
+/** Bifă pentru titluri văzute, ceas pentru filme și seriale începute. */
 @Composable
-fun PlatformBadge(kind: TitleKind, id: Long?, modifier: Modifier = Modifier) {
-    val badge = rememberTitleLookup(LocalPosterBadge.current, kind, id)
-    badge?.let { AppIconBadge(it.packageName, modifier, fallbackLabel = it.label) }
+fun PosterViewingStatus(
+    kind: TitleKind,
+    id: Long?,
+    modifier: Modifier = Modifier,
+    stage: PosterStage? = null,
+    episodeCount: Int? = null,
+) {
+    val activity = if (stage == null && id != null) LocalPosterActivity.current[mediaKey(kind, id)] else null
+    val total = if (kind == TitleKind.TV && activity?.watchedEpisodes != null && !activity.hasActiveResume) {
+        rememberTitleLookup(LocalPosterEpisodeTotal.current, kind, id, refresh = true) ?: episodeCount
+    } else null
+    val resolved = PosterBadgeRequest(kind, id, stage, activity).resolvedStage(total)
+    when {
+        resolved == PosterStage.WATCHED -> ViewingStatusBadge(watched = true, modifier)
+        resolved == PosterStage.IN_PROGRESS -> ViewingStatusBadge(watched = false, modifier)
+    }
+}
+
+/** Desenat ca simbol, independent de fontul instalat pe televizor. */
+@Composable
+fun ViewingStatusBadge(watched: Boolean, modifier: Modifier = Modifier, size: Dp = BadgeHeight) {
+    val ink = if (watched) Color(0xFF9CF5CE) else Color(0xFFFFCF76)
+    val background = if (watched) Color(0xF210362E) else Color(0xF2332713)
+    val stroke = (size / 16.dp).coerceIn(0.65f, 1.5f)
+    Canvas(
+        modifier
+            .size(size)
+            .background(background, BadgeShape)
+            .semantics { contentDescription = if (watched) "Văzut" else "Văzut parțial" },
+    ) {
+        if (watched) {
+            val start = Offset(this.size.width * .24f, this.size.height * .51f)
+            val bend = Offset(this.size.width * .43f, this.size.height * .69f)
+            val end = Offset(this.size.width * .77f, this.size.height * .32f)
+            drawLine(ink, start, bend, (1.8f * stroke).dp.toPx(), StrokeCap.Round)
+            drawLine(ink, bend, end, (1.8f * stroke).dp.toPx(), StrokeCap.Round)
+        } else {
+            drawCircle(ink, radius = this.size.minDimension * .32f, style = Stroke((1.4f * stroke).dp.toPx()))
+            val top = center - Offset(0f, this.size.height * .18f)
+            val end = center + Offset(this.size.width * .12f, this.size.height * .07f)
+            drawLine(ink, top, center, (1.3f * stroke).dp.toPx(), StrokeCap.Round)
+            drawLine(ink, center, end, (1.3f * stroke).dp.toPx(), StrokeCap.Round)
+        }
+    }
+}
+
+/** Iconițele și eticheta intră pe rânduri suplimentare când posterul este îngust. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun PlatformBadge(
+    kind: TitleKind,
+    id: Long?,
+    modifier: Modifier = Modifier,
+    stage: PosterStage? = null,
+    label: String? = null,
+    confirmedService: ServiceBadge? = null,
+) {
+    val lookup = LocalPosterBadge.current
+    val activity = id?.let { LocalPosterActivity.current[mediaKey(kind, it)] }
+    val request = PosterBadgeRequest(kind, id, stage, activity, confirmedService)
+    var badges by remember(lookup, request) { mutableStateOf(lookup?.peek?.invoke(request).orEmpty()) }
+    if (lookup != null) LaunchedEffect(lookup, request) { badges = lookup.load(request) }
+    if (badges.isEmpty() && label.isNullOrBlank()) return
+    FlowRow(
+        modifier,
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        badges.forEach { badge ->
+            val iconModifier = Modifier.semantics { contentDescription = badge.label }
+            val pkg = badge.packageName
+            if (pkg == null) ServiceLogoBadge(badge.serviceId, badge.label, iconModifier)
+            else AppIconBadge(pkg, iconModifier, fallbackLabel = badge.label)
+        }
+        label?.takeIf { it.isNotBlank() }?.let { PosterLabel(it) }
+    }
 }
 
 /**
@@ -245,19 +345,39 @@ fun PlatformBadge(kind: TitleKind, id: Long?, modifier: Modifier = Modifier) {
  */
 sealed interface BadgeSpec {
     data class App(val packageName: String, val label: String? = null) : BadgeSpec
-    data class Cinema(val region: String) : BadgeSpec
+    data class PlaybackSource(val packageName: String?) : BadgeSpec
+    data class ConfirmedService(val service: ServiceBadge) : BadgeSpec
+    data object InProgress : BadgeSpec
+    data class Cinema(val regions: List<String>) : BadgeSpec
     data class Service(val serviceId: String?, val name: String) : BadgeSpec
     data class Label(val text: String) : BadgeSpec
 }
 
 @Composable
-fun TitleBadge(spec: BadgeSpec?, kind: TitleKind, id: Long?, modifier: Modifier = Modifier) {
+fun TitleBadge(spec: BadgeSpec?, kind: TitleKind, id: Long?, modifier: Modifier = Modifier, label: String? = null) {
     when (spec) {
-        null -> PlatformBadge(kind, id, modifier)
-        is BadgeSpec.App -> AppIconBadge(spec.packageName, modifier, fallbackLabel = spec.label)
-        is BadgeSpec.Cinema -> CinemaBadge(spec.region, modifier)
-        is BadgeSpec.Service -> ServiceLogoBadge(spec.serviceId, spec.name, modifier)
-        is BadgeSpec.Label -> PosterLabel(spec.text, modifier)
+        null -> PlatformBadge(kind, id, modifier, label = label)
+        BadgeSpec.InProgress -> PlatformBadge(kind, id, modifier, stage = PosterStage.IN_PROGRESS, label = label)
+        is BadgeSpec.ConfirmedService -> PlatformBadge(kind, id, modifier, label = label, confirmedService = spec.service)
+        else -> PosterBottomRow(modifier, label) {
+            when (spec) {
+                is BadgeSpec.PlaybackSource -> {
+                    val pkg = spec.packageName?.takeIf { it.isNotBlank() }
+                    if (pkg != null) {
+                        val app = TargetApp.byPackage(pkg)?.displayName ?: pkg.substringAfterLast('.')
+                        AppIconBadge(pkg, Modifier.semantics { contentDescription = app }, fallbackLabel = app, preferInstalledIcon = true)
+                    } else {
+                        PosterLabel("▶", Modifier.semantics { contentDescription = "Aplicația de redare necunoscută" })
+                    }
+                }
+                is BadgeSpec.App -> AppIconBadge(spec.packageName, fallbackLabel = spec.label)
+                is BadgeSpec.Cinema -> CinemaBadges(spec.regions)
+                is BadgeSpec.Service -> ServiceLogoBadge(spec.serviceId, spec.name)
+                is BadgeSpec.Label -> PosterLabel(spec.text)
+                BadgeSpec.InProgress -> Unit
+                is BadgeSpec.ConfirmedService -> Unit
+            }
+        }
     }
 }
 
@@ -266,17 +386,27 @@ fun TitleBadge(spec: BadgeSpec?, kind: TitleKind, id: Long?, modifier: Modifier 
  * SUA: dungile și cantonul albastru. Are forma și înălțimea celorlalte etichete de pe poster.
  */
 @Composable
-fun CinemaBadge(region: String, modifier: Modifier = Modifier) {
+internal fun CinemaBadges(regions: List<String>, modifier: Modifier = Modifier, availableWidth: Dp? = null) {
+    if (regions.isEmpty()) return
+    val gap = if (availableWidth == null) 3.dp else 1.dp
+    val width = availableWidth?.let { ((it - gap * (regions.size - 1)) / regions.size).coerceIn(1.dp, 25.dp) }
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(gap)) {
+        regions.forEach { region -> CinemaBadge(region, scale = width?.let { it / 25.dp } ?: 1f) }
+    }
+}
+
+@Composable
+private fun CinemaBadge(region: String, scale: Float) {
     val us = region.equals("US", ignoreCase = true)
     Box(
-        modifier
-            .height(BadgeHeight)
+        Modifier
+            .height(BadgeHeight * scale)
             .background(BadgeBackground, BadgeShape)
-            .padding(horizontal = 3.dp, vertical = 1.5.dp)
+            .padding(horizontal = 3.dp * scale, vertical = 1.5.dp * scale)
             .semantics { contentDescription = if (us) "Cinema SUA" else "Cinema România" },
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.size(width = 19.dp, height = 13.dp)) {
+        Canvas(Modifier.size(width = 19.dp * scale, height = 13.dp * scale)) {
             val w = size.width
             val h = size.height
             val barH = h * 0.28f
@@ -322,10 +452,16 @@ val LocalImdbRating = staticCompositionLocalOf<TitleLookup<Double>?> { null }
 @Composable
 fun PosterRatings(kind: TitleKind, id: Long?, tmdb: Double?, modifier: Modifier = Modifier) {
     val imdb = rememberTitleLookup(LocalImdbRating.current, kind, id)
+    PosterRatingChips(tmdb, imdb, modifier)
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+fun PosterRatingChips(tmdb: Double?, imdb: Double?, modifier: Modifier = Modifier) {
     val t = tmdb?.takeIf { it > 0 }
     val i = imdb?.takeIf { it > 0 }
     if (t == null && i == null) return
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+    FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(3.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         t?.let { RatingChip(it) }
         i?.let { ImdbChip(it) }
     }

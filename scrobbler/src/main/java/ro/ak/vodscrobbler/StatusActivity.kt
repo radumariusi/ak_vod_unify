@@ -4,10 +4,11 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
-import android.graphics.Color
-import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
+import ro.ak.vodimport.AkWidgets
+import ro.ak.vodimport.keepClearOfSystemBars
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -22,8 +23,7 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Singurul ecran: dacă scrobblerul are acces, ce vede acum de la fiecare aplicație
- * și ce a trimis recent către AK VOD Unify. Construit fără XML ca aplicația să rămână mică.
+ * Fereastra de stare: acces, sesiuni active, ce a trimis recent către AK VOD Unify și setările de diagnostic.
  * Merge cu telecomanda (D-pad) și cu touch.
  */
 class StatusActivity : Activity() {
@@ -54,18 +54,28 @@ class StatusActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val pad = dp(24)
+        val pad = dp(16)
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
-            setBackgroundColor(Color.rgb(14, 17, 22))
         }
-        column.addView(text("AK Scrobbler", 26f, bold = true))
+        column.addView(AkWidgets.heading(this, "AK Scrobbler"))
+        val reconnect = button("Reconectează") {
+            KeepAliveService.reconnect(this)
+            render()
+        }
+        val close = button("Închide fereastra") { finish() }
+        column.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(reconnect, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(close, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginStart = dp(8)
+            })
+        })
         column.addView(
             text(
                 "Vede ce redă orice aplicație (Netflix, Prime Video, SkyShowtime, HBO Max, Disney+, Stremio…) " +
-                    "și trimite titlul și minutul în AK VOD Unify. Nu folosește internetul, " +
-                    "deci nu trebuie pus în VPN.",
+                    "și trimite titlul și minutul în AK VOD Unify. Activitatea Netflix ajută la identificarea titlurilor lipsă.",
                 15f,
             ),
         )
@@ -105,6 +115,9 @@ class StatusActivity : Activity() {
             render()
         }.also(dotSettings::addView)
         column.addView(dotSettings)
+        column.addView(button("Conectează Netflix pentru identificare") {
+            startActivity(Intent(this, NetflixLoginActivity::class.java))
+        })
         column.addView(button("Deschide AK VOD Unify") { openMainApp() })
 
         adb = text("", 14f).also { it.setTextIsSelectable(true) }.also(column::addView)
@@ -130,8 +143,23 @@ class StatusActivity : Activity() {
         })
         diag = focusableText().also { it.textSize = 12f }.also(column::addView)
 
-        setContentView(ScrollView(this).apply { addView(column); keepClearOfSystemBars() })
-        accessButton.requestFocus()
+        setContentView(ScrollView(this).apply {
+            background = GradientDrawable().apply {
+                setColor(AkWidgets.background)
+                cornerRadius = dp(14).toFloat()
+                setStroke(dp(1), 0x44FFFFFF)
+            }
+            clipToOutline = true
+            isFillViewport = true
+            addView(column)
+            keepClearOfSystemBars()
+        })
+        reconnect.requestFocus()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        sizeScrobblerWindow()
     }
 
     override fun onResume() {
@@ -155,7 +183,8 @@ class StatusActivity : Activity() {
         val pending = Forwarder.get(this).pendingCount()
         val overlay = Access.canDrawOverlays(this)
         val screenOn = Access.isScreenReaderEnabled(this)
-        status.text = buildString {
+        val logcatAllowed = LogcatProbe.isAllowed(this)
+        status.showText(buildString {
             append(if (enabled) "✅ Acces la sesiunile media: DA" else "❌ Acces la sesiunile media: NU (vezi mai jos)")
             if (enabled && !connected) append("\n⏳ Accesul e dat, aștept ca Android să pornească ascultătorul…")
             append(
@@ -166,7 +195,7 @@ class StatusActivity : Activity() {
                 },
             )
             append(
-                if (LogcatProbe.isAllowed(this@StatusActivity)) {
+                if (logcatAllowed) {
                     "\n✅ Citește codul titlului din jurnalul sistemului (pentru Netflix)"
                 } else {
                     "\n❌ Codul titlului din jurnalul sistemului (Netflix): fără acces, vezi comanda ADB de mai jos"
@@ -186,16 +215,16 @@ class StatusActivity : Activity() {
                 },
             )
             if (pending > 0) append("\n⏳ $pending evenimente așteaptă să ajungă în AK VOD Unify")
-        }
+        })
         overlayButton.visibility = if (overlay) View.GONE else View.VISIBLE
         dotButton.visibility = if (overlay) View.VISIBLE else View.GONE
-        dotButton.text = if (Prefs.dotEnabled(this)) "Ascunde bulina" else "Arată bulina"
+        dotButton.showText(if (Prefs.dotEnabled(this)) "Ascunde bulina" else "Arată bulina")
         dotSettings.visibility = if (overlay && Prefs.dotEnabled(this)) View.VISIBLE else View.GONE
-        colorButtons.forEach { (st, b) -> b.text = "Culoare când ${st.label}: ${Prefs.dotColor(this, st).name}" }
+        colorButtons.forEach { (st, b) -> b.showText("Culoare când ${st.label}: ${Prefs.dotColor(this, st).name}") }
         val (sizeDp, sizeName) = Prefs.SIZES[Prefs.dotSizeIndex(this)]
-        sizeButton.text = "Mărimea bulinei: $sizeName ($sizeDp dp)"
-        cornerButton.text = "Locul bulinei: ${Prefs.dotCorner(this).label}"
-        alphaButton.text = "Vizibilitatea bulinei: ${Prefs.dotAlpha(this)}%"
+        sizeButton.showText("Mărimea bulinei: $sizeName ($sizeDp dp)")
+        cornerButton.showText("Locul bulinei: ${Prefs.dotCorner(this).label}")
+        alphaButton.showText("Vizibilitatea bulinei: ${Prefs.dotAlpha(this)}%")
         accessButton.visibility = if (enabled) View.GONE else View.VISIBLE
         screenButton.visibility = if (screenOn) View.GONE else View.VISIBLE
         batteryButton.visibility = if (battery) View.GONE else View.VISIBLE
@@ -213,19 +242,23 @@ class StatusActivity : Activity() {
                 "Dacă televizorul nu are setarea sau o blochează, prin ADB (o singură dată, rămâne după restart):\n\n" +
                 Access.adbScreenReaderCommands(this).joinToString("\n") + "\n\n"
         }
-        val logcatHelp = if (LogcatProbe.isAllowed(this)) {
+        val logcatHelp = if (logcatAllowed) {
             ""
         } else {
             "Netflix nu spune ce redă. Ca AK Scrobbler să afle codul titlului din jurnalul sistemului, " +
                 "dă-i voie o singură dată prin ADB (în Bugjaeger scrie fără „adb shell”):\n\n" +
                 LogcatProbe.adbCommand(this) + "\n\napoi închide și redeschide AK Scrobbler.\n\n"
         }
-        adb.text = listenerHelp + screenHelp + logcatHelp + "Pe televizoarele care închid aplicațiile (ex. TCL), tot prin ADB, o singură dată:\n" +
-            "• bulina: ${Access.adbOverlayCommand(this)}\n" +
-            "• fără economie de baterie: ${Access.adbBatteryCommand(this)}"
+        adb.showText(
+            listenerHelp + screenHelp + logcatHelp +
+                "Pe televizoarele care închid aplicațiile (ex. TCL / Safety Guard), prin ADB (o singură dată):\n" +
+                "• bulina: ${Access.adbOverlayCommand(this)}\n" +
+                "• fără economie de baterie: ${Access.adbBatteryCommand(this)}\n" +
+                Access.adbKeepAliveCommands(this).joinToString("\n") { "• $it" },
+        )
 
         val sessions = ScrobblerState.live
-        live.text = when {
+        live.showText(when {
             !connected -> "Nimic încă: ascultătorul nu rulează."
             sessions.isEmpty() -> "Nicio aplicație nu redă acum. Pornește un episod în Netflix (sau altă aplicație) și revino aici."
             else -> sessions.joinToString("\n\n") { s ->
@@ -253,19 +286,19 @@ class StatusActivity : Activity() {
                     }
                 }.trimEnd()
             }
-        }
+        })
 
-        diag.text = DiagLog.newestFirst(DIAG_LINES).joinToString("\n").ifEmpty { "Gol." }
+        diag.showText(DiagLog.newestFirst(DIAG_LINES).joinToString("\n").ifEmpty { "Gol." })
 
         val log = Forwarder.get(this).recent()
         val fmt = SimpleDateFormat("dd.MM HH:mm", Locale.getDefault())
-        sent.text = if (log.isEmpty()) {
+        sent.showText(if (log.isEmpty()) {
             "Nimic trimis încă."
         } else {
             log.joinToString("\n") { e ->
                 "${fmt.format(Date(e.at))} · ${e.appLabel} · ${e.title} · ${clock(e.positionMs)} · ${e.reason.label()} → ${e.result.resultLabel()}"
             }
-        }
+        })
     }
 
     private fun openListenerSettings() {
@@ -352,24 +385,23 @@ class StatusActivity : Activity() {
         if (intent != null) startActivity(intent)
     }
 
-    private fun text(value: String, size: Float, bold: Boolean = false) = TextView(this).apply {
-        text = value
-        textSize = size
-        setTextColor(Color.WHITE)
-        if (bold) setTypeface(typeface, Typeface.BOLD)
-        setPadding(0, dp(6), 0, dp(6))
-    }
+    private fun text(value: String, size: Float, bold: Boolean = false) = AkWidgets.text(this, value, size, bold)
 
-    /** Text care poate primi focus, ca ecranul să se poată derula cu telecomanda. */
+    /** Permite derularea jurnalului cu telecomanda. */
     private fun focusableText() = text("", 14f).apply {
         isFocusable = true
-        setOnFocusChangeListener { v, has -> v.setBackgroundColor(if (has) Color.rgb(40, 44, 52) else Color.TRANSPARENT) }
+        setOnFocusChangeListener(AkWidgets::panelFocus)
     }
 
-    private fun button(label: String, onClick: () -> Unit) = Button(this).apply {
-        text = label
-        isAllCaps = false
-        setOnClickListener { onClick() }
+    private fun button(label: String, onClick: () -> Unit) = AkWidgets.button(this, label, action = onClick).apply {
+        layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = dp(8) }
+    }
+
+    private fun TextView.showText(value: String) {
+        if (text.toString() != value) text = value
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()

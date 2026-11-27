@@ -7,8 +7,13 @@ import ro.ak.vodunify.R
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.Image
 import ro.ak.vodunify.core.catalog.TitleKind
-import ro.ak.vodunify.core.playback.PosterBadge
+import ro.ak.vodunify.core.playback.AppRegistry
+import ro.ak.vodunify.core.playback.PlaybackSettings
+import ro.ak.vodunify.core.prefs.UiPrefs
+import ro.ak.vodunify.ui.components.PosterBadgeLookup
+import ro.ak.vodunify.ui.components.LocalPosterActivity
 import ro.ak.vodunify.ui.components.LocalPosterBadge
+import ro.ak.vodunify.ui.components.LocalPosterEpisodeTotal
 import ro.ak.vodunify.ui.components.LocalImdbRating
 import ro.ak.vodunify.ui.components.LocalServiceLogos
 import ro.ak.vodunify.ui.components.ServiceLogoLookup
@@ -44,6 +49,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,7 +68,6 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -98,10 +103,13 @@ import ro.ak.vodunify.ui.theme.GlassIdle
 import ro.ak.vodunify.ui.theme.OnFocusFill
 import ro.ak.vodunify.ui.theme.PillShape
 import androidx.compose.ui.graphics.Brush
-import androidx.navigation.NavBackStackEntry
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ro.ak.vodunify.ui.components.TitleMenuHost
 import ro.ak.vodunify.ui.components.TitleMenuViewModel
 
+internal val LocalTabTopFocus = androidx.compose.runtime.staticCompositionLocalOf<() -> Unit> { {} }
+
+@android.annotation.SuppressLint("RestrictedApi")
 @Composable
 fun AppNavigation() {
     val nav = rememberNavController()
@@ -133,12 +141,23 @@ fun AppNavigation() {
 
     val backdrop = remember { BackdropState() }
     val restore = remember { FocusRestore() }
+    val topFocus = remember { TopDestination.entries.associateWith { FocusRequester() } }
+    val focusActiveTab: () -> Unit = {
+        val active = TopDestination.entries.firstOrNull { it.route == current }
+        runCatching { topFocus[active]?.requestFocus() }
+    }
     var exitPrompt by remember { mutableStateOf(false) }
     val onHome = current == TopDestination.HOME.route
-    SideEffect { restore.current = current }
+    val onCalendar = current == TopDestination.CALENDAR.route
+    val onDetails = current == Routes.TITLE
+    val calendarBackdropState = remember { mutableStateOf<String?>(null) }
+    val showCalendarBackdrop: (String?) -> Unit = remember { { calendarBackdropState.value = it } }
+    val detailsBackdropState = remember { mutableStateOf<String?>(null) }
+    val showDetailsBackdrop: (String?) -> Unit = remember { { detailsBackdropState.value = it } }
+    SideEffect { restore.show(backStack?.id) }
     ExpireFocusRestore(restore)
 
-    // Înapoi din Acasă cere confirmare (ca în AK VOD Hub); din celelalte file duce în Acasă.
+    // În Acasă, numai Back de la început cere confirmarea ieșirii.
     BackHandler(enabled = onHome) { exitPrompt = true }
     if (exitPrompt) {
         AlertDialog(
@@ -152,11 +171,21 @@ fun AppNavigation() {
     TitleMenuHost(titleMenu, onOpen = { kind, id -> nav.navigate(Routes.title(kind, id)) })
 
     val badgesModel: PosterBadgesViewModel = hiltViewModel()
-    val posterBadge = remember(badgesModel) {
-        TitleLookup(peek = badgesModel::peekBadge, load = { kind, id -> badgesModel.badge(kind, id) })
+    val playback by badgesModel.playbackSettings.collectAsStateWithLifecycle(initialValue = PlaybackSettings())
+    val badgeSettings by UiPrefs.posterBadges.collectAsStateWithLifecycle()
+    val posterActivity by badgesModel.activity.collectAsStateWithLifecycle(initialValue = emptyMap())
+    val registryVersion by AppRegistry.version.collectAsStateWithLifecycle()
+    val posterBadge = remember(badgesModel, playback, badgeSettings, registryVersion) {
+        PosterBadgeLookup(
+            peek = { badgesModel.peekBadges(it, playback, badgeSettings) },
+            load = { badgesModel.badges(it, playback, badgeSettings) },
+        )
     }
     val imdbRating = remember(badgesModel) {
         TitleLookup(peek = badgesModel::peekImdbRating, load = { kind, id -> badgesModel.imdbRating(kind, id) })
+    }
+    val episodeTotal = remember(badgesModel) {
+        TitleLookup(peek = { _, id -> badgesModel.peekEpisodeTotal(id) }, load = { _, id -> badgesModel.episodeTotal(id) })
     }
     val serviceLogos = remember(badgesModel) {
         ServiceLogoLookup(
@@ -167,18 +196,22 @@ fun AppNavigation() {
 
     CompositionLocalProvider(
         LocalPosterBadge provides posterBadge,
+        LocalPosterActivity provides posterActivity,
+        LocalPosterEpisodeTotal provides episodeTotal,
         LocalImdbRating provides imdbRating,
         LocalServiceLogos provides serviceLogos,
         LocalCatalogActions provides actions,
         LocalBackdrop provides backdrop,
         LocalFocusRestore provides restore,
+        LocalTabTopFocus provides focusActiveTab,
     ) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-            // Fundalul panoramic: titlul cu focus din Acasă, peste tot ecranul, sub meniu.
-            if (onHome) TitleBackdrop(backdrop.url, Modifier.matchParentSize())
+            // Fundalul panoramic al titlului focalizat e citit separat, fără a recompune bara de sus / NavHost.
+            ScreenBackdrop(onHome, onCalendar, onDetails, backdrop, calendarBackdropState, detailsBackdropState, Modifier.matchParentSize())
             Column(Modifier.fillMaxSize()) {
                 TopBar(
                     current = current,
+                    tabs = topFocus,
                     showBack = !isTopLevel,
                     onBack = { nav.popBackStack() },
                     onSelect = { nav.navigateTop(it) },
@@ -187,7 +220,7 @@ fun AppNavigation() {
                     composable(TopDestination.HOME.route) { HomeScreen() }
                     composable(TopDestination.SEARCH.route) { SearchScreen() }
                     composable(TopDestination.DISCOVER.route) { DiscoverScreen() }
-                    composable(TopDestination.CALENDAR.route) { CalendarScreen() }
+                    composable(TopDestination.CALENDAR.route) { CalendarScreen(onBackdropChange = showCalendarBackdrop) }
                     composable(TopDestination.LIBRARY.route) { LibraryScreen() }
                     composable(TopDestination.SETTINGS.route) { SettingsScreen() }
                     composable(Routes.DIAGNOSTICS) { DiagnosticsScreen() }
@@ -197,7 +230,7 @@ fun AppNavigation() {
                             navArgument("kind") { type = NavType.StringType },
                             navArgument("id") { type = NavType.LongType },
                         ),
-                    ) { DetailsScreen() }
+                    ) { DetailsScreen(onBackdropChange = showDetailsBackdrop) }
                     composable(
                         Routes.PERSON,
                         arguments = listOf(navArgument("id") { type = NavType.LongType }),
@@ -223,12 +256,12 @@ fun AppNavigation() {
 @Composable
 private fun TopBar(
     current: String?,
+    tabs: Map<TopDestination, FocusRequester>,
     showBack: Boolean,
     onBack: () -> Unit,
     onSelect: (TopDestination) -> Unit,
 ) {
     val spec = layoutSpec()
-    val tabs = remember { TopDestination.entries.associateWith { FocusRequester() } }
     val active = TopDestination.entries.firstOrNull { it.route == current }
     val scroll = rememberScrollState()
     val textTabs = TopDestination.entries.filter { !it.iconTab }
@@ -354,45 +387,35 @@ private fun NavTab(
     }
 }
 
-/**
- * Paginile deschise în fiecare filă (ex. un film deschis din Descoperă), păstrate când treci pe altă filă și
- * redeschise când revii. Ținute de noi: salvarea automată a navigației nu merge pentru fila de start (Acasă)
- * și o încurca și pe celelalte (revenirea arăta mereu pagina principală a filei).
- */
-private object TabStacks {
-    val saved = HashMap<String, List<String>>()
+/** Izolează citirea fundalului focalizat ca schimbarea posterelelor pe TV să nu recompună tot ecranul. */
+@Composable
+private fun ScreenBackdrop(
+    onHome: Boolean,
+    onCalendar: Boolean,
+    onDetails: Boolean,
+    backdrop: BackdropState,
+    calendarBackdrop: State<String?>,
+    detailsBackdrop: State<String?>,
+    modifier: Modifier = Modifier,
+) {
+    if (onHome) TitleBackdrop(backdrop.url, modifier)
+    if (onCalendar) calendarBackdrop.value?.let { TitleBackdrop(it, modifier) }
+    if (onDetails) detailsBackdrop.value?.let { TitleBackdrop(it, modifier, opacity = 0.9f, settleMillis = 0) }
 }
 
-/** Ruta concretă a unei pagini („title/movie/603”), din șablon și argumente. */
-private fun NavBackStackEntry.concreteRoute(): String? {
-    val pattern = destination.route ?: return null
-    val args = arguments
-    return pattern.replace(Regex("\\{([^}]+)\\}")) { m ->
-        @Suppress("DEPRECATION")
-        args?.get(m.groupValues[1])?.toString().orEmpty()
-    }
-}
-
-// currentBackStack e public în Kotlin, dar marcat „doar pentru biblioteca Navigation”; e stabil din 2.6.
+/** Navigation păstrează intrările reale ale fiecărei file, cu ViewModel și starea Compose. */
 @android.annotation.SuppressLint("RestrictedApi")
 private fun NavHostController.navigateTop(dest: TopDestination) {
-    val stack = currentBackStack.value.filter { it.destination.route != null && it.destination !is androidx.navigation.NavGraph }
-    val tops = TopDestination.entries.map { it.route }.toSet()
-    val tabIndex = stack.indexOfLast { it.destination.route in tops }
-    val tab = stack.getOrNull(tabIndex)?.destination?.route
-    if (tab != null) {
-        // Pe ce filă ești și ce pagini ai deschis în ea.
-        TabStacks.saved[tab] = stack.drop(tabIndex + 1).mapNotNull { it.concreteRoute() }
+    val tab = currentBackStack.value.lastOrNull { entry ->
+        TopDestination.entries.any { it.route == entry.destination.route }
     }
-    if (tab == dest.route) {
-        // Apăsat pe fila curentă: înapoi la pagina ei principală.
-        TabStacks.saved.remove(dest.route)
+    if (tab?.destination?.route == dest.route) {
         popBackStack(dest.route, inclusive = false)
         return
     }
     navigate(dest.route) {
-        popUpTo(graph.findStartDestination().id)
+        popUpTo(graph.id) { saveState = true }
         launchSingleTop = true
+        restoreState = true
     }
-    TabStacks.saved[dest.route].orEmpty().forEach { route -> runCatching { navigate(route) } }
 }

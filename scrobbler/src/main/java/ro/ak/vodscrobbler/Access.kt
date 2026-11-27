@@ -21,6 +21,15 @@ object Access {
 
     fun adbBatteryCommand(context: Context) = "adb shell dumpsys deviceidle whitelist +${context.packageName}"
 
+    /** Comenzi suplimentare pentru TV-uri agresive (TCL Safety Guard): rulare permanentă în fundal. */
+    fun adbKeepAliveCommands(context: Context): List<String> = listOf(
+        "adb shell cmd appops set ${context.packageName} RUN_IN_BACKGROUND allow",
+        "adb shell cmd appops set ${context.packageName} RUN_ANY_IN_BACKGROUND allow",
+        "adb shell am set-standby-bucket ${context.packageName} active",
+        "adb shell dumpsys deviceidle whitelist +${BuildConfig.MAIN_APP_ID}",
+        "adb shell cmd appops set ${BuildConfig.MAIN_APP_ID} RUN_ANY_IN_BACKGROUND allow",
+    )
+
     fun isListenerEnabled(context: Context): Boolean {
         val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners").orEmpty()
         val me = component(context)

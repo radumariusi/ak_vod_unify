@@ -3,6 +3,7 @@ package ro.ak.vodscrobbler
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -36,8 +37,13 @@ class ScreenReaderService : AccessibilityService() {
             // Verificăm des și modul cititor de ecran: Netflix nu trebuie să-l vadă niciodată.
             updateReaderMode(front)
             val fg = ScreenState.foregroundPackage
-            if (fg != null && fg in ScreenState.screenOnlyPackages && pendingPackage == null) {
-                runCatching { snapshot(fg) }
+            val target = fg ?: front
+            if (target != null && pendingPackage == null &&
+                (target in ScreenState.screenOnlyPackages ||
+                    (isInteresting(target) && target !in ScreenState.skipScreenForPackages &&
+                        ScrobblerState.live.none { it.packageName == target }))
+            ) {
+                runCatching { snapshot(target) }
             }
             handler.postDelayed(this, POLL_MS)
         }
@@ -62,6 +68,13 @@ class ScreenReaderService : AccessibilityService() {
         if (tv) updateReaderMode(frontApp())
         handler.removeCallbacks(pollRunnable)
         handler.postDelayed(pollRunnable, POLL_MS)
+        ScreenState.onSnapshotRequest = { pkg ->
+            if (isInteresting(pkg)) {
+                handler.removeCallbacks(snapshotRunnable)
+                pendingPackage = pkg
+                handler.postDelayed(snapshotRunnable, SETTLE_MS)
+            }
+        }
         DiagLog.add("Citirea ecranului (accesibilitate) a pornit" + if (tv) " · mod cititor de ecran (TV)" else "")
         KeepAliveService.start(this)
     }
@@ -78,6 +91,9 @@ class ScreenReaderService : AccessibilityService() {
         if (pkg == packageName || IGNORED.any { pkg.startsWith(it) }) return
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             ScreenState.foregroundPackage = pkg
+        } else if (pkg in ScreenState.skipScreenForPackages) {
+            // Sesiunea media dă deja titlul și poziția exactă: nu trezim procesorul la fiecare subtitrare/secundă.
+            return
         }
         if (!isInteresting(pkg)) return
         // Cel mult o citire la ~1 s: playerele schimbă textele (timpul) foarte des.
@@ -94,9 +110,12 @@ class ScreenReaderService : AccessibilityService() {
 
     /** Pachetul ferestrei de aplicație din față (null dacă nu se poate afla). */
     private fun frontApp(): String? = runCatching {
-        val apps = windows.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
-        val front = apps.firstOrNull { it.isFocused } ?: apps.firstOrNull { it.isActive } ?: apps.firstOrNull()
-        front?.root?.packageName?.toString()
+        windows.asSequence()
+            .filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+            .sortedBy { if (it.isFocused) 0 else if (it.isActive) 1 else 2 }
+            .firstNotNullOfOrNull { window ->
+                window.root?.packageName?.toString()?.takeUnless { it == packageName }
+            }
     }.getOrNull()
 
     /**
@@ -138,6 +157,7 @@ class ScreenReaderService : AccessibilityService() {
 
     override fun onDestroy() {
         ScreenState.serviceConnected = false
+        ScreenState.onSnapshotRequest = null
         handler.removeCallbacksAndMessages(null)
         DiagLog.add("Citirea ecranului (accesibilitate) s-a oprit")
         super.onDestroy()
@@ -158,13 +178,28 @@ class ScreenReaderService : AccessibilityService() {
         runCatching { windows }.getOrNull()?.forEach { w -> w.root?.let { all.add(it) } }
         if (all.isEmpty()) rootInActiveWindow?.let { all.add(it) }
         val roots = all.filter { it.packageName?.toString() == pkg }
-        if (roots.isEmpty()) return
-        roots.forEach { collect(it, items, ranges, 0) }
+        if (roots.isEmpty()) {
+            all.forEach(::recycleLegacy)
+            return
+        }
+        try {
+            roots.forEach { collect(it, items, ranges, 0) }
+        } finally {
+            all.forEach(::recycleLegacy)
+        }
 
         val app = ScrobblerState.live.firstOrNull { it.packageName == pkg }?.appLabel ?: appLabel(pkg)
         val guess = ScreenText.guess(items, app)
         val times = ScreenText.times(items, ranges)
-        val snap = ScreenSnapshot(pkg, lastSnapshotAt, guess, times, ScreenText.hasPlayButton(items), items.size)
+        val snap = ScreenSnapshot(
+            pkg,
+            lastSnapshotAt,
+            guess,
+            times,
+            ScreenText.hasPlayButton(items),
+            items.size,
+            isAd = ScreenText.isAdScreen(items),
+        )
         ScreenState.publish(snap)
 
         // Jurnal: doar când se schimbă ce înțelegem de pe ecran (nu la fiecare secundă).
@@ -197,7 +232,18 @@ class ScreenReaderService : AccessibilityService() {
         }
         for (i in 0 until node.childCount) {
             val child = runCatching { node.getChild(i) }.getOrNull() ?: continue
-            collect(child, items, ranges, depth + 1)
+            try {
+                collect(child, items, ranges, depth + 1)
+            } finally {
+                recycleLegacy(child)
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun recycleLegacy(node: AccessibilityNodeInfo) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            runCatching { node.recycle() }
         }
     }
 
@@ -212,12 +258,12 @@ class ScreenReaderService : AccessibilityService() {
          */
         val READER_PREFIXES = listOf("com.apple.atve.", "com.nuvio", "app.nuvio", "com.debridstream")
 
-        const val SETTLE_MS = 700L
-        const val POLL_MS = 4_000L
-        const val MIN_GAP_MS = 1_500L
-        const val MAX_DEPTH = 40
-        const val MAX_ITEMS = 300
-        const val MAX_NODES = 3000
+        const val SETTLE_MS = 800L
+        const val POLL_MS = 5_000L
+        const val MIN_GAP_MS = 2_500L
+        const val MAX_DEPTH = 36
+        const val MAX_ITEMS = 120
+        const val MAX_NODES = 800
 
         /** Sistemul, tastaturile și launcherele: nu au titluri de film. */
         val IGNORED = listOf(

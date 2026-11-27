@@ -23,11 +23,11 @@ class ImportParsingTest {
     @Test
     fun csvRomanianAndLimitedSeries() {
         assertEquals(
-            TitleGuess.SeasonNamedEpisode("Mercredi", 2, "Ep 1"),
+            TitleGuess.NumberedEpisode("Mercredi", 2, 1, null),
             ImportParser.guesses(ImportItem(title = "Mercredi: Sezonul 2: Ep 1")).first(),
         )
         assertEquals(
-            TitleGuess.SeasonNamedEpisode("Adolescence", 1, "Episode 1"),
+            TitleGuess.NumberedEpisode("Adolescence", 1, 1, null),
             ImportParser.guesses(ImportItem(title = "Adolescence: Limited Series: Episode 1")).first(),
         )
     }

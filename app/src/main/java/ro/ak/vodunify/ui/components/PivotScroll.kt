@@ -8,27 +8,29 @@ import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import kotlinx.coroutines.Job
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.gestures.animateScrollBy
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyListState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 
 /**
  * Derulare verticală „cu pivot”, ca pe TV (preluată din AK VOD Hub): rândul cu focus ajunge mereu la aceeași
@@ -75,26 +77,82 @@ fun DefaultScroll(content: @Composable () -> Unit) {
     }
 }
 
-/**
- * Acasă pe TV: rânduri cu poziții fixe. Fiecare rând ocupă exact [slotHeight] (titlu + postere + spațiu), oricât
- * de înalte îi sunt cardurile (16:9 sau postere), iar lista arată un singur rând și, dedesubt, titlul celui
- * următor. Rândul care primește focusul e adus sus (titlul lui mereu în același loc), pe loc sau animat ([animate]).
- */
+/** Focusul vertical se mută între elementele listei, chiar dacă următorul rând nu e compus încă. */
 class HomeRows(
     val slotHeight: Dp,
     private val state: LazyListState,
     private val scope: CoroutineScope,
-    private val animate: Boolean,
 ) {
-    /** Marginea de sus a listei, în coordonatele ecranului. */
-    var listTop: Float = 0f
+    private val requesters = mutableMapOf<String, FocusRequester>()
+    private var focused: String? = null
+    private var moving: String? = null
+    private var scroll: Job? = null
 
-    fun bringToTop(rowTop: Float) {
-        val delta = rowTop - listTop
-        if (abs(delta) < 1f) return
-        scope.launch {
-            if (animate) state.animateScrollBy(delta) else state.scrollBy(delta)
+    fun register(key: String, requester: FocusRequester) { requesters[key] = requester }
+
+    fun unregister(key: String, requester: FocusRequester) { requesters.remove(key, requester) }
+
+    fun entered(key: String, index: Int) {
+        focused = key
+        if (moving != null || (state.firstVisibleItemIndex == index && state.firstVisibleItemScrollOffset == 0)) return
+        scroll?.cancel()
+        scroll = scope.launch { state.scrollToItem(index) }
+    }
+
+    fun move(event: KeyEvent, keys: List<String?>, animate: Boolean): Boolean {
+        if (event.type != KeyEventType.KeyDown) return false
+        val step = when (event.key) {
+            Key.DirectionUp -> -1
+            Key.DirectionDown -> 1
+            else -> return false
         }
+        if (moving != null) return true
+        val current = keys.indexOf(focused ?: return false)
+        if (current < 0) return false
+        val next = if (step > 0) {
+            (current + 1 until keys.size).firstOrNull { keys[it] != null }
+        } else {
+            (current - 1 downTo 0).firstOrNull { keys[it] != null }
+        }
+        if (next == null) return step > 0
+        val target = checkNotNull(keys[next])
+        scroll?.cancel()
+        moving = target
+        scroll = scope.launch {
+            try {
+                if (animate) state.animateScrollToItem(next) else state.scrollToItem(next)
+                repeat(3) {
+                    withFrameNanos { }
+                    // Rândul se poate schimba între derulare și următorul cadru, la încărcarea datelor.
+                    runCatching { requesters[target]?.requestFocus() }
+                    if (focused == target) return@launch
+                }
+            } finally {
+                moving = null
+            }
+        }
+        return true
+    }
+}
+
+@Composable
+fun HomeRowFocus(key: String, index: Int, content: @Composable () -> Unit) {
+    val rows = LocalHomeRows.current
+    if (rows == null) {
+        content()
+        return
+    }
+    val requester = remember { FocusRequester() }
+    DisposableEffect(rows, key, requester) {
+        rows.register(key, requester)
+        onDispose { rows.unregister(key, requester) }
+    }
+    Box(
+        Modifier.focusRequester(requester)
+            .onFocusChanged { if (it.hasFocus) rows.entered(key, index) }
+            .focusGroup(),
+    ) {
+        CompositionLocalProvider(LocalHomeRowKey provides key, content = content)
     }
 }
 
@@ -102,7 +160,11 @@ val LocalHomeRows = staticCompositionLocalOf<HomeRows?> { null }
 
 /** Lista din Acasă (TV): nu se derulează singură după focus; rândurile se aduc sus prin [HomeRows]. */
 @Composable
-fun FixedRowsScroll(content: @Composable () -> Unit) {
+fun FixedRowsScroll(enabled: Boolean = true, content: @Composable () -> Unit) {
+    if (!enabled) {
+        content()
+        return
+    }
     val default = LocalBringIntoViewSpec.current
     val none = remember {
         object : BringIntoViewSpec {
@@ -112,31 +174,27 @@ fun FixedRowsScroll(content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalBringIntoViewSpec provides none, LocalDefaultScroll provides default) { content() }
 }
 
-/** Pe lista din Acasă: ține minte unde e lista pe ecran, ca rândurile să se poată alinia sus. */
-fun Modifier.homeRowsList(rows: HomeRows): Modifier = onGloballyPositioned { rows.listTop = it.positionInRoot().y }
+/** Focusul din Detalii derulează doar cât e necesar pentru a vedea elementul. */
+@Composable
+fun KeepFocusedContentVisible(enabled: Boolean, content: @Composable () -> Unit) {
+    if (!enabled) {
+        content()
+        return
+    }
+    val spec = remember {
+        object : BringIntoViewSpec {
+            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+                val end = offset + size
+                if (offset <= 0f && end >= containerSize) return 0f
+                if (offset < 0f) return offset
+                return (end - containerSize).coerceAtLeast(0f)
+            }
+        }
+    }
+    CompositionLocalProvider(LocalBringIntoViewSpec provides spec, content = content)
+}
 
-/**
- * Pe un rând (titlu + postere) din Acasă, pe TV: înălțime fixă și, când primește focusul, rândul urcă sus.
- * În afara Acasă (sau pe telefon) nu face nimic.
- */
+/** În Acasă pe TV, toate rândurile de carduri ocupă același spațiu. */
 fun Modifier.peekRow(): Modifier = composed {
-    val rows = LocalHomeRows.current ?: return@composed this
-    var top by remember { mutableStateOf<Float?>(null) }
-    var pending by remember { mutableStateOf(false) }
-    this
-        .height(rows.slotHeight)
-        .onFocusChanged { s ->
-            if (s.hasFocus) {
-                val t = top
-                if (t != null) rows.bringToTop(t) else pending = true
-            }
-        }
-        .onGloballyPositioned { c ->
-            val t = c.positionInRoot().y
-            top = t
-            if (pending) {
-                pending = false
-                rows.bringToTop(t)
-            }
-        }
+    LocalHomeRows.current?.let { height(it.slotHeight) } ?: this
 }

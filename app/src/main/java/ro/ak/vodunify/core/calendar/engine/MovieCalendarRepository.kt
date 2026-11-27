@@ -64,6 +64,7 @@ class MovieCalendarRepository(
         settings: CalendarSettings,
         apiKey: String,
         omdbKey: String = "",
+        onProgress: (suspend (MovieCalendarResult) -> Unit)? = null,
     ): MovieCalendarResult = coroutineScope {
         require(!to.isBefore(from)) { "to < from" }
         val api = apiFactory(apiKey)
@@ -126,52 +127,39 @@ class MovieCalendarRepository(
         val anticipated = anticipatedDeferred.await()
         val useImdb = imdbRatings != null && omdbKey.isNotBlank()
 
-        val semaphore = Semaphore(concurrency)
-        val ids = (kept.map { it.id } + settings.followedMovieIds()).distinct()
-        val results = ids.map { id ->
-            async {
-                semaphore.withPermit {
-                    try {
-                        Result.success(entriesForMovie(api, id, from, to, settings, anticipated, omdbKey.takeIf { useImdb }, program))
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        Result.failure(e)
-                    }
-                }
+        fun build(entries: List<MovieEntry>): MovieCalendarResult {
+            val inRange = entries.distinctBy { it.key }.sortedWith(movieOrder)
+            val (categoryHidden, visible) = inRange.partition { e ->
+                !e.isFollowed && e.categories.any { it in settings.hiddenCategories }
             }
-        }.awaitAll()
+            // Filtrul pentru aplicații se aplică lansărilor de streaming.
+            val (onMyApps, notOnMyApps) = if (settings.onlyInstalledApps) {
+                visible.partition { it.kind != MovieReleaseKind.STREAMING || it.watchOn != null || it.isFollowed }
+            } else visible to emptyList()
+            val (passed, rejected) = onMyApps.partition { it.verdict.passed }
+            return MovieCalendarResult(
+                entries = passed,
+                rejected = rejected,
+                hiddenByCategory = (hiddenByCategoryIds + categoryHidden.map { it.movieId }).size,
+                hiddenByUser = hiddenByUser,
+                notOnMyApps = notOnMyApps.size,
+                usedImdb = useImdb,
+                anticipatedSource = anticipatedSource.label,
+            )
+        }
+
+        val ids = (settings.followedMovieIds() + kept.map { it.id }).distinct()
+        val publish: (suspend (List<MovieEntry>) -> Unit)? = onProgress?.let { update ->
+            { entries -> build(entries).takeIf { it.entries.isNotEmpty() }?.let { update(it) }; Unit }
+        }
+        val results = loadCalendarTitles(ids, concurrency, publish) { id ->
+            entriesForMovie(api, id, from, to, settings, anticipated, omdbKey.takeIf { useImdb }, program)
+        }
         if (results.isNotEmpty() && results.all { it.isFailure }) {
             throw results.first().exceptionOrNull() ?: TmdbException("TMDB: eroare necunoscută")
         }
-
-        val inRange = results.flatMap { it.getOrDefault(emptyList()) }
-            .distinctBy { it.key }
-            .sortedWith(movieOrder)
-
-        // Details can reveal a category discover did not (origin country: Indian, Turkish, …).
-        val (categoryHidden, visible) = inRange.partition { e ->
-            !e.isFollowed && e.categories.any { it in settings.hiddenCategories }
-        }
-        hiddenByCategoryIds += categoryHidden.map { it.movieId }
-
-        // "Only my apps" only applies to streaming: cinema and digital aren't tied to an app.
-        val (onMyApps, notOnMyApps) = if (settings.onlyInstalledApps) {
-            visible.partition { it.kind != MovieReleaseKind.STREAMING || it.watchOn != null || it.isFollowed }
-        } else {
-            visible to emptyList()
-        }
-        val (passed, rejected) = onMyApps.partition { it.verdict.passed }
-
-        MovieCalendarResult(
-            entries = passed,
-            rejected = rejected,
-            hiddenByCategory = hiddenByCategoryIds.size,
-            hiddenByUser = hiddenByUser,
-            notOnMyApps = notOnMyApps.size,
-            usedImdb = useImdb,
-            anticipatedSource = anticipatedSource.label,
-        )
+        build(results.flatMap { it.getOrDefault(emptyList()) })
+            .copy(complete = discovered.none { it.isFailure } && results.none { it.isFailure })
     }
 
     /** (region, TMDB release types) to ask `discover/movie` for. */
@@ -194,7 +182,11 @@ class MovieCalendarRepository(
     ): Result<List<MovieSummaryDto>> = try {
         val first = api.discoverMovieReleases(region.code, types, from, to, page = 1)
         val lastPage = minOf(first.totalPages, maxPages)
-        val rest = (2..lastPage).flatMap { page -> api.discoverMovieReleases(region.code, types, from, to, page).results }
+        val rest = coroutineScope {
+            (2..lastPage).map { page ->
+                async { api.discoverMovieReleases(region.code, types, from, to, page).results }
+            }.awaitAll().flatten()
+        }
         Result.success(first.results + rest)
     } catch (e: CancellationException) {
         throw e

@@ -8,6 +8,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import ro.ak.vodunify.core.net.readResponse
 import java.io.IOException
 import java.net.URLEncoder
 import java.time.LocalDate
@@ -46,7 +47,7 @@ class OrangeFilmSource(
     }
 
     private suspend fun fetch(url: String): String = withContext(Dispatchers.IO) {
-        http.newCall(Request.Builder().url(url).header("User-Agent", USER_AGENT).get().build()).execute().use { r ->
+        http.newCall(Request.Builder().url(url).header("User-Agent", USER_AGENT).get().build()).readResponse { r ->
             if (!r.isSuccessful) throw IOException("Orange Film: HTTP ${r.code}")
             r.body?.string().orEmpty()
         }

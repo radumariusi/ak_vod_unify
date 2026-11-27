@@ -1,9 +1,11 @@
 package ro.ak.vodunify.core.calendar.quality
 
+import kotlinx.serialization.Serializable
 import ro.ak.vodunify.core.calendar.model.ImdbRating
 import ro.ak.vodunify.core.calendar.model.QualityThresholds
 
 /** Why a show is (or isn't) in the calendar. */
+@Serializable
 enum class QualityVerdict(val passed: Boolean, val label: String, val movieLabel: String) {
     PASS_FOLLOWED(true, "Urmărești serialul", "Urmărești filmul"),
     PASS_RATING(true, "Trece pragurile de notă", "Trece pragurile de notă"),

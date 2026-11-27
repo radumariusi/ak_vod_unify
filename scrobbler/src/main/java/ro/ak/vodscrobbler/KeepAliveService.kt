@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
@@ -37,18 +38,23 @@ class KeepAliveService : Service() {
     /** Mărimea, colțul și transparența cu care a fost pusă bulina; altele = o refacem. */
     private var dotLayout: Triple<Int, Prefs.Corner, Int>? = null
 
-    private val refresher = object : Runnable {
-        override fun run() {
-            updateDot()
-            handler.postDelayed(this, 2_000)
-        }
+    private val updateIndicator = Runnable { updateDot() }
+    private val statusChanged = { scheduleIndicatorUpdate() }
+    private val dotPreferences = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        scheduleIndicatorUpdate()
+    }
+
+    private fun scheduleIndicatorUpdate() {
+        handler.removeCallbacks(updateIndicator)
+        handler.post(updateIndicator)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
-        ScrobblerState.keepAliveRunning = true
+        Prefs.observe(this, dotPreferences)
+        ScrobblerState.observeStatus(statusChanged)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -66,30 +72,50 @@ class KeepAliveService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        handler.removeCallbacks(refresher)
-        handler.post(refresher)
+        ScrobblerState.keepAliveRunning = true
+        scheduleIndicatorUpdate()
         return START_STICKY
     }
 
     override fun onDestroy() {
+        Prefs.stopObserving(this, dotPreferences)
+        ScrobblerState.stopObservingStatus(statusChanged)
         handler.removeCallbacksAndMessages(null)
         removeDot()
         ScrobblerState.keepAliveRunning = false
         super.onDestroy()
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Dacă sistemul sau TV-ul închide sarcina din fundal, reprogramăm repornirea serviciului permanent.
+        val restart = PendingIntent.getForegroundService(
+            applicationContext,
+            101,
+            Intent(applicationContext, KeepAliveService::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_ONE_SHOT,
+        )
+        runCatching {
+            val am = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+            am.set(android.app.AlarmManager.ELAPSED_REALTIME, android.os.SystemClock.elapsedRealtime() + 2_000L, restart)
+        }
+        super.onTaskRemoved(rootIntent)
+    }
+
     private fun notification(): Notification {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.createNotificationChannel(
-            NotificationChannel(CHANNEL, "AK Scrobbler activ", NotificationManager.IMPORTANCE_MIN).apply {
+            NotificationChannel(CHANNEL, "AK Scrobbler activ", NotificationManager.IMPORTANCE_LOW).apply {
                 description = "Ține AK Scrobbler pornit ca să vadă ce rulează pe TV."
                 setShowBadge(false)
+                setSound(null, null)
+                enableVibration(false)
             },
         )
         val open = PendingIntent.getActivity(
             this,
             0,
-            Intent(this, StatusActivity::class.java),
+            Intent(this, StatusActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return Notification.Builder(this, CHANNEL)
@@ -112,7 +138,7 @@ class KeepAliveService : Service() {
         val view = dot ?: addDot(layout) ?: return
         val state = when {
             !ScrobblerState.listenerConnected -> Prefs.DotState.OFF
-            ScrobblerState.live.any { it.state == PlayState.PLAYING } -> Prefs.DotState.PLAYING
+            ScrobblerState.playingApp != null -> Prefs.DotState.PLAYING
             else -> Prefs.DotState.IDLE
         }
         (view.background as? GradientDrawable)?.setColor(Prefs.dotColor(this, state).value)
@@ -168,6 +194,11 @@ class KeepAliveService : Service() {
         private const val TAG = "AKScrobbler"
         private const val CHANNEL = "keep_alive"
         private const val NOTIFICATION_ID = 1
+
+        fun reconnect(context: Context) {
+            start(context)
+            MediaListenerService.reconnect(context)
+        }
 
         /** Pornește serviciul dacă se poate (din fundal, Android 12+ poate refuza: nu e grav). */
         fun start(context: Context) {

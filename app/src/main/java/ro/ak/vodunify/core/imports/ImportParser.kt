@@ -48,6 +48,9 @@ object ImportParser {
                     // „S1:E3” în numele episodului.
                     addAll(TitleParser.guesses(mapOf("title" to episodeTitle, "artist" to series)).filterIsInstance<TitleGuess.NumberedEpisode>())
                 }
+                if (numbered != null && season == null && episodeTitle?.let(EPISODE_ONLY::matches) != false) {
+                    add(TitleGuess.NumberedEpisode(series, null, numbered, null))
+                }
             }.distinct()
         }
 
@@ -60,7 +63,9 @@ object ImportParser {
             val ep = parts.subList(seasonIndex + 1, parts.size).joinToString(": ").takeIf { it.isNotEmpty() }
             val season = seasonNumber(parts[seasonIndex])
             return if (ep != null) {
-                listOf(TitleGuess.SeasonNamedEpisode(show, season, ep))
+                val number = EPISODE_ONLY.matchEntire(ep)?.groupValues?.get(1)?.toIntOrNull()
+                if (number != null) listOf(TitleGuess.NumberedEpisode(show, season, number, null))
+                else listOf(TitleGuess.SeasonNamedEpisode(show, season, ep))
             } else {
                 listOf(TitleGuess.Movie(title, null)) // ex. „Kill Bill: Vol. 1”
             }
@@ -68,10 +73,10 @@ object ImportParser {
         return buildList {
             if (parts.size >= 2) {
                 // „Serial: Episod” (fără sezon) sau un film cu „:” în titlu („Dune: Part Two”).
-                add(TitleGuess.Movie(title, null))
+                addAll(TitleParser.guesses(mapOf("title" to title)).filterIsInstance<TitleGuess.Movie>())
                 add(TitleGuess.SeasonNamedEpisode(parts.first(), null, parts.drop(1).joinToString(": ")))
             } else {
-                add(TitleGuess.Movie(title, null))
+                addAll(TitleParser.guesses(mapOf("title" to title)).filterIsInstance<TitleGuess.Movie>())
             }
         }
     }
