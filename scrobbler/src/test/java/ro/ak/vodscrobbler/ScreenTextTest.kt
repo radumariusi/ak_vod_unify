@@ -165,4 +165,9 @@ class ScreenTextTest {
     fun appleTvSkipButtonIsNotATitle() {
         assertEquals(null, ScreenText.guess(items("Skip"), "Apple TV"))
     }
+
+    @Test
+    fun appleTvYearCommaTitleBecomesTitleWithYear() {
+        assertEquals("Way of the Warrior Kid (2026)", ScreenText.guess(items("2026, Way of the Warrior Kid", "Playback Controls"), "Apple TV")?.title)
+    }
 }

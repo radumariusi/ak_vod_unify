@@ -31,6 +31,10 @@
 
     <queries>
         <package android:name="${mainAppId}" />
+        <!-- Motorul de voce (TTS): dacă e oprit, modul cititor de ecran poate sta pornit peste tot. -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
         <!-- Ca să afișăm numele aplicațiilor care redau (Netflix, Prime Video…), nu doar pachetul. -->
         <intent>
             <action android:name="android.intent.action.MAIN" />

@@ -133,10 +133,15 @@ object ScreenText {
         }
 
         // 3) Film: primul text rămas (de obicei titlul e primul pe ecranul de pauză).
-        return ScreenGuess(clean.first().text, null)
+        // Apple TV: „2026, Way of the Warrior Kid” (anul, titlul) → „Way of the Warrior Kid (2026)”.
+        val first = clean.first().text
+        val yearFirst = YEAR_FIRST.matchEntire(first)
+        return ScreenGuess(yearFirst?.let { "${it.groupValues[2].trim()} (${it.groupValues[1]})" } ?: first, null)
     }
 
     private val IMAGE_LABEL = Regex("""(?i)^(?:picture|image|img|icon|logo)\s+of\b|\bheader logo\b|\bnavigation img\b""")
+
+    private val YEAR_FIRST = Regex("""^((?:19|20)\d{2}),\s+(\S.{1,100})$""")
 
     private val SEASON_ONLY = Regex("""(?i)^(S|T|season|sezonul|sezon)\s*\d{1,2}$""")
     private val RESOURCE_KEY = Regex("""^[A-Z][A-Za-z]*(\.[A-Za-z]+){2,}$""")
