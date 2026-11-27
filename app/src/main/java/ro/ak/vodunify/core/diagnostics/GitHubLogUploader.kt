@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -20,12 +21,20 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Colectează jurnalele AK VOD Unify + AK Scrobbler și le încarcă într-un GitHub Gist privat
+ * Colectează jurnalele AK VOD Unify + AK Scrobbler și le încarcă pe GitHub
  * (sau le salvează local într-un fișier text).
+ *
+ * Destinația principală e un repo PRIVAT fix ([LOG_REPO]): `latest.txt` se suprascrie la fiecare
+ * încărcare, iar o copie datată rămâne în `history/`. Așa Claude poate citi mereu ultimul jurnal
+ * direct (repos/{owner}/{repo}/contents/latest.txt), fără să mai fie trimis vreun link.
+ * Dacă repo-ul nu e accesibil cu token-ul dat, cade înapoi pe Gist secret (comportamentul vechi).
  */
 object GitHubLogUploader {
     private const val PREFS = "github_diag"
     private const val KEY_TOKEN = "gist_token"
+    const val LOG_REPO = "radumariusi/ak_vod_logs"
+    private const val API = "https://api.github.com"
+    private val JSON = "application/json; charset=utf-8".toMediaType()
 
     fun getToken(context: Context): String =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_TOKEN, "").orEmpty()
@@ -103,6 +112,107 @@ object GitHubLogUploader {
         }
         return "=== AK Scrobbler ===\n(nu este instalat sau nu a răspuns la interogarea de diagnostic)"
     }
+
+    /** Rezultatul încărcării: link-ul de deschis și unde a ajuns jurnalul. */
+    data class UploadResult(val url: String, val toRepo: Boolean, val note: String? = null)
+
+    /** Încarcă în repo-ul fix de jurnale; dacă nu se poate, încearcă Gist. */
+    suspend fun upload(okHttp: OkHttpClient, token: String, report: String): Result<UploadResult> = withContext(Dispatchers.IO) {
+        val repo = uploadToRepo(okHttp, token, report)
+        if (repo.isSuccess) return@withContext Result.success(UploadResult(repo.getOrThrow(), toRepo = true))
+        val repoError = repo.exceptionOrNull()?.message ?: "eroare necunoscută"
+        val gist = uploadGist(okHttp, token, report)
+        if (gist.isSuccess) {
+            Result.success(
+                UploadResult(
+                    gist.getOrThrow(),
+                    toRepo = false,
+                    note = "Repo-ul $LOG_REPO nu e accesibil ($repoError). L-am pus pe Gist; trimite link-ul sau setează un token cu acces la repo.",
+                ),
+            )
+        } else {
+            Result.failure(IllegalStateException("Repo $LOG_REPO: $repoError · Gist: ${gist.exceptionOrNull()?.message}"))
+        }
+    }
+
+    /** Scrie `latest.txt` (suprascris) + `history/<stamp>.txt` în [LOG_REPO]. Întoarce link-ul către latest.txt. */
+    suspend fun uploadToRepo(okHttp: OkHttpClient, token: String, report: String): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val cleanToken = token.trim()
+            require(cleanToken.isNotEmpty()) { "Lipsește token-ul GitHub." }
+            val stamp = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.ROOT).format(Date())
+            val content = Base64.encodeToString(report.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+            val message = "Jurnal ${BuildConfig.VERSION_NAME} · $stamp"
+
+            // 1. latest.txt: are nevoie de sha-ul curent ca să-l suprascriem.
+            val sha: String? = when (val found = fileSha(okHttp, cleanToken, "latest.txt")) {
+                REPO_MISSING -> {
+                    createRepo(okHttp, cleanToken)
+                    fileSha(okHttp, cleanToken, "latest.txt") as? String
+                }
+                else -> found as? String
+            }
+            putFile(okHttp, cleanToken, "latest.txt", content, message, sha)
+            // 2. copia datată (fișier nou, fără sha). Un eșec aici nu strică latest.txt.
+            runCatching { putFile(okHttp, cleanToken, "history/$stamp.txt", content, message, null) }
+            "https://github.com/$LOG_REPO/blob/main/latest.txt"
+        }
+    }
+
+    private val REPO_MISSING = Any()
+
+    /** sha-ul fișierului, null dacă fișierul nu există, [REPO_MISSING] dacă repo-ul nu există / nu e vizibil. */
+    private fun fileSha(okHttp: OkHttpClient, token: String, path: String): Any? {
+        val req = authed(token, "$API/repos/$LOG_REPO/contents/$path").get().build()
+        okHttp.newCall(req).execute().use { resp ->
+            val raw = resp.body?.string().orEmpty()
+            return when {
+                resp.isSuccessful -> JSONObject(raw).optString("sha").ifBlank { null }
+                resp.code == 404 && raw.contains("This repository is empty", ignoreCase = true) -> null
+                resp.code == 404 -> if (repoExists(okHttp, token)) null else REPO_MISSING
+                else -> error("GitHub HTTP ${resp.code}: ${raw.take(160)}")
+            }
+        }
+    }
+
+    private fun repoExists(okHttp: OkHttpClient, token: String): Boolean {
+        val req = authed(token, "$API/repos/$LOG_REPO").get().build()
+        return okHttp.newCall(req).execute().use { it.isSuccessful }
+    }
+
+    /** Încearcă să creeze repo-ul privat (merge doar cu token-uri care pot crea repo-uri). */
+    private fun createRepo(okHttp: OkHttpClient, token: String) {
+        val body = JSONObject().apply {
+            put("name", LOG_REPO.substringAfter('/'))
+            put("private", true)
+            put("description", "Jurnale de diagnostic AK VOD Unify (privat)")
+            put("auto_init", true)
+        }
+        val req = authed(token, "$API/user/repos").post(body.toString().toRequestBody(JSON)).build()
+        okHttp.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) {
+                error("repo-ul nu există și nu l-am putut crea (HTTP ${resp.code}). Creează-l privat pe github.com/new")
+            }
+        }
+    }
+
+    private fun putFile(okHttp: OkHttpClient, token: String, path: String, b64: String, message: String, sha: String?) {
+        val body = JSONObject().apply {
+            put("message", message)
+            put("content", b64)
+            if (sha != null) put("sha", sha)
+        }
+        val req = authed(token, "$API/repos/$LOG_REPO/contents/$path").put(body.toString().toRequestBody(JSON)).build()
+        okHttp.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) error("HTTP ${resp.code}: ${resp.body?.string().orEmpty().take(160)}")
+        }
+    }
+
+    private fun authed(token: String, url: String) = Request.Builder()
+        .url(url)
+        .header("Authorization", "Bearer $token")
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
 
     suspend fun uploadGist(okHttp: OkHttpClient, token: String, report: String): Result<String> = withContext(Dispatchers.IO) {
         runCatching {

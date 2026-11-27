@@ -71,9 +71,9 @@ class DiagnosticsViewModel @Inject constructor(
             netflixStatus = scrobble.netflix.value,
             unresolvedCount = scrobble.unresolved.value,
         )
-        val url = GitHubLogUploader.uploadGist(okHttp, _githubToken.value, report).getOrThrow()
-        _uploadedGistUrl.value = url
-        "Jurnal încărcat pe GitHub: $url"
+        val res = GitHubLogUploader.upload(okHttp, _githubToken.value, report).getOrThrow()
+        _uploadedGistUrl.value = res.url
+        res.note ?: "Jurnal încărcat în ${GitHubLogUploader.LOG_REPO} (latest.txt). Claude îl poate citi direct, nu mai trebuie trimis link."
     }
 
     fun saveLogsLocally() = launchAction("save_logs") {

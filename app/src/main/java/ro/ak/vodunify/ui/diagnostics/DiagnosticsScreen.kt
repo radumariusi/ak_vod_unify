@@ -1,5 +1,7 @@
 package ro.ak.vodunify.ui.diagnostics
 
+import ro.ak.vodunify.core.diagnostics.GitHubLogUploader
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -76,11 +78,13 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel = hiltViewModel()) {
         var draft by remember(githubToken) { mutableStateOf(githubToken) }
         AlertDialog(
             onDismissRequest = { showTokenDialog = false },
-            title = { Text("Token GitHub (scope: gist)") },
+            title = { Text("Token GitHub pentru jurnale") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "Introdu un Personal Access Token GitHub cu permisiunea „gist”. Jurnalele se încarcă privat (unlisted) ca să le pot citi direct.",
+                        "Jurnalele merg în repo-ul privat ${GitHubLogUploader.LOG_REPO} (latest.txt), de unde Claude le citește direct. " +
+                            "Token recomandat: fine-grained, doar pentru acel repo, cu „Contents: Read and write”. " +
+                            "Un token doar cu „gist” merge în continuare, dar atunci jurnalul ajunge pe Gist și trebuie trimis link-ul.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                     TextInput(
@@ -158,7 +162,7 @@ fun DiagnosticsScreen(viewModel: DiagnosticsViewModel = hiltViewModel()) {
                     ) {
                         QrCode(content = url, size = 120.dp)
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("Link jurnal GitHub Gist:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                            Text("Link jurnal GitHub:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                             Text(url, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                         }
                     }
