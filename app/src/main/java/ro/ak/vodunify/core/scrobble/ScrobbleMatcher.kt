@@ -71,6 +71,31 @@ object MatchRules {
 
     fun yearOf(date: String?): Int? = date?.take(4)?.toIntOrNull()
 
+    /**
+     * Seriale la care VOYO numerotează sezoanele altfel decât TMDb. Las Fierbinți (verificat pe
+     * TMDb, Wikipedia RO și anunțurile PRO TV, 27.11.2026): PRO TV/VOYO au sărit un număr în 2023
+     * (toamna 2023 = VOYO 23, Wikipedia 24), iar TMDb a lipit toamna 2023 peste sezonul 23 și are
+     * sezonul 26 duplicat (toamna 2024 + începutul primăverii 2025). Rezultă:
+     *   VOYO 23 (toamna 2023) = TMDb 23 (doar ep. 18+ sunt ale toamnei; 1–17 lipsesc din TMDb),
+     *   VOYO 24 (primăvara 2024) = TMDb 24, VOYO 25 (toamna 2024) = TMDb 25 (ep. 1–26),
+     *   VOYO 26 (primăvara 2025) = TMDb 27, VOYO 27 (toamna 2025) = TMDb 28,
+     *   VOYO 28 (primăvara 2026) = TMDb 29, VOYO 29 (toamna 2026) = TMDb 30.
+     * Episoadele au aceleași numere în sezonul corespondent, deci mutăm doar sezonul.
+     */
+    val SEASON_REMAP: Map<String, Map<Int, Int>> = mapOf(
+        "lasfierbinti" to mapOf(26 to 27, 27 to 28, 28 to 29, 29 to 30),
+    )
+
+    fun remapSeason(showNames: List<String?>, season: Int): Int {
+        val keys = showNames.mapNotNull { it?.let(::plainKey) }
+        val map = SEASON_REMAP.entries.firstOrNull { it.key in keys }?.value ?: return season
+        return map[season] ?: season
+    }
+
+    private fun plainKey(s: String): String =
+        java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "").lowercase().filter { it.isLetterOrDigit() }
+
     /** Verifică dacă durata raportată de player e compatibilă cu durata filmului în TMDb (evită potriviri false episod↔film). */
     fun compatibleDuration(runtimeMs: Long?, reportedMs: Long?): Boolean {
         if (runtimeMs == null || runtimeMs <= 0L || reportedMs == null || reportedMs < 3 * 60_000L) return true
@@ -203,20 +228,9 @@ class ScrobbleMatcher @Inject constructor(
         return episodeMatch(show, seasonNumber, ep.episodeNumber, ep.name, ep.runtime)
     }
 
-    /**
-     * Seriale la care aplicația numerotează sezoanele altfel decât TMDb (confirmat de Radu):
-     * Las Fierbinți: sezonul curent pe VOYO e 29, pe TMDb e 30. Sezoanele vechi nu le mutăm
-     * până nu verificăm (numerotarea se decalează de pe la sezonul 25).
-     */
-    private fun remapSeason(show: TvShow, season: Int): Int {
-        val names = listOfNotNull(show.name, show.details.name, show.item.originalName).map(::plainKey)
-        val map = SEASON_REMAP.entries.firstOrNull { it.key in names }?.value ?: return season
-        return map[season] ?: season
-    }
-
-    private fun plainKey(s: String): String =
-        java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD)
-            .replace(Regex("\\p{Mn}+"), "").lowercase().filter { it.isLetterOrDigit() }
+    /** Sezonul din aplicație → sezonul TMDb, pentru serialele numerotate altfel (vezi [MatchRules.remapSeason]). */
+    private fun remapSeason(show: TvShow, season: Int): Int =
+        MatchRules.remapSeason(listOfNotNull(show.name, show.details.name, show.item.originalName), season)
 
     /**
      * Episod încă nelistat în TMDb (VOYO publică episoadele cu o săptămână înaintea TV-ului): dacă
@@ -489,6 +503,5 @@ class ScrobbleMatcher @Inject constructor(
         const val MAX_SEASONS_SCANNED = 50
         const val MISS_TTL_MS = 10 * 60_000L
         const val MAX_UNLISTED_AHEAD = 6
-        val SEASON_REMAP = mapOf("lasfierbinti" to mapOf(29 to 30))
     }
 }
