@@ -409,7 +409,10 @@ class MediaListenerService : NotificationListenerService() {
             val guess = snap.guess
             // Pe pauză titlul nu se schimbă: ce apare atunci pe ecran e reclama de pauză (Peacock, Xumo).
             val pausedWithTitle = t.tracker.state == PlayState.PAUSED && t.screenGuess != null
-            if (guess != null && needsScreenShow(t) && guess != t.screenGuess && !pausedWithTitle) {
+            // Știm deja serialul + episodul: un text singur, fără episod și fără bara de timp (un buton
+            // ca „Skip” la Apple TV), nu e alt titlu.
+            val downgrade = t.screenGuess?.subtitle != null && guess?.subtitle == null && snap.times.isEmpty
+            if (guess != null && needsScreenShow(t) && guess != t.screenGuess && !pausedWithTitle && !downgrade) {
                 val previous = t.screenGuess
                 val hadNativeTitle = hasTextTitle(t)
                 val oldCode = ScreenPlayback.episodeCode(previous?.subtitle)

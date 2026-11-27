@@ -160,4 +160,9 @@ class ScreenTextTest {
     fun overlayBadgesAndImageLabelsAreNotTitles() {
         assertEquals(null, ScreenText.guess(items("On Now", "Info, button", "Loading Pluto TV", "Picture of home header logo."), "Pluto TV"))
     }
+
+    @Test
+    fun appleTvSkipButtonIsNotATitle() {
+        assertEquals(null, ScreenText.guess(items("Skip"), "Apple TV"))
+    }
 }
