@@ -183,7 +183,7 @@ class ScrobbleMatcher @Inject constructor(
     private suspend fun numbered(g: TitleGuess.NumberedEpisode, strict: Boolean): ScrobbleMatch? {
         val show = searchShow(g.show) ?: return null
         val seasons = show.details.seasons.filter { it.seasonNumber > 0 }
-        val seasonNumber = g.season ?: when {
+        val seasonNumber = g.season?.let { remapSeason(show, it) } ?: when {
             seasons.size == 1 -> seasons.first().seasonNumber
             // Fără sezon, dar cu numele episodului: îl căutăm după nume.
             g.episodeTitle != null -> return findByName(show, g.episodeTitle)
@@ -202,6 +202,21 @@ class ScrobbleMatcher @Inject constructor(
         }
         return episodeMatch(show, seasonNumber, ep.episodeNumber, ep.name, ep.runtime)
     }
+
+    /**
+     * Seriale la care aplicația numerotează sezoanele altfel decât TMDb (confirmat de Radu):
+     * Las Fierbinți: sezonul curent pe VOYO e 29, pe TMDb e 30. Sezoanele vechi nu le mutăm
+     * până nu verificăm (numerotarea se decalează de pe la sezonul 25).
+     */
+    private fun remapSeason(show: TvShow, season: Int): Int {
+        val names = listOfNotNull(show.name, show.details.name, show.item.originalName).map(::plainKey)
+        val map = SEASON_REMAP.entries.firstOrNull { it.key in names }?.value ?: return season
+        return map[season] ?: season
+    }
+
+    private fun plainKey(s: String): String =
+        java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "").lowercase().filter { it.isLetterOrDigit() }
 
     /**
      * Episod încă nelistat în TMDb (VOYO publică episoadele cu o săptămână înaintea TV-ului): dacă
@@ -474,5 +489,6 @@ class ScrobbleMatcher @Inject constructor(
         const val MAX_SEASONS_SCANNED = 50
         const val MISS_TTL_MS = 10 * 60_000L
         const val MAX_UNLISTED_AHEAD = 6
+        val SEASON_REMAP = mapOf("lasfierbinti" to mapOf(29 to 30))
     }
 }
