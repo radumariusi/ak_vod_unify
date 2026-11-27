@@ -95,6 +95,8 @@ class StatusActivity : Activity() {
             DiagLog.add("Mod cititor de ecran pentru toate aplicațiile (test): ${if (Prefs.readerAll(this)) "PORNIT" else "oprit"}")
             render()
         }
+        // v0.3.42: testul „mod cititor în toate aplicațiile” a stricat navigarea pe TV; butonul e ascuns.
+        readerButton.visibility = View.GONE
         column.addView(readerButton)
         dotButton = button("") {
             Prefs.setDotEnabled(this, !Prefs.dotEnabled(this))
