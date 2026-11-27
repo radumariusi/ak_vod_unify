@@ -82,6 +82,12 @@ class ScreenReaderService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val pkg = event?.packageName?.toString() ?: return
+        if (event.eventType == AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED && readerMode == true) {
+            // În modul cititor de ecran Android desenează un chenar alb pe elementul selectat
+            // („focus de accesibilitate”). Nu-l folosim la nimic: îl ștergem imediat, ca să nu se vadă.
+            hideFocusFrame(event)
+            return
+        }
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             // Netflix, când vede un cititor de ecran, citește cu voce tare butoanele (și oricum nu
             // ne arată textele): cât e Netflix în față, nu ne mai prezentăm ca cititor de ecran.
@@ -104,6 +110,21 @@ class ScreenReaderService : AccessibilityService() {
         val delay = if (now - lastSnapshotAt > MIN_GAP_MS) SETTLE_MS else MIN_GAP_MS
         handler.removeCallbacks(snapshotRunnable)
         handler.postDelayed(snapshotRunnable, delay)
+    }
+
+    private var focusClears = 0
+
+    private fun hideFocusFrame(event: AccessibilityEvent) {
+        val node = event.source ?: return
+        try {
+            val ok = node.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS)
+            if (focusClears < 3) {
+                focusClears++
+                DiagLog.add("Chenar de focus (cititor de ecran) ascuns în ${event.packageName}: ${if (ok) "da" else "nu"}")
+            }
+        } finally {
+            recycleLegacy(node)
+        }
     }
 
     private var isTv = false
