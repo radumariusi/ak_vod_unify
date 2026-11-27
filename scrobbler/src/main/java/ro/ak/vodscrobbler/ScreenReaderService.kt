@@ -133,7 +133,7 @@ class ScreenReaderService : AccessibilityService() {
         // Armarea expiră singură (15 s): n-o ștergem când apare Apple TV, ca modul să nu se
         // oprească/pornească în timp ce Apple TV se deschide (ferestrele se schimbă de câteva ori).
         val armed = ScreenState.readerArmed() && ARM_HOSTS.any { front.startsWith(it) }
-        val all = Prefs.readerAll(this)
+        val all = Prefs.readerAll(this) || noVoiceEngine()
         setReaderMode(all || READER_PREFIXES.any { front.startsWith(it) } || armed, if (armed) "$front (urmează Apple TV)" else front)
     }
 
@@ -158,6 +158,30 @@ class ScreenReaderService : AccessibilityService() {
             DiagLog.add("Mod cititor de ecran: ${if (on) "pornit" else "oprit"} · $why")
             if (on) muteAccessibilityVoice()
         }
+    }
+
+    private var ttsCheckedAt = 0L
+    private var ttsMissing = false
+
+    /**
+     * Fără niciun motor de voce (TTS) pornit pe TV (ex. `pm disable-user com.google.android.tts`),
+     * aplicațiile n-au cu ce vorbi: atunci ținem modul cititor de ecran pornit peste tot, ca Apple TV
+     * să-și arate titlul oricum ar fi deschis. Verificăm cel mult o dată pe minut.
+     */
+    private fun noVoiceEngine(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (ttsCheckedAt != 0L && now - ttsCheckedAt < 60_000L) return ttsMissing
+        ttsCheckedAt = now
+        val engines = runCatching {
+            packageManager.queryIntentServices(android.content.Intent("android.intent.action.TTS_SERVICE"), 0)
+                .map { it.serviceInfo.packageName }
+        }.getOrNull() ?: return ttsMissing
+        val missing = engines.isEmpty()
+        if (missing != ttsMissing || readerMode == null) {
+            DiagLog.add("Motoare de voce (TTS): ${engines.joinToString().ifBlank { "niciunul" }} → mod cititor de ecran ${if (missing) "pornit în toate aplicațiile" else "doar pentru Apple TV/Nuvio/DebridStream"}")
+        }
+        ttsMissing = missing
+        return missing
     }
 
     /**
