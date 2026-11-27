@@ -195,7 +195,17 @@ class ScrobbleRepository @Inject constructor(
             return done(ScrobbleResult.TOO_SHORT)
         }
         val guesses = TitleParser.guesses(event.fields, event.app)
-        var match = if (guesses.isNotEmpty() && matcher.isConfigured) matcher.match(guesses, reportedDuration) else null
+        // Peacock trimite la episoade doar numele episodului („Growing Pains”), fără serial: căutăm
+        // serialul după numele episodului (doar seriale de pe Peacock US), nu un film cu același nume.
+        val peacockEpisodeName = event.pkg.startsWith("com.peacocktv.") &&
+            reportedDuration != null && reportedDuration < PEACOCK_EPISODE_MAX_MS &&
+            guesses.isNotEmpty() && guesses.all { it is TitleGuess.Movie }
+        var match = when {
+            !matcher.isConfigured || guesses.isEmpty() -> null
+            peacockEpisodeName -> matcher.episodeOnly((guesses.first() as TitleGuess.Movie).title, reportedDuration, PEACOCK_PROVIDERS, "US")
+                .also { ro.ak.vodunify.core.diagnostics.AppDiagLog.add("Peacock episod fără serial „${(guesses.first() as TitleGuess.Movie).title}” → ${it?.media?.title ?: "negăsit"}") }
+            else -> matcher.match(guesses, reportedDuration)
+        }
         if (match == null && event.playId.isNotEmpty()) match = byPlay[event.playId]
         if (match == null) {
             // Nu aruncăm nimic: păstrăm vizionarea și o completăm când aflăm titlul (alt eveniment
@@ -546,3 +556,7 @@ data class AppProof(
         }
     }
 }
+
+/** Episoadele Peacock au sub 70 de minute; filmele (mai lungi) se caută normal, ca filme. */
+private const val PEACOCK_EPISODE_MAX_MS = 70 * 60_000L
+private val PEACOCK_PROVIDERS = setOf(386, 387)

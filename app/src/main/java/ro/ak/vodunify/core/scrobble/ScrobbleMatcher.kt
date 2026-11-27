@@ -20,6 +20,7 @@ import ro.ak.vodunify.core.tmdb.TmdbListItem
 import ro.ak.vodunify.core.tmdb.TmdbPage
 import ro.ak.vodunify.core.tmdb.TmdbSeasonDetails
 import ro.ak.vodunify.core.tmdb.TmdbTitleDetails
+import ro.ak.vodunify.core.tmdb.TmdbWatchProviders
 import java.net.URLEncoder
 import java.util.Collections
 import java.util.concurrent.TimeUnit
@@ -250,6 +251,80 @@ class ScrobbleMatcher @Inject constructor(
         if (g.episode <= listed || g.episode > listed + MAX_UNLISTED_AHEAD) return null
         return episodeMatch(show, s.seasonNumber, g.episode, g.episodeTitle, null)
     }
+
+    /**
+     * Doar numele episodului, fără serial (Peacock trimite „Growing Pains”, iar ecranul lui nu se
+     * poate citi). Wikidata știe ce seriale au un episod cu numele ăsta (cu id-ul TMDb); păstrăm doar
+     * serialele disponibile pe serviciul aplicației ([providerIds] în [region]), apoi episodul din
+     * TMDb cu durata potrivită. Mai multe la fel de bune → nimic (mai bine nepotrivit decât greșit).
+     */
+    suspend fun episodeOnly(episodeTitle: String, durationMs: Long?, providerIds: Set<Int>, region: String): ScrobbleMatch? {
+        val title = episodeTitle.trim()
+        if (title.length < 2 || providerIds.isEmpty()) return null
+        val key = "ep-only|$region|${durationMs?.div(60_000)}|${title.lowercase()}"
+        memo[key]?.let { return it }
+        val now = System.currentTimeMillis()
+        misses[key]?.let { at -> if (now - at < MISS_TTL_MS) return null else misses.remove(key) }
+        val candidates = wikidataSeriesForEpisode(title)
+        val onService = candidates.filter { c ->
+            val providers = runCatching {
+                tmdb.get("tv/${c.tmdbId}/watch/providers", emptyMap(), TmdbWatchProviders.serializer(), TmdbClient.LONG_TTL)
+            }.getOrNull()?.results?.get(region) ?: return@filter false
+            (providers.flatrate + providers.ads + providers.free).any { it.providerId in providerIds }
+        }.take(MAX_EPISODE_ONLY_SHOWS)
+        val found = mutableListOf<ScrobbleMatch>()
+        for (c in onService) {
+            val show = runCatching {
+                val details = tmdb.get("tv/${c.tmdbId}", mapOf("language" to "en-US"), TmdbTitleDetails.serializer(), TmdbClient.LONG_TTL)
+                TvShow(details, TmdbListItem(id = details.id, name = details.name))
+            }.getOrNull() ?: continue
+            val m = c.season?.let { sn ->
+                season(show.id, sn, "en-US")?.episodes?.let { pickEpisodeByName(it, title) }
+                    ?.let { episodeMatch(show, sn, it.episodeNumber, it.name, it.runtime) }
+            } ?: findByName(show, title) ?: continue
+            if (MatchRules.compatibleDuration(m.runtimeMs, durationMs)) found += m
+        }
+        val result = when {
+            found.size <= 1 -> found.firstOrNull()
+            durationMs == null -> null
+            else -> {
+                // Mai multe seriale: alegem durata clar cea mai apropiată (cel puțin 1 minut diferență).
+                val sorted = found.sortedBy { kotlin.math.abs((it.runtimeMs ?: Long.MAX_VALUE / 2) - durationMs) }
+                val d0 = kotlin.math.abs((sorted[0].runtimeMs ?: Long.MAX_VALUE / 2) - durationMs)
+                val d1 = kotlin.math.abs((sorted[1].runtimeMs ?: Long.MAX_VALUE / 2) - durationMs)
+                sorted[0].takeIf { d1 - d0 >= 60_000L }
+            }
+        }
+        if (result != null) memo[key] = result else misses[key] = now
+        return result
+    }
+
+    internal data class EpisodeSeries(val tmdbId: Long, val season: Int?)
+
+    private suspend fun wikidataSeriesForEpisode(title: String): List<EpisodeSeries> {
+        val escaped = title.replace("\\", "\\\\").replace("\"", "\\\"")
+        val sparql = """
+            SELECT DISTINCT ?tmdb ?sn WHERE {
+              ?ep rdfs:label "$escaped"@en .
+              ?ep wdt:P31/wdt:P279* wd:Q21191270 .
+              ?ep wdt:P179 ?series .
+              ?series wdt:P4983 ?tmdb .
+              OPTIONAL { ?ep wdt:P4908 ?season . ?season p:P179 [ pq:P1545 ?sn ] . }
+            } LIMIT 60
+        """.trimIndent()
+        val url = "https://query.wikidata.org/sparql?format=json&query=" + URLEncoder.encode(sparql, "UTF-8")
+        val body = httpGet(url) ?: return emptyList()
+        return parseWikidataEpisodeSeries(body)
+    }
+
+    internal fun parseWikidataEpisodeSeries(body: String): List<EpisodeSeries> = runCatching {
+        val rows = json.parseToJsonElement(body).jsonObject["results"]?.jsonObject?.get("bindings")?.jsonArray ?: return emptyList()
+        rows.mapNotNull { row ->
+            val o = row as? JsonObject ?: return@mapNotNull null
+            val id = o["tmdb"]?.jsonObject?.get("value")?.jsonPrimitive?.content?.toLongOrNull() ?: return@mapNotNull null
+            EpisodeSeries(id, o["sn"]?.jsonObject?.get("value")?.jsonPrimitive?.content?.toIntOrNull())
+        }.groupBy { it.tmdbId }.map { (id, list) -> EpisodeSeries(id, list.firstNotNullOfOrNull { it.season }) }
+    }.getOrDefault(emptyList())
 
     private suspend fun named(g: TitleGuess.NamedEpisode): ScrobbleMatch? {
         val show = searchShow(g.show) ?: return null
@@ -501,6 +576,7 @@ class ScrobbleMatcher @Inject constructor(
     private companion object {
         val LANGUAGES = listOf("ro-RO", "en-US")
         const val MAX_SEASONS_SCANNED = 50
+        const val MAX_EPISODE_ONLY_SHOWS = 5
         const val MISS_TTL_MS = 10 * 60_000L
         const val MAX_UNLISTED_AHEAD = 6
     }
