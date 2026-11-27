@@ -104,6 +104,34 @@
                 android:resource="@xml/screen_reader" />
         </service>
 
+        <!--
+            Motor de voce MUT: aplicațiile care vorbesc singure în modul cititor de ecran (Netflix, Peacock)
+            ne dau textul, iar TV-ul nu scoate niciun sunet. Devine implicit prin ADB:
+            adb shell settings put secure tts_default_synth ro.ak.vodscrobbler
+        -->
+        <service
+            android:name=".SilentTtsService"
+            android:exported="true"
+            android:label="@string/silent_tts_label">
+            <intent-filter>
+                <action android:name="android.intent.action.TTS_SERVICE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <meta-data
+                android:name="android.speech.tts"
+                android:resource="@xml/silent_tts" />
+        </service>
+
+        <activity
+            android:name=".TtsCheckDataActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.speech.tts.engine.CHECK_TTS_DATA" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".KeepAliveService"
             android:exported="false"
