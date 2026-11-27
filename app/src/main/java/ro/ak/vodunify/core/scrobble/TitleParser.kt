@@ -58,7 +58,8 @@ object TitleParser {
 
     fun guesses(fields: Map<String, String>, appLabel: String? = null): List<TitleGuess> {
         NetflixActivity.guesses(fields)?.let { return it }
-        val texts = orderedTexts(fields, appLabel)
+        // Apple TV: „2026, Way of the Warrior Kid” → „Way of the Warrior Kid (2026)” (și pentru vizionările vechi păstrate).
+        val texts = orderedTexts(fields, appLabel).map(::yearFirstToSuffix)
         if (texts.isEmpty()) return emptyList()
         val out = mutableListOf<TitleGuess>()
 
@@ -172,6 +173,11 @@ object TitleParser {
     private fun isNoise(s: String) = normalize(s) in NOISE_NORMALIZED
 
     private val NOISE_NORMALIZED by lazy { NOISE.map(::normalize).toSet() }
+
+    private val YEAR_FIRST = Regex("""^((?:19|20)\d{2}),\s+(\S.{1,100})$""")
+
+    internal fun yearFirstToSuffix(s: String): String =
+        YEAR_FIRST.matchEntire(s.trim())?.let { "${it.groupValues[2].trim()} (${it.groupValues[1]})" } ?: s
 
     private fun stripYear(s: String): String {
         val t = s.replace(YEAR, "").trim { it in SEPARATORS }
