@@ -133,7 +133,8 @@ class ScreenReaderService : AccessibilityService() {
         // Armarea expiră singură (15 s): n-o ștergem când apare Apple TV, ca modul să nu se
         // oprească/pornească în timp ce Apple TV se deschide (ferestrele se schimbă de câteva ori).
         val armed = ScreenState.readerArmed() && ARM_HOSTS.any { front.startsWith(it) }
-        setReaderMode(READER_PREFIXES.any { front.startsWith(it) } || armed, if (armed) "$front (urmează Apple TV)" else front)
+        val all = Prefs.readerAll(this)
+        setReaderMode(all || READER_PREFIXES.any { front.startsWith(it) } || armed, if (armed) "$front (urmează Apple TV)" else front)
     }
 
 
@@ -142,11 +143,11 @@ class ScreenReaderService : AccessibilityService() {
         if (readerMode == on) return
         runCatching {
             serviceInfo = serviceInfo.apply {
-                flags = if (on) {
+                flags = (if (on) {
                     flags or AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE
                 } else {
                     flags and AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE.inv()
-                }
+                }) or AccessibilityServiceInfo.FLAG_ENABLE_ACCESSIBILITY_VOLUME
                 feedbackType = if (on) {
                     AccessibilityServiceInfo.FEEDBACK_SPOKEN or AccessibilityServiceInfo.FEEDBACK_GENERIC
                 } else {
@@ -155,7 +156,23 @@ class ScreenReaderService : AccessibilityService() {
             }
             readerMode = on
             DiagLog.add("Mod cititor de ecran: ${if (on) "pornit" else "oprit"} · $why")
+            if (on) muteAccessibilityVoice()
         }
+    }
+
+    /**
+     * Vocea pe care o pornesc aplicațiile când văd un cititor de ecran poate merge pe canalul
+     * „accesibilitate”: doar un serviciu de accesibilitate îl poate da la zero. Jurnalul arată dacă a mers.
+     */
+    private fun muteAccessibilityVoice() {
+        runCatching {
+            val am = getSystemService(android.media.AudioManager::class.java) ?: return
+            val stream = android.media.AudioManager.STREAM_ACCESSIBILITY
+            val before = am.getStreamVolume(stream)
+            if (before > 0) am.setStreamVolume(stream, 0, 0)
+            val tts = runCatching { android.provider.Settings.Secure.getString(contentResolver, "tts_default_synth") }.getOrNull()
+            DiagLog.add("Volum accesibilitate: $before → ${am.getStreamVolume(stream)} · muzică=${am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)} · motor TTS=${tts ?: "-"}")
+        }.onFailure { DiagLog.add("Volum accesibilitate: eroare ${it.javaClass.simpleName}: ${it.message}") }
     }
 
     override fun onInterrupt() = Unit

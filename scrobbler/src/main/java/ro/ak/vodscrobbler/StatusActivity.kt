@@ -39,6 +39,7 @@ class StatusActivity : Activity() {
     private lateinit var batteryButton: Button
     private lateinit var overlayButton: Button
     private lateinit var dotButton: Button
+    private lateinit var readerButton: Button
     private lateinit var dotSettings: LinearLayout
     private lateinit var sizeButton: Button
     private lateinit var cornerButton: Button
@@ -89,6 +90,12 @@ class StatusActivity : Activity() {
         column.addView(batteryButton)
         overlayButton = button("Permite bulina din dreapta sus (peste alte aplicații)") { openOverlaySettings() }
         column.addView(overlayButton)
+        readerButton = button("") {
+            Prefs.setReaderAll(this, !Prefs.readerAll(this))
+            DiagLog.add("Mod cititor de ecran pentru toate aplicațiile (test): ${if (Prefs.readerAll(this)) "PORNIT" else "oprit"}")
+            render()
+        }
+        column.addView(readerButton)
         dotButton = button("") {
             Prefs.setDotEnabled(this, !Prefs.dotEnabled(this))
             render()
@@ -219,6 +226,10 @@ class StatusActivity : Activity() {
         overlayButton.visibility = if (overlay) View.GONE else View.VISIBLE
         dotButton.visibility = if (overlay) View.VISIBLE else View.GONE
         dotButton.showText(if (Prefs.dotEnabled(this)) "Ascunde bulina" else "Arată bulina")
+        readerButton.showText(
+            if (Prefs.readerAll(this)) "Test: mod cititor de ecran în TOATE aplicațiile (pornit) · apasă ca să revii la doar Apple TV"
+            else "Test: pornește modul cititor de ecran în toate aplicațiile",
+        )
         dotSettings.visibility = if (overlay && Prefs.dotEnabled(this)) View.VISIBLE else View.GONE
         colorButtons.forEach { (st, b) -> b.showText("Culoare când ${st.label}: ${Prefs.dotColor(this, st).name}") }
         val (sizeDp, sizeName) = Prefs.SIZES[Prefs.dotSizeIndex(this)]
