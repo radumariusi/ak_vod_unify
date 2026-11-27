@@ -13,4 +13,4 @@
     android:canRequestTouchExplorationMode="true"
     android:canRetrieveWindowContent="true"
     android:description="@string/screen_reader_description"
-    android:notificationTimeout="50" />
+    android:notificationTimeout="300" />
