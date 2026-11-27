@@ -89,9 +89,6 @@ class ScreenReaderService : AccessibilityService() {
             // de volum sau o notificare peste Netflix nu înseamnă că Netflix a ieșit).
             updateReaderMode(frontApp() ?: pkg.takeUnless { it == packageName || IGNORED.any { p -> it.startsWith(p) } })
         }
-        if (isTv && event.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED && LAUNCHERS.any { pkg.startsWith(it) }) {
-            runCatching { onLauncherFocus(event) }
-        }
         if (pkg == packageName || IGNORED.any { pkg.startsWith(it) }) return
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             ScreenState.foregroundPackage = pkg
@@ -133,34 +130,12 @@ class ScreenReaderService : AccessibilityService() {
             if (readerMode == null) setReaderMode(false, "aplicația din față necunoscută")
             return
         }
-        val armedFor = ScreenState.readerArmedFor
-        if (armedFor != null && front.startsWith(armedFor)) ScreenState.armReader(null, 0) // a ajuns în Apple TV
+        // Armarea expiră singură (15 s): n-o ștergem când apare Apple TV, ca modul să nu se
+        // oprească/pornească în timp ce Apple TV se deschide (ferestrele se schimbă de câteva ori).
         val armed = ScreenState.readerArmed() && ARM_HOSTS.any { front.startsWith(it) }
         setReaderMode(READER_PREFIXES.any { front.startsWith(it) } || armed, if (armed) "$front (urmează Apple TV)" else front)
     }
 
-    /**
-     * În lansator: dacă e selectată plăcuța Apple TV, armăm modul (Apple TV îl verifică la pornire);
-     * orice altă plăcuță îl dezarmează imediat, ca Netflix, Peacock & co. să pornească fără el.
-     */
-    private fun onLauncherFocus(event: AccessibilityEvent) {
-        val text = buildString {
-            event.text?.forEach { append(it).append(' ') }
-            event.contentDescription?.let { append(it) }
-            event.source?.let { n ->
-                n.contentDescription?.let { append(' ').append(it) }
-                n.text?.let { append(' ').append(it) }
-            }
-        }.trim()
-        if (text.isEmpty()) return
-        if (APPLE_TV_TILE.containsMatchIn(text)) {
-            if (!ScreenState.readerArmed()) DiagLog.add("Lansator: Apple TV selectat („${text.take(60)}”) → pregătesc modul cititor de ecran")
-            ScreenState.armReader(APPLE_TV_PREFIX, 60_000L)
-        } else if (ScreenState.readerArmed()) {
-            ScreenState.armReader(null, 0)
-        }
-        updateReaderMode(frontApp() ?: event.packageName?.toString())
-    }
 
     /** Mod „cititor de ecran” (Apple TV își arată textele doar așa) pornit / oprit. */
     private fun setReaderMode(on: Boolean, why: String) {
@@ -291,14 +266,11 @@ class ScreenReaderService : AccessibilityService() {
          */
         val READER_PREFIXES = listOf("com.apple.atve.", "com.nuvio", "app.nuvio", "com.debridstream")
 
-        const val APPLE_TV_PREFIX = "com.apple.atve."
-        val LAUNCHERS = listOf(
-            "com.google.android.apps.tv.launcherx", "com.google.android.tvlauncher", "com.google.android.leanbacklauncher",
-        )
-
-        /** Lansatorul / Unify țin modul pornit doar cât e armat pentru Apple TV. */
-        val ARM_HOSTS = LAUNCHERS + "ro.ak.vodunify"
-        val APPLE_TV_TILE = Regex("""(?i)\bapple\s*tv\b""")
+        /**
+         * Doar Unify ține modul pornit, cât e armat chiar înainte să deschidă Apple TV. NU lansatorul:
+         * în v0.3.37, modul pornit/oprit după plăcuța selectată făcea Apple TV să se închidă imediat.
+         */
+        val ARM_HOSTS = listOf("ro.ak.vodunify")
 
         const val SETTLE_MS = 800L
         const val POLL_MS = 5_000L
