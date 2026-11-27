@@ -255,8 +255,15 @@ class ScreenReaderService : AccessibilityService() {
         /**
          * Singurele aplicații pentru care pornim modul cititor de ecran: Apple TV își arată titlul
          * doar așa; Nuvio și DebridStream au mers (fără voce) cu el pornit și nu le schimbăm.
+         * Peacock e o pagină web: WebView-ul își expune textele doar cu un cititor de ecran.
+         * Lansatorul TV și AK VOD Unify: Apple TV verifică modul doar când pornește, deci trebuie
+         * să fie deja activ când îl deschizi de acolo (pornit abia după, Apple TV arată 0 texte).
          */
-        val READER_PREFIXES = listOf("com.apple.atve.", "com.nuvio", "app.nuvio", "com.debridstream")
+        val READER_PREFIXES = listOf(
+            "com.apple.atve.", "com.nuvio", "app.nuvio", "com.debridstream", "com.peacocktv.",
+            "com.google.android.apps.tv.launcherx", "com.google.android.tvlauncher",
+            "com.google.android.leanbacklauncher", "ro.ak.vodunify",
+        )
 
         const val SETTLE_MS = 800L
         const val POLL_MS = 5_000L
