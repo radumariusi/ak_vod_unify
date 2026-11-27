@@ -202,7 +202,10 @@ class ScrobbleRepository @Inject constructor(
             guesses.isNotEmpty() && guesses.all { it is TitleGuess.Movie }
         var match = when {
             !matcher.isConfigured || guesses.isEmpty() -> null
-            peacockEpisodeName -> matcher.episodeOnly((guesses.first() as TitleGuess.Movie).title, reportedDuration, PEACOCK_PROVIDERS, "US")
+            peacockEpisodeName -> matcher.episodeOnly(
+                (guesses.first() as TitleGuess.Movie).title, reportedDuration, PEACOCK_PROVIDERS, "US",
+                airDate = MatchRules.metadataDate(event.fields["date"]),
+            )
                 .also { ro.ak.vodunify.core.diagnostics.AppDiagLog.add("Peacock episod fără serial „${(guesses.first() as TitleGuess.Movie).title}” → ${it?.media?.title ?: "negăsit"}") }
             else -> matcher.match(guesses, reportedDuration)
         }

@@ -48,6 +48,12 @@ class TitleParserTest {
     }
 
     @Test
+    fun appleTvYearFirstTitle() {
+        val g = TitleParser.guesses(mapOf("title" to "2026, Way of the Warrior Kid"), "Apple TV")
+        assertEquals(TitleGuess.Movie("Way of the Warrior Kid", 2026), g.first())
+    }
+
+    @Test
     fun appNameIsNotATitle() {
         val g = TitleParser.guesses(mapOf("title" to "Dune: Part Two", "artist" to "Max"), "Max")
         assertEquals(listOf(TitleGuess.Movie("Dune: Part Two", null)), g)

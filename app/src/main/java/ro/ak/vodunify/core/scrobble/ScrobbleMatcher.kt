@@ -72,6 +72,14 @@ object MatchRules {
 
     fun yearOf(date: String?): Int? = date?.take(4)?.toIntOrNull()
 
+    /** Data din metadatele sesiunii media („2026-11-12T10:00:00.000Z” sau „2026-11-12”) → zi; altfel null. */
+    fun metadataDate(raw: String?): java.time.LocalDate? {
+        val m = Regex("""^((?:19|20)\d{2})-(\d{2})-(\d{2})""").find(raw?.trim().orEmpty()) ?: return null
+        return runCatching {
+            java.time.LocalDate.of(m.groupValues[1].toInt(), m.groupValues[2].toInt(), m.groupValues[3].toInt())
+        }.getOrNull()
+    }
+
     /**
      * Seriale la care VOYO numerotează sezoanele altfel decât TMDb. Las Fierbinți (verificat pe
      * TMDb, Wikipedia RO și anunțurile PRO TV, 27.11.2026): PRO TV/VOYO au sărit un număr în 2023
@@ -258,10 +266,16 @@ class ScrobbleMatcher @Inject constructor(
      * serialele disponibile pe serviciul aplicației ([providerIds] în [region]), apoi episodul din
      * TMDb cu durata potrivită. Mai multe la fel de bune → nimic (mai bine nepotrivit decât greșit).
      */
-    suspend fun episodeOnly(episodeTitle: String, durationMs: Long?, providerIds: Set<Int>, region: String): ScrobbleMatch? {
+    suspend fun episodeOnly(
+        episodeTitle: String,
+        durationMs: Long?,
+        providerIds: Set<Int>,
+        region: String,
+        airDate: java.time.LocalDate? = null,
+    ): ScrobbleMatch? {
         val title = episodeTitle.trim()
         if (title.length < 2 || providerIds.isEmpty()) return null
-        val key = "ep-only|$region|${durationMs?.div(60_000)}|${title.lowercase()}"
+        val key = "ep-only|$region|${durationMs?.div(60_000)}|${title.lowercase()}|$airDate"
         memo[key]?.let { return it }
         val now = System.currentTimeMillis()
         misses[key]?.let { at -> if (now - at < MISS_TTL_MS) return null else misses.remove(key) }
@@ -285,6 +299,7 @@ class ScrobbleMatcher @Inject constructor(
             if (MatchRules.compatibleDuration(m.runtimeMs, durationMs)) found += m
         }
         val result = when {
+            found.isEmpty() && airDate != null -> byAirDate(title, durationMs, providerIds, region, airDate)
             found.size <= 1 -> found.firstOrNull()
             durationMs == null -> null
             else -> {
@@ -297,6 +312,64 @@ class ScrobbleMatcher @Inject constructor(
         }
         if (result != null) memo[key] = result else misses[key] = now
         return result
+    }
+
+    /**
+     * Episod nou, încă necunoscut în Wikidata: Peacock trimite și data apariției episodului
+     * (DATE = „2026-11-12T10:00:00Z” la The Good Daughter S1E1, aceeași cu cea din TMDb). Căutăm
+     * serialele de pe serviciu cu un episod apărut în jurul datei și păstrăm episodul cu exact
+     * același nume, apărut în fereastră, cu durata compatibilă. Mai multe → nimic.
+     */
+    private suspend fun byAirDate(
+        title: String,
+        durationMs: Long?,
+        providerIds: Set<Int>,
+        region: String,
+        airDate: java.time.LocalDate,
+    ): ScrobbleMatch? {
+        val from = airDate.minusDays(AIR_DATE_WINDOW_DAYS)
+        val to = airDate.plusDays(AIR_DATE_WINDOW_DAYS)
+        val shows = linkedSetOf<Long>()
+        for (page in 1..AIR_DATE_PAGES) {
+            val r = runCatching {
+                tmdb.get(
+                    "discover/tv",
+                    mapOf(
+                        "with_watch_providers" to providerIds.joinToString("|"),
+                        "watch_region" to region,
+                        "air_date.gte" to from.toString(),
+                        "air_date.lte" to to.toString(),
+                        "sort_by" to "popularity.desc",
+                        "page" to page.toString(),
+                    ),
+                    TmdbPage.serializer(TmdbListItem.serializer()),
+                    TmdbClient.LONG_TTL,
+                )
+            }.getOrNull() ?: break
+            r.results.forEach { shows += it.id }
+            if (page >= r.totalPages) break
+        }
+        val found = mutableListOf<ScrobbleMatch>()
+        for (id in shows) {
+            val details = runCatching {
+                tmdb.get("tv/$id", mapOf("language" to "en-US"), TmdbTitleDetails.serializer(), TmdbClient.LONG_TTL)
+            }.getOrNull() ?: continue
+            val show = TvShow(details, TmdbListItem(id = details.id, name = details.name))
+            // Doar sezoanele care au putut avea episoade în fereastră (ultimele două).
+            val seasons = details.seasons.filter { it.seasonNumber > 0 }.sortedByDescending { it.seasonNumber }.take(2)
+            for (sn in seasons) {
+                val eps = season(id, sn.seasonNumber, "en-US")?.episodes ?: continue
+                val ep = eps.firstOrNull { e ->
+                    MatchRules.sameName(e.name, title) &&
+                        e.airDate?.let { d -> runCatching { java.time.LocalDate.parse(d) }.getOrNull() }
+                            ?.let { d -> !d.isBefore(from) && !d.isAfter(to) } == true
+                } ?: continue
+                val m = episodeMatch(show, sn.seasonNumber, ep.episodeNumber, ep.name, ep.runtime)
+                if (MatchRules.compatibleDuration(m.runtimeMs, durationMs)) found += m
+                break
+            }
+        }
+        return found.singleOrNull()
     }
 
     internal data class EpisodeSeries(val tmdbId: Long, val season: Int?)
@@ -578,6 +651,8 @@ class ScrobbleMatcher @Inject constructor(
         const val MAX_SEASONS_SCANNED = 50
         const val MAX_EPISODE_ONLY_SHOWS = 5
         const val MISS_TTL_MS = 10 * 60_000L
+        const val AIR_DATE_WINDOW_DAYS = 3L
+        const val AIR_DATE_PAGES = 3
         const val MAX_UNLISTED_AHEAD = 6
     }
 }
