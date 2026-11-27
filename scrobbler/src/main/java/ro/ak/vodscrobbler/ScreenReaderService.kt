@@ -133,11 +133,10 @@ class ScreenReaderService : AccessibilityService() {
         // Armarea expiră singură (15 s): n-o ștergem când apare Apple TV, ca modul să nu se
         // oprească/pornească în timp ce Apple TV se deschide (ferestrele se schimbă de câteva ori).
         val armed = ScreenState.readerArmed() && ARM_HOSTS.any { front.startsWith(it) }
-        // Fără motor de voce (sau cu motorul nostru mut implicit) nimeni nu poate vorbi: modul cititor
-        // stă pornit peste tot, ca Apple TV să-și arate titlul oricum ar fi deschis. NU ștergem chenarul
-        // de focus (v0.3.41): ecranul Google TV nu mai deschidea aplicațiile.
-        val all = noVoiceEngine()
-        setReaderMode(all || READER_PREFIXES.any { front.startsWith(it) } || armed, if (armed) "$front (urmează Apple TV)" else front)
+        // NICIODATĂ peste tot (v0.3.40–0.3.42): în toate aplicațiile apare chenarul alb de focus
+        // (HBO, Prime îl redesenează), iar ștergerea lui a stricat deschiderea aplicațiilor din Google TV.
+        // Doar Apple TV/Nuvio/DebridStream (+ Apple TV pornit din Unify).
+        setReaderMode(READER_PREFIXES.any { front.startsWith(it) } || armed, if (armed) "$front (urmează Apple TV)" else front)
     }
 
 
@@ -161,39 +160,6 @@ class ScreenReaderService : AccessibilityService() {
             DiagLog.add("Mod cititor de ecran: ${if (on) "pornit" else "oprit"} · $why")
             if (on) muteAccessibilityVoice()
         }
-    }
-
-    private var ttsCheckedAt = 0L
-    private var ttsMissing = false
-    private var ttsCheckedLogged = false
-
-    /**
-     * Fără niciun motor de voce (TTS) pornit pe TV (ex. `pm disable-user com.google.android.tts`),
-     * aplicațiile n-au cu ce vorbi: atunci ținem modul cititor de ecran pornit peste tot, ca Apple TV
-     * să-și arate titlul oricum ar fi deschis. Verificăm cel mult o dată pe minut.
-     */
-    private fun noVoiceEngine(): Boolean {
-        val now = SystemClock.elapsedRealtime()
-        if (ttsCheckedAt != 0L && now - ttsCheckedAt < 60_000L) return ttsMissing
-        ttsCheckedAt = now
-        // Motorul nostru mut (SilentTtsService) nu contează ca voce: cu el, TV-ul tot nu vorbește.
-        val engines = runCatching {
-            packageManager.queryIntentServices(android.content.Intent("android.intent.action.TTS_SERVICE"), 0)
-                .map { it.serviceInfo.packageName }
-                .filter { it != packageName }
-        }.getOrNull() ?: return ttsMissing
-        val defaultEngine = runCatching {
-            android.provider.Settings.Secure.getString(contentResolver, "tts_default_synth")
-        }.getOrNull()
-        val oursIsDefault = defaultEngine == packageName
-        val missing = engines.isEmpty() || oursIsDefault
-        if (missing != ttsMissing || ttsCheckedLogged.not()) {
-            ttsCheckedLogged = true
-            val voice = if (oursIsDefault) "implicit = AK (mut)" else "implicit = ${defaultEngine ?: "-"}"
-            DiagLog.add("Motoare de voce (TTS): ${engines.joinToString().ifBlank { "niciunul" }} · $voice → mod cititor de ecran ${if (missing) "pornit în toate aplicațiile" else "doar pentru Apple TV/Nuvio/DebridStream"}")
-        }
-        ttsMissing = missing
-        return missing
     }
 
     /**

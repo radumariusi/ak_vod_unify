@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">AK Scrobbler</string>
-    <string name="silent_tts_label">AK Scrobbler – voce mută</string>
     <string name="screen_reader_label">AK Scrobbler – citește titlul din player</string>
     <string name="screen_reader_description">Citește de pe ecran numele filmului sau al episodului și minutul, din aplicațiile de streaming (Netflix, Apple TV, Prime Video, HBO Max, Disney+, SkyShowtime, Stremio…), ca AK VOD Unify să știe automat ce ai văzut. Nu apasă nimic și nu trimite nimic pe internet.</string>
 </resources>
