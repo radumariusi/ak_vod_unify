@@ -79,6 +79,14 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
     private var savedMovieMedia: MediaInfo? = null
     private var savedPlayId: String? = null
 
+    /** Reclama apărută la pauză (Peacock, Xumo): identitatea ei, ca să n-o luăm drept alt titlu. */
+    private var adIdentity: String? = null
+
+    /** Când a intrat pe pauză / a ieșit din pauză (pentru reclamele care apar la pauză). */
+    private var pausedAt: Long? = null
+    private var resumedFromPauseAt: Long? = null
+    private var pausePositionMs: Long? = null
+
     /** Playerul tocmai a golit metadatele la oprire: ignorăm evenimentele `STOPPED` fără titlu imediat după. */
     private var clearedAtStop = false
 
@@ -128,15 +136,23 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
             if (info == null || isAdContent(info, savedMovieMedia)) return emptyList()
             val saved = savedMovieMedia
             val cleanInfo = info.withoutAdFlags()
+            // Aceeași reclamă de la pauză, cu câmpuri actualizate (durată etc.): o ignorăm în continuare.
+            // (și alte reclame scurte de după ea), până revine filmul sau începe un titlu lung.
+            if (adIdentity != null && !isLongContent(cleanInfo) && cleanInfo.identity != saved?.identity) return emptyList()
             if (saved != null && (saved.identity == cleanInfo.identity || (!cleanInfo.hasTitle && saved.hasTitle))) {
                 media = saved.copy(durationMs = cleanInfo.durationMs ?: saved.durationMs)
                 savedPlayId?.let { playId = it }
                 inAdBreak = false
                 savedMovieMedia = null
                 savedPlayId = null
+                // Ceasul nu a mers cât a fost reclama: pornim estimarea de acum, de la minutul de la pauză.
+                if (adIdentity != null) pausePositionMs?.let { basePositionMs = it }
+                adIdentity = null
+                baseUpdateTime = now
                 if (state == PlayState.PLAYING && playingSince == null) playingSince = now
                 return emptyList()
             }
+            adIdentity = null
             // A început alt film/episod după reclamă: nu mai emitem STOP pe poziția reclamei (PAUSE pre-reclamă a salvat deja).
             inAdBreak = false
             savedMovieMedia = null
@@ -153,6 +169,20 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
             return emptyList()
         }
         val previous = media
+        if (!correction && looksLikePauseAd(info, previous, now)) {
+            // Peacock / Xumo pun o reclamă la 1–2 s după pauză: nu e alt titlu, păstrăm filmul și minutul
+            // (PAUSE l-a trimis deja; nu trimitem nimic cu poziția reclamei).
+            inAdBreak = true
+            if (state == PlayState.PLAYING) {
+                playedMs = playedTime(now)
+                playingSince = null
+            }
+            savedMovieMedia = previous
+            savedPlayId = playId
+            adIdentity = info?.withoutAdFlags()?.identity
+            onSkip?.invoke(SendReason.PAUSE, "reclamă la pauză („${info?.fields?.get("title") ?: "?"}”), păstrez titlul și minutul")
+            return emptyList()
+        }
         if (isAdContent(info, previous)) {
             if (previous != null && previous.hasTitle && state != PlayState.STOPPED) {
                 return onAdDetected(now)
@@ -212,6 +242,21 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
         return out
     }
 
+    /**
+     * Alt titlu apărut cât filmul e pe pauză (sau în primele secunde după ce a pornit din nou):
+     * e reclama de pauză, dacă e scurtă sau fără durată. Un episod nou ales din meniu are durată lungă.
+     */
+    private fun looksLikePauseAd(info: MediaInfo?, previous: MediaInfo?, now: Long): Boolean {
+        if (info == null || previous == null || !previous.hasTitle || !info.hasTitle) return false
+        if (info.identity == previous.identity || isLongContent(info)) return false
+        if (basePositionMs == null && playedTime(now) <= 0) return false
+        val paused = state == PlayState.PAUSED && pausedAt != null
+        val justResumed = state == PlayState.PLAYING && resumedFromPauseAt?.let { now - it < PAUSE_AD_RESUME_MS } == true
+        return paused || justResumed
+    }
+
+    private fun isLongContent(info: MediaInfo): Boolean = (info.durationMs ?: 0L) > PAUSE_AD_MAX_MS
+
     private fun isAdContent(info: MediaInfo?, reference: MediaInfo?): Boolean {
         if (info == null) return false
         val adFlag = info.fields["advertisement"]
@@ -230,6 +275,16 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
         copy(fields = fields.filterKeys { it != "advertisement" && it != "is_ad" })
 
     fun onPlaybackState(newState: PlayState, positionMs: Long?, updateTime: Long, newSpeed: Float, now: Long): List<Outgoing> {
+        if (newState == PlayState.PAUSED && state != PlayState.PAUSED) {
+            pausedAt = now
+            if (!inAdBreak) pausePositionMs = positionMs?.takeIf { it >= 0 } ?: bestPosition(now)
+        } else if (newState == PlayState.PLAYING && state == PlayState.PAUSED) {
+            resumedFromPauseAt = now
+            pausedAt = null
+        } else if (newState == PlayState.STOPPED) {
+            pausedAt = null
+            resumedFromPauseAt = null
+        }
         if (inAdBreak) {
             state = newState
             speed = if (newSpeed > 0f) newSpeed else 1f
@@ -237,6 +292,7 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
                 inAdBreak = false
                 savedMovieMedia = null
                 savedPlayId = null
+                adIdentity = null
             }
             return emptyList()
         }
@@ -306,6 +362,7 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
     fun onGone(now: Long): List<Outgoing> {
         if (inAdBreak) {
             inAdBreak = false
+            adIdentity = null
             savedMovieMedia = null
             savedPlayId = null
             state = PlayState.STOPPED
@@ -380,6 +437,12 @@ class SessionTracker(val packageName: String, val appLabel: String, private val 
 
         /** Două pauze la mai puțin de 3 s distanță sunt aceeași poziție. */
         const val SAME_POSITION_MS = 3_000L
+
+        /** Reclama de pauză e scurtă; peste 3 minute e un titlu adevărat. */
+        const val PAUSE_AD_MAX_MS = 3 * 60_000L
+
+        /** Reclama poate porni playerul („redare”) chiar înainte să-și schimbe metadatele. */
+        const val PAUSE_AD_RESUME_MS = 4_000L
 
         private val AD_TITLE_RE = Regex(
             """(?i)\b(reclam[ăa]|commercial|advertisement|sponsored|ad\s*break|publicitate)\b|^(ads?|pub)(\s+\d+)?$""",

@@ -31,7 +31,6 @@ enum class StreamingService(
     XUMO("xumo", "Xumo Play", emptySet(), "xumo", Market.US),
     FAWESOME("fawesome", "Fawesome", emptySet(), "fawesome", Market.US),
     FANDANGO("fandango", "Fandango at Home", setOf(7), "fandango", Market.US),
-    PBS("pbs", "PBS", emptySet(), "pbs", Market.US),
     SLING("sling", "Sling TV", setOf(299), "sling", Market.US),
     ARTE("arte", "ARTE", emptySet(), "arte", Market.RO),
     MAGELLAN("magellan", "MagellanTV", emptySet(), "magellan", Market.US, "documentare"),
@@ -90,7 +89,6 @@ enum class StreamingService(
                 "xumo" in n -> XUMO
                 "fawesome" in n -> FAWESOME
                 "fandango" in n || "vudu" in n -> FANDANGO
-                word("pbs") -> PBS
                 "sling" in n -> SLING
                 n == "arte" || n == "arte.tv" -> ARTE
                 "magellan" in n -> MAGELLAN
@@ -149,7 +147,6 @@ enum class TargetApp(
     XUMO("xumo", "Xumo Play", AppRole.OFFICIAL, listOf("com.xumo.xumo.tv", "com.xumo.xumo"), listOf("xumoplay", "xumo")),
     FAWESOME("fawesome", "Fawesome", AppRole.OFFICIAL, listOf("com.future.moviesByFawesomeAndroidTV"), listOf("fawesome")),
     FANDANGO("fandango", "Fandango at Home", AppRole.OFFICIAL, listOf("air.com.vudu.air.DownloaderTablet"), listOf("fandango", "vudu")),
-    PBS("pbs", "PBS", AppRole.OFFICIAL, listOf("com.pbs.video"), listOf("pbsvideo", "pbs")),
     SLING("sling", "Sling TV", AppRole.OFFICIAL, listOf("com.sling"), listOf("sling")),
     ARTE("arte", "ARTE", AppRole.OFFICIAL, listOf("tv.arte.plus7"), listOf("arte")),
     MAGELLAN("magellan", "MagellanTV", AppRole.OFFICIAL, listOf("com.abide.magellantv"), listOf("magellan")),

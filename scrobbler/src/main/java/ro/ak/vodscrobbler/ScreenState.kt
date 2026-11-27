@@ -81,7 +81,7 @@ object ScreenState {
         "tv.pluto.", "com.tubitv", "com.streammate.tv", "ro.antenaplay",
         "ro.voyo", "com.voyo.", "net.pro.voyo", "net.cme.voyo", "com.cme.voyo",
         "com.curiosity.", "com.xumo.", "com.future.moviesByFawesome", "tv.fawesome", "com.fawesome",
-        "com.abide.magellan", "com.pbs.", "air.com.vudu.", "com.fandango.", "com.sling", "tv.arte.",
+        "com.abide.magellan", "air.com.vudu.", "com.fandango.", "com.sling", "tv.arte.",
         "com.nuvio", "app.nuvio", "com.debridstream", "com.wuplay", "com.mubi", "com.crunchyroll", "com.plexapp", "org.jellyfin",
         "org.xbmc.kodi", "com.syncler", "com.tivimate", "is.xyz.mpv", "org.videolan.vlc", "com.mxtech.",
         "com.google.android.videos", "com.canal", "com.hbogo", "com.orange.", "ro.digionline", "ro.rcsrds",

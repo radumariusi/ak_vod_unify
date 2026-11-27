@@ -255,4 +255,34 @@ class SessionTrackerTest {
         assertTrue(t.onAdDetected(2_000).isEmpty())
         assertTrue(t.onGone(37_000).isEmpty())
     }
+
+    @Test
+    fun pauseAdDoesNotReplaceTitleOrPosition() {
+        val t = SessionTracker("com.peacocktv.peacockandroid", "Peacock")
+        t.onMetadata(episode, 0)
+        t.onPlaybackState(PlayState.PLAYING, 600_000, 1_000, 1f, 1_000)
+        val pause = t.onPlaybackState(PlayState.PAUSED, 660_000, 61_000, 0f, 61_000)
+        assertEquals(1, pause.size)
+        // Reclama de pauză: alt „titlu”, fără durată sau scurtă, și playerul o „redă”.
+        val ad = MediaInfo(mapOf("title" to "Toyota Camry"), durationMs = 15_000L)
+        assertTrue(t.onMetadata(ad, 62_500).isEmpty())
+        assertTrue(t.onPlaybackState(PlayState.PLAYING, 2_000, 63_000, 1f, 63_000).isEmpty())
+        assertTrue(t.onMetadata(ad.copy(durationMs = 16_000L), 64_000).isEmpty())
+        assertTrue(t.onTick(200_000).isEmpty())
+        assertEquals("Chapter One", t.media?.fields?.get("title"))
+        // Revine episodul: același titlu și minutul de la pauză, fără STOP pe poziția reclamei.
+        assertTrue(t.onMetadata(episode, 300_000).isEmpty())
+        assertEquals("Chapter One", t.media?.fields?.get("title"))
+        assertEquals(660_000L, t.position(300_000))
+    }
+
+    @Test
+    fun newLongEpisodeWhilePausedIsNotAnAd() {
+        val t = SessionTracker("p", "P")
+        t.onMetadata(episode, 0)
+        t.onPlaybackState(PlayState.PLAYING, 600_000, 1_000, 1f, 1_000)
+        t.onPlaybackState(PlayState.PAUSED, 660_000, 61_000, 0f, 61_000)
+        t.onMetadata(other, 70_000)
+        assertEquals("Chapter Two", t.media?.fields?.get("title"))
+    }
 }

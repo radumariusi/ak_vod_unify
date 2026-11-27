@@ -315,6 +315,8 @@ class MediaListenerService : NotificationListenerService() {
     private fun recheckScreenPause(t: Tracked) {
         if (!tracked.values.contains(t) || t.tracker.state != PlayState.PAUSED || !needsScreenShow(t) || t.screenGuess != null) return
         val snap = ScreenState.latest(t.tracker.packageName) ?: return
+        // Doar bara playerului (cu timpi), nu reclama care apare la 1–2 s după pauză (Peacock, Xumo).
+        if (snap.isAd || snap.times.isEmpty) return
         val guess = snap.guess ?: return
         val hadTitle = hasTextTitle(t)
         t.screenGuess = guess
@@ -405,7 +407,9 @@ class MediaListenerService : NotificationListenerService() {
         }
         for (t in active) {
             val guess = snap.guess
-            if (guess != null && needsScreenShow(t) && guess != t.screenGuess) {
+            // Pe pauză titlul nu se schimbă: ce apare atunci pe ecran e reclama de pauză (Peacock, Xumo).
+            val pausedWithTitle = t.tracker.state == PlayState.PAUSED && t.screenGuess != null
+            if (guess != null && needsScreenShow(t) && guess != t.screenGuess && !pausedWithTitle) {
                 val previous = t.screenGuess
                 val hadNativeTitle = hasTextTitle(t)
                 val oldCode = ScreenPlayback.episodeCode(previous?.subtitle)
@@ -416,7 +420,7 @@ class MediaListenerService : NotificationListenerService() {
                 val isCorrection = (previous != null || hadNativeTitle) && (oldCode == null || oldCode == newCode)
                 dispatch(t.tracker.onMetadata(merged(t), now, correction = isCorrection))
             }
-            if (!snap.times.isEmpty) {
+            if (!snap.times.isEmpty && !(t.tracker.state == PlayState.PAUSED && snap.guess != t.screenGuess && t.screenGuess != null)) {
                 val nativeDuration = t.nativeInfo?.durationMs
                 val times = t.screenTimeResolver.resolve(snap.times, nativeDuration)
                 t.tracker.onScreenTimes(times.position(nativeDuration ?: t.tracker.media?.durationMs),
