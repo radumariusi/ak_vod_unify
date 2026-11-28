@@ -164,4 +164,19 @@ class NetflixActivityTest {
         assertEquals("102", NetflixActivity.match(event(2_136_000).copy(playId = "p2"), items)?.id)
         assertEquals("103", NetflixActivity.match(event(3_551_000).copy(playId = "p3"), items)?.id)
     }
+
+    @Test
+    fun matchesByPlaybackStartWhenTitlesStartedAMinuteApart() {
+        // TV 28.11: Grinch pornit 09:52:10, Lupin 09:53:40; Netflix notează ora pornirii.
+        val grinchAt = now
+        val lupinAt = now + 90_000L
+        val items = listOf(
+            NetflixViewedItem(title = "Dr. Seuss' The Grinch", watchedAt = grinchAt - 2_000L, id = "g"),
+            NetflixViewedItem(series = "Lupin", season = "Part 1", episode = "Chapter 1", title = "Lupin: Part 1: Chapter 1", watchedAt = lupinAt - 2_000L, id = "l"),
+        )
+        val first = ScrobbleEvent(pkg = "com.netflix.ninja", reason = "pause", positionMs = 63_000L, at = grinchAt + 72_000L)
+        val second = ScrobbleEvent(pkg = "com.netflix.ninja", reason = "pause", positionMs = 70_000L, at = lupinAt + 76_000L)
+        assertEquals("g", NetflixActivity.match(first, items)!!.id)
+        assertEquals("l", NetflixActivity.match(second, items)!!.id)
+    }
 }
