@@ -4,6 +4,9 @@ import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,7 +48,54 @@ import javax.inject.Inject
 class TitleMenuViewModel @Inject constructor(
     private val tracking: TrackingRepository,
     private val seriesMarker: ro.ak.vodunify.core.tracking.SeriesMarker,
+    private val correction: ro.ak.vodunify.core.scrobble.TitleCorrection,
 ) : ViewModel() {
+    /** „Titlu greșit”: lista de variante cu același nume (null = închisă). */
+    data class FixUi(
+        val item: CatalogItem,
+        val resume: ro.ak.vodunify.core.db.ResumePointEntity?,
+        val watched: Boolean,
+        val name: String,
+        val options: List<ro.ak.vodunify.core.scrobble.TitleCorrection.Option>? = null,
+    )
+
+    private val _fix = MutableStateFlow<FixUi?>(null)
+    val fix: StateFlow<FixUi?> = _fix.asStateFlow()
+
+    fun openFix() {
+        val i = _item.value ?: return
+        val s = state.value
+        close()
+        val key = ref(i).titleKey
+        val name = correction.searchName(key, i.title, s?.resume)
+        val ui = FixUi(i, s?.resume, s?.watched == true, name)
+        _fix.value = ui
+        viewModelScope.launch {
+            val current = s?.resume?.ref?.let { ro.ak.vodunify.core.tracking.TrackingEntities.media(it).itemKey } ?: key
+            val options = runCatching { correction.options(name, current) }.getOrDefault(emptyList())
+            if (_fix.value?.item?.mediaKey == i.mediaKey) _fix.value = ui.copy(options = options)
+        }
+    }
+
+    fun closeFix() {
+        _fix.value = null
+    }
+
+    fun chooseFix(option: ro.ak.vodunify.core.scrobble.TitleCorrection.Option) {
+        val f = _fix.value ?: return
+        _fix.value = null
+        viewModelScope.launch {
+            _message.value = try {
+                correction.apply(ref(f.item), f.resume, f.watched, option.media)
+                "Corectat: ${option.label}"
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                "Eroare: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
+
     private val _item = MutableStateFlow<CatalogItem?>(null)
     val item: StateFlow<CatalogItem?> = _item.asStateFlow()
 
@@ -120,6 +170,7 @@ fun TitleMenuHost(viewModel: TitleMenuViewModel, onOpen: (TitleKind, Long) -> Un
     val item by viewModel.item.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
+    val fix by viewModel.fix.collectAsStateWithLifecycle()
     val context = LocalContext.current
     LaunchedEffect(message) {
         message?.let {
@@ -127,6 +178,7 @@ fun TitleMenuHost(viewModel: TitleMenuViewModel, onOpen: (TitleKind, Long) -> Un
             viewModel.consumeMessage()
         }
     }
+    fix?.let { FixDialog(it, viewModel) }
     val i = item ?: return
     val first = remember(i.mediaKey) { FocusRequester() }
     LaunchedEffect(i.mediaKey) { runCatching { first.requestFocus() } }
@@ -158,6 +210,11 @@ fun TitleMenuHost(viewModel: TitleMenuViewModel, onOpen: (TitleKind, Long) -> Un
                         Text("Marchează tot serialul nevăzut")
                     }
                 }
+                if (state?.resume != null || state?.watched == true) {
+                    OutlinedButton(onClick = viewModel::openFix, modifier = Modifier.fillMaxWidth()) {
+                        Text("Titlu greșit")
+                    }
+                }
                 OutlinedButton(
                     onClick = {
                         viewModel.close()
@@ -169,5 +226,41 @@ fun TitleMenuHost(viewModel: TitleMenuViewModel, onOpen: (TitleKind, Long) -> Un
         },
         confirmButton = {},
         dismissButton = { TextButton(onClick = viewModel::close) { Text("Închide") } },
+    )
+}
+
+/** Lista de variante cu același nume: episoade (serial + SxEy) și filme (cu anul). */
+@Composable
+private fun FixDialog(f: TitleMenuViewModel.FixUi, viewModel: TitleMenuViewModel) {
+    val first = remember(f.item.mediaKey, f.options) { FocusRequester() }
+    LaunchedEffect(f.item.mediaKey, f.options) { runCatching { first.requestFocus() } }
+    AlertDialog(
+        onDismissRequest = viewModel::closeFix,
+        modifier = Modifier.ignoreHeldOk(),
+        title = { Text("Ce ai văzut de fapt? („${f.name}”)") },
+        text = {
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                val options = f.options
+                when {
+                    options == null -> Text("Caut titlurile cu numele ăsta…")
+                    options.isEmpty() -> Text("N-am găsit alt film sau episod cu numele „${f.name}”.")
+                    else -> options.forEachIndexed { index, o ->
+                        OutlinedButton(
+                            onClick = { viewModel.chooseFix(o) },
+                            modifier = Modifier.fillMaxWidth().let { if (index == 0) it.focusRequester(first) else it },
+                        ) { Text(o.label) }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = viewModel::closeFix, modifier = if (f.options.isNullOrEmpty()) Modifier.focusRequester(first) else Modifier) {
+                Text("Renunță")
+            }
+        },
     )
 }

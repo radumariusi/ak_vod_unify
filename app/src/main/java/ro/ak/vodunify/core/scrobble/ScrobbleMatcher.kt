@@ -374,6 +374,39 @@ class ScrobbleMatcher @Inject constructor(
 
     internal data class EpisodeSeries(val tmdbId: Long, val season: Int?)
 
+    /**
+     * „Titlu greșit”: variantele cu numele ăsta, ca să alegi tu. Întâi episoadele cu exact acest nume
+     * (serial + sezon/episod, din Wikidata → TMDb), apoi filmele cu acest nume (cu anul).
+     */
+    suspend fun alternatives(name: String): List<ScrobbleMatch> = withContext(Dispatchers.IO) {
+        val title = name.trim()
+        if (title.length < 2) return@withContext emptyList()
+        val out = mutableListOf<ScrobbleMatch>()
+        for (c in runCatching { wikidataSeriesForEpisode(title) }.getOrDefault(emptyList()).take(MAX_ALTERNATIVE_SHOWS)) {
+            val show = runCatching {
+                val details = tmdb.get("tv/${c.tmdbId}", mapOf("language" to "en-US"), TmdbTitleDetails.serializer(), TmdbClient.LONG_TTL)
+                TvShow(details, TmdbListItem(id = details.id, name = details.name))
+            }.getOrNull() ?: continue
+            val m = runCatching {
+                c.season?.let { sn ->
+                    season(show.id, sn, "en-US")?.episodes?.let { pickEpisodeByName(it, title) }
+                        ?.let { episodeMatch(show, sn, it.episodeNumber, it.name, it.runtime) }
+                } ?: findByName(show, title)
+            }.getOrNull() ?: continue
+            out += m
+        }
+        val movies = runCatching {
+            tmdb.get("search/movie", mapOf("query" to title, "language" to "en-US"), TmdbPage.serializer(TmdbListItem.serializer()))
+        }.getOrNull()?.results.orEmpty().filterNot { it.adult }.take(MAX_ALTERNATIVE_MOVIES)
+        movies.forEach { item ->
+            out += ScrobbleMatch(
+                MediaRef(MediaType.MOVIE, ExternalIds(tmdb = item.id), item.title ?: item.originalTitle ?: title, MatchRules.yearOf(item.releaseDate)),
+                null,
+            )
+        }
+        out.distinctBy { it.media.itemKey }
+    }
+
     private suspend fun wikidataSeriesForEpisode(title: String): List<EpisodeSeries> {
         val escaped = title.replace("\\", "\\\\").replace("\"", "\\\"")
         val sparql = """
@@ -650,6 +683,8 @@ class ScrobbleMatcher @Inject constructor(
         val LANGUAGES = listOf("ro-RO", "en-US")
         const val MAX_SEASONS_SCANNED = 50
         const val MAX_EPISODE_ONLY_SHOWS = 5
+        private const val MAX_ALTERNATIVE_SHOWS = 8
+        private const val MAX_ALTERNATIVE_MOVIES = 10
         const val MISS_TTL_MS = 10 * 60_000L
         const val AIR_DATE_WINDOW_DAYS = 3L
         const val AIR_DATE_PAGES = 3

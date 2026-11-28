@@ -201,7 +201,9 @@ class ScrobbleRepository @Inject constructor(
         // luat ca filmul „Daybreak (2000)” la 28.11). Întâi episodul; doar dacă nu e găsit, film.
         val peacockEpisodeName = event.pkg.startsWith("com.peacocktv.") &&
             guesses.isNotEmpty() && guesses.all { it is TitleGuess.Movie }
+        val corrected = if (guesses.isNotEmpty()) correctionFor(event.pkg, ScrobbleRules.rawLabel(event.fields)) else null
         var match = when {
+            corrected != null -> ScrobbleMatch(corrected, null)
             !matcher.isConfigured || guesses.isEmpty() -> null
             peacockEpisodeName -> {
                 val name = (guesses.first() as TitleGuess.Movie).title
@@ -243,6 +245,53 @@ class ScrobbleRepository @Inject constructor(
         rememberApp(media, event.pkg)
         publisher.setManualPosition(media, position, duration, publish = !event.isTick && !fromQueue, appPackage = event.pkg, recordedAt = event.at)
         return done(ScrobbleResult.SAVED, media, duration, position)
+    }
+
+    // ---------- „Titlu greșit”: corecturile tale, folosite și la vizionările următoare ----------
+
+    @Serializable
+    private data class Correction(
+        val type: String,
+        val tmdb: Long? = null,
+        val imdb: String? = null,
+        val title: String,
+        val year: Int? = null,
+        val season: Int? = null,
+        val episode: Int? = null,
+        val episodeTitle: String? = null,
+    ) {
+        fun media() = MediaRef(
+            MediaType.entries.firstOrNull { it.name == type } ?: MediaType.MOVIE,
+            ro.ak.vodunify.core.connector.ExternalIds(tmdb = tmdb, imdb = imdb),
+            title, year, season, episode, episodeTitle,
+        )
+    }
+
+    private val correctionSerializer = MapSerializer(String.serializer(), Correction.serializer())
+
+    private fun correctionKey(pkg: String, raw: String) = "$pkg|${TitleParser.normalize(raw)}"
+
+    private fun readCorrections(): Map<String, Correction> = runCatching {
+        prefs.getString(KEY_CORRECTIONS, null)?.let { json.decodeFromString(correctionSerializer, it) }
+    }.getOrNull().orEmpty()
+
+    private fun correctionFor(pkg: String, raw: String): MediaRef? = readCorrections()[correctionKey(pkg, raw)]?.media()
+
+    /** Ce a citit AK Scrobbler (aplicația + textul) pentru ultima vizionare potrivită la [titleKey]. */
+    fun lastRawFor(titleKey: String): Pair<String, String>? {
+        ensureLoaded()
+        return _log.value.firstOrNull { e ->
+            e.itemKey != null && (e.itemKey == titleKey || e.itemKey.startsWith("$titleKey:")) && e.raw.isNotBlank() && e.raw != "(fără titlu)"
+        }?.let { it.pkg to it.raw }
+    }
+
+    /** De acum, același text din aceeași aplicație înseamnă [media] (alegerea ta, nu ghicitul automat). */
+    fun rememberCorrection(pkg: String, raw: String, media: MediaRef) {
+        val map = readCorrections().toMutableMap()
+        map[correctionKey(pkg, raw)] = Correction(media.type.name, media.ids.tmdb, media.ids.imdb, media.title, media.year, media.season, media.episode, media.episodeTitle)
+        prefs.edit().putString(KEY_CORRECTIONS, json.encodeToString(correctionSerializer, map)).apply()
+        ro.ak.vodunify.core.diagnostics.AppDiagLog.add("Titlu corectat de tine: „$raw” ($pkg) → ${media.title}" +
+            (if (media.type == MediaType.EPISODE) " S${media.season}E${media.episode}" else media.year?.let { " ($it)" } ?: ""))
     }
 
     // ---------- Netflix: titlul din „Activitate de vizionare” ----------
@@ -527,6 +576,7 @@ class ScrobbleRepository @Inject constructor(
         const val KEY_UNRESOLVED = "unresolved"
         const val KEY_LAST_RETRY = "unresolved_last_retry"
         const val KEY_NETFLIX_STATUS = "netflix_status_"
+        const val KEY_CORRECTIONS = "title_corrections"
         const val KEY_NETFLIX_CLAIMS = "netflix_claims"
         const val KEY_PROOFS = "proofs"
         const val KEY_PROCESSED_IDS = "processed_ids"
