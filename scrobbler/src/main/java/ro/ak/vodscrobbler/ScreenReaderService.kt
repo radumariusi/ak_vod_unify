@@ -34,7 +34,7 @@ class ScreenReaderService : AccessibilityService() {
             // Aplicația din față, după ferestre (lansatorul e ignorat la evenimente, deci nu ne-am baza pe ele).
             val front = frontApp()
             if (ScreenState.screenOnlyPackages.isNotEmpty()) front?.let { ScreenState.foregroundPackage = it }
-            // Verificăm des și modul cititor de ecran: Netflix nu trebuie să-l vadă niciodată.
+            // Verificăm des și modul cititor de ecran (complet doar în Apple TV/Nuvio/DebridStream).
             updateReaderMode(front)
             val fg = ScreenState.foregroundPackage
             val target = fg ?: front
@@ -82,6 +82,7 @@ class ScreenReaderService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val pkg = event?.packageName?.toString() ?: return
+        if (LAUNCHERS.any { pkg.startsWith(it) }) runCatching { onLauncherEvent(event) }
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             // Netflix, când vede un cititor de ecran, citește cu voce tare butoanele (și oricum nu
             // ne arată textele): cât e Netflix în față, nu ne mai prezentăm ca cititor de ecran.
@@ -107,7 +108,118 @@ class ScreenReaderService : AccessibilityService() {
     }
 
     private var isTv = false
-    private var readerMode: Boolean? = null
+    /** [MODE_OFF], [MODE_SPOKEN] (fără chenar) sau [MODE_FULL] (cu explorare la atingere). */
+    private var readerMode: Int? = null
+    private var spokenCheckedAt = 0L
+    private var spokenOk = false
+    private var lastFront: String? = null
+
+    /** Ultima plăcuță din Google TV apăsată / selectată (titlu + momentul). */
+    private var launcherClick: Pair<ScreenGuess, Long>? = null
+    private var launcherFocus: Pair<ScreenGuess, Long>? = null
+    private var appLabels: Set<String>? = null
+
+    /**
+     * Google TV: ținem minte titlul de pe plăcuța selectată / apăsată. Dacă imediat după se deschide o
+     * aplicație (Apple TV din „Continuă vizionarea”), ăsta e titlul pornit. Fără mod cititor de ecran:
+     * lansatorul își expune textele plăcuțelor și așa.
+     */
+    private fun onLauncherEvent(event: AccessibilityEvent) {
+        val type = event.eventType
+        if (type != AccessibilityEvent.TYPE_VIEW_CLICKED && type != AccessibilityEvent.TYPE_VIEW_FOCUSED &&
+            type != AccessibilityEvent.TYPE_VIEW_SELECTED
+        ) return
+        val items = mutableListOf<ScreenItem>()
+        event.text?.forEach { t -> t?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { items += ScreenItem(it) } }
+        event.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { items += ScreenItem(it) }
+        event.source?.let { src ->
+            try {
+                collectCard(src, items, 0)
+            } finally {
+                recycleLegacy(src)
+            }
+        }
+        val labels = launchableLabels()
+        val isAppIcon = items.isNotEmpty() && items.all { ScreenText.normalize(it.text) in labels }
+        val cardItems = items.filterNot { ScreenText.normalize(it.text) in labels || ScreenText.normalize(it.text) in CARD_NOISE }
+        val guess = ScreenText.guess(cardItems)
+        val now = SystemClock.elapsedRealtime()
+        val clicked = type == AccessibilityEvent.TYPE_VIEW_CLICKED
+        if (clicked) {
+            when {
+                guess != null -> launcherClick = guess to now
+                // Pictograma unei aplicații: nu mai e un titlu anume.
+                isAppIcon -> { launcherClick = null; launcherFocus = null }
+                // Un buton („Watch on Apple TV”) pe pagina titlului din Google TV: rămâne plăcuța apăsată înainte.
+                else -> Unit
+            }
+        } else {
+            launcherFocus = guess?.let { it to now }
+        }
+        val summary = "${if (clicked) "apăsat" else "selectat"}: ${guess?.let { "${it.title} · ${it.subtitle ?: "-"}" } ?: if (isAppIcon) "pictogramă aplicație" else "-"}"
+        if (clicked || lastLogged["launcher"] != summary) {
+            lastLogged["launcher"] = summary
+            DiagLog.add("Google TV $summary · texte: ${items.take(8).joinToString(" | ") { it.text.take(60) }}")
+        }
+    }
+
+    private fun collectCard(node: AccessibilityNodeInfo, items: MutableList<ScreenItem>, depth: Int) {
+        if (depth > 8 || items.size >= 30) return
+        node.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { items += ScreenItem(it, node.viewIdResourceName) }
+        node.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() && it != node.text?.toString()?.trim() }
+            ?.let { items += ScreenItem(it, node.viewIdResourceName) }
+        for (i in 0 until node.childCount) {
+            val child = runCatching { node.getChild(i) }.getOrNull() ?: continue
+            try {
+                collectCard(child, items, depth + 1)
+            } finally {
+                recycleLegacy(child)
+            }
+        }
+    }
+
+    /** Numele aplicațiilor instalate (pictogramele din lansator nu sunt titluri). */
+    private fun launchableLabels(): Set<String> = appLabels ?: runCatching {
+        val pm = packageManager
+        listOf(android.content.Intent.CATEGORY_LEANBACK_LAUNCHER, android.content.Intent.CATEGORY_LAUNCHER).flatMap { cat ->
+            pm.queryIntentActivities(android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(cat), 0)
+        }.map { ScreenText.normalize(it.loadLabel(pm).toString()) }.filter { it.isNotEmpty() }.toSet()
+    }.getOrDefault(emptySet()).also { appLabels = it }
+
+    /** Când se schimbă aplicația din față imediat după o plăcuță din Google TV, îi dăm titlul plăcuței. */
+    private fun onFrontChanged(front: String) {
+        if (front == lastFront) return
+        lastFront = front
+        if (front == packageName || IGNORED.any { front.startsWith(it) }) return
+        val now = SystemClock.elapsedRealtime()
+        val pick = launcherClick?.takeIf { now - it.second < CARD_TO_APP_MS }
+            ?: launcherFocus?.takeIf { now - it.second < CARD_TO_APP_MS }
+        launcherClick = null
+        launcherFocus = null
+        if (pick == null) return
+        ScreenState.setLauncherCard(ScreenState.LauncherCard(front, pick.first, now))
+        DiagLog.add("Google TV → ${appLabel(front)}: titlul plăcuței ${pick.first.title} · ${pick.first.subtitle ?: "-"}")
+    }
+
+    /**
+     * Ne prezentăm ca cititor „vorbitor” (FEEDBACK_SPOKEN) doar dacă nu există niciun motor de voce
+     * activ: TV-ul nu are cu ce vorbi. Verificat cel mult o dată pe minut.
+     */
+    private fun spokenAllowed(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (spokenCheckedAt != 0L && now - spokenCheckedAt < 60_000L) return spokenOk
+        spokenCheckedAt = now
+        val engines = runCatching {
+            packageManager.queryIntentServices(android.content.Intent("android.intent.action.TTS_SERVICE"), 0)
+                .map { it.serviceInfo.packageName }.filter { it != packageName }.distinct()
+        }.getOrNull()
+        val ok = engines != null && engines.isEmpty()
+        if (ok != spokenOk || readerMode == null) {
+            DiagLog.add("Motoare de voce active: ${engines?.joinToString().takeUnless { it.isNullOrEmpty() } ?: if (engines == null) "eroare" else "niciunul"} · mod vorbitor fără chenar ${if (ok) "permis" else "NU (TV-ul ar vorbi)"}")
+        }
+        spokenOk = ok
+        return ok
+    }
 
     /** Pachetul ferestrei de aplicație din față (null dacă nu se poate afla). */
     private fun frontApp(): String? = runCatching {
@@ -125,9 +237,11 @@ class ScreenReaderService : AccessibilityService() {
      * [front] necunoscut: păstrăm starea, iar la pornirea serviciului alegem „oprit”.
      */
     private fun updateReaderMode(front: String?) {
+        front?.let(::onFrontChanged)
         if (!isTv) return
+        val base = if (spokenAllowed()) MODE_SPOKEN else MODE_OFF
         if (front == null) {
-            if (readerMode == null) setReaderMode(false, "aplicația din față necunoscută")
+            if (readerMode == null) setReaderMode(base, "aplicația din față necunoscută")
             return
         }
         // Armarea expiră singură (15 s): n-o ștergem când apare Apple TV, ca modul să nu se
@@ -136,13 +250,17 @@ class ScreenReaderService : AccessibilityService() {
         // NICIODATĂ peste tot (v0.3.40–0.3.42): în toate aplicațiile apare chenarul alb de focus
         // (HBO, Prime îl redesenează), iar ștergerea lui a stricat deschiderea aplicațiilor din Google TV.
         // Doar Apple TV/Nuvio/DebridStream (+ Apple TV pornit din Unify).
-        setReaderMode(READER_PREFIXES.any { front.startsWith(it) } || armed, if (armed) "$front (urmează Apple TV)" else front)
+        // În rest: modul „vorbitor” fără explorare la atingere (fără chenar alb, TV-ul fără motor de voce
+        // nu vorbește). Apple TV îl vede deja când pornește, oricum ar fi pornit (și din Google TV).
+        val full = READER_PREFIXES.any { front.startsWith(it) } || armed
+        setReaderMode(if (full) MODE_FULL else base, if (armed) "$front (urmează Apple TV)" else front)
     }
 
 
     /** Mod „cititor de ecran” (Apple TV își arată textele doar așa) pornit / oprit. */
-    private fun setReaderMode(on: Boolean, why: String) {
-        if (readerMode == on) return
+    private fun setReaderMode(mode: Int, why: String) {
+        if (readerMode == mode) return
+        val on = mode == MODE_FULL
         runCatching {
             serviceInfo = serviceInfo.apply {
                 flags = (if (on) {
@@ -150,15 +268,15 @@ class ScreenReaderService : AccessibilityService() {
                 } else {
                     flags and AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE.inv()
                 }) or AccessibilityServiceInfo.FLAG_ENABLE_ACCESSIBILITY_VOLUME
-                feedbackType = if (on) {
+                feedbackType = if (mode != MODE_OFF) {
                     AccessibilityServiceInfo.FEEDBACK_SPOKEN or AccessibilityServiceInfo.FEEDBACK_GENERIC
                 } else {
                     AccessibilityServiceInfo.FEEDBACK_GENERIC
                 }
             }
-            readerMode = on
-            DiagLog.add("Mod cititor de ecran: ${if (on) "pornit" else "oprit"} · $why")
-            if (on) muteAccessibilityVoice()
+            readerMode = mode
+            DiagLog.add("Mod cititor de ecran: ${when (mode) { MODE_FULL -> "pornit (complet)"; MODE_SPOKEN -> "vorbitor, fără chenar"; else -> "oprit" }} · $why")
+            if (mode != MODE_OFF) muteAccessibilityVoice()
         }
     }
 
@@ -290,6 +408,22 @@ class ScreenReaderService : AccessibilityService() {
          * în v0.3.37, modul pornit/oprit după plăcuța selectată făcea Apple TV să se închidă imediat.
          */
         val ARM_HOSTS = listOf("ro.ak.vodunify")
+
+        const val MODE_OFF = 0
+        const val MODE_SPOKEN = 1
+        const val MODE_FULL = 2
+
+        /** Lansatoarele TV ale căror plăcuțe le citim (titlul pornit din „Continuă vizionarea”). */
+        val LAUNCHERS = listOf("com.google.android.apps.tv.launcherx", "com.google.android.tvlauncher")
+
+        /** Plăcuța apăsată contează doar dacă aplicația apare în față în cel mult atât. */
+        const val CARD_TO_APP_MS = 20_000L
+
+        /** Texte de pe plăcuțe care nu sunt titluri. */
+        val CARD_NOISE = setOf(
+            "apple tv", "apple tv+", "continue watching", "continua vizionarea", "for you", "pentru tine",
+            "watch next", "up next", "new episode", "episod nou", "top picks for you", "recomandate",
+        ).map { ScreenText.normalize(it) }.toSet()
 
         const val SETTLE_MS = 800L
         const val POLL_MS = 5_000L
