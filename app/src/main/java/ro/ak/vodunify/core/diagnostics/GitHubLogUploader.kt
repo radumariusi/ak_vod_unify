@@ -43,6 +43,7 @@ object GitHubLogUploader {
         routeItems: List<RouteItem>,
         netflixStatus: List<String> = emptyList(),
         unresolvedCount: Int = 0,
+        linkReport: List<String> = emptyList(),
     ): String = withContext(Dispatchers.IO) {
         AppDiagLog.init(context)
         val fmt = SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.ROOT)
@@ -69,6 +70,11 @@ object GitHubLogUploader {
                 }
             }
             appendLine()
+            if (linkReport.isNotEmpty()) {
+                appendLine("--- AK VOD Unify: Ce deschide Unify în fiecare aplicație ---")
+                linkReport.forEach { appendLine(it) }
+                appendLine()
+            }
             appendLine("--- AK VOD Unify: Rute & progres (${routeItems.size}) ---")
             routeItems.take(25).forEach { item ->
                 val pos = item.positions.joinToString { "${it.label}:${it.progress ?: "-"}" }

@@ -33,6 +33,7 @@ class DiagnosticsViewModel @Inject constructor(
     private val scrobble: ScrobbleRepository,
     private val scrobblePuller: ScrobblePuller,
     private val okHttp: OkHttpClient,
+    private val resolver: ro.ak.vodunify.core.playback.TargetResolver,
 ) : ViewModel() {
 
     /** Null = se încarcă. */
@@ -70,6 +71,7 @@ class DiagnosticsViewModel @Inject constructor(
             items.value.orEmpty(),
             netflixStatus = scrobble.netflix.value,
             unresolvedCount = scrobble.unresolved.value,
+            linkReport = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { resolver.linkReport() }.getOrElse { listOf("eroare: ${it.message}") } },
         )
         val url = GitHubLogUploader.uploadGist(okHttp, _githubToken.value, report).getOrThrow()
         _uploadedGistUrl.value = url
@@ -83,6 +85,7 @@ class DiagnosticsViewModel @Inject constructor(
             items.value.orEmpty(),
             netflixStatus = scrobble.netflix.value,
             unresolvedCount = scrobble.unresolved.value,
+            linkReport = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { resolver.linkReport() }.getOrElse { listOf("eroare: ${it.message}") } },
         )
         val path = GitHubLogUploader.saveLocal(context, report).getOrThrow()
         "Jurnal salvat local: $path"

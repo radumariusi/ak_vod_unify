@@ -90,6 +90,29 @@ class TargetResolver @Inject constructor(@ApplicationContext private val context
         return launchIntent(installed.packageName)?.let { ResolvedLaunch(installed, LinkPrecision.APP, it) }
     }
 
+    /**
+     * Pentru jurnal: până unde duce Unify în fiecare aplicație instalată (link direct, pagina titlului,
+     * căutare, doar aplicația), cu un film și un episod de probă. Plus toate aplicațiile din launcher
+     * (pachet + nume), ca să recunoaștem și playerele noi.
+     */
+    fun linkReport(): List<String> {
+        val movie = PlaybackRequest(PlaybackRequest.Type.MOVIE, 840430, "tt14849194", "The Holdovers", 2023, runtimeMinutes = 133)
+        val episode = PlaybackRequest(
+            PlaybackRequest.Type.EPISODE, 108978, "tt9288030", "Reacher", 2022, season = 1, episode = 1,
+            episodeTitle = "Welcome to Margrave", runtimeMinutes = 50,
+        )
+        val installed = installedApps(includeServicesWithoutLauncher = true)
+        val lines = installed.values.map { a ->
+            fun how(r: PlaybackRequest) = runCatching { resolve(a, r) }.getOrNull()?.let { res ->
+                res.precision.label + (res.intent.data?.let { " ($it)" } ?: if (res.intent.action == Intent.ACTION_SEARCH) " (căutare în aplicație)" else "")
+            } ?: "nu pornește"
+            "${a.app.displayName} [${a.packageName}] · film: ${how(movie)} · episod: ${how(episode)}"
+        }
+        val known = installed.values.map { it.packageName }.toSet()
+        val others = launchableApps().filter { it.first !in known }.map { (pkg, label) -> "$label [$pkg]" }
+        return lines + listOf("Alte aplicații din launcher (${others.size}): ${others.joinToString(" | ")}")
+    }
+
     /** Pornește ținta; dacă linkul e refuzat la execuție, cade pe simpla pornire a aplicației. */
     fun launch(target: ResolvedLaunch): Boolean {
         prepareScrobbler(target.installed.packageName)
