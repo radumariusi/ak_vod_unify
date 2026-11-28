@@ -191,4 +191,22 @@ class ScreenTextTest {
     fun continueShelfIsNotAPlayButton() {
         assertFalse(ScreenText.hasPlayButton(items("Presumed Innocent, Continue, Playback Progress: 3%, 46 minutes remaining")))
     }
+
+    @Test
+    fun curiosityStreamPlayerTitleAndTimes() {
+        val screen = listOf(
+            ScreenItem("CURRENTLY WATCHING", "styled-text"),
+            ScreenItem("Out of the Cradle", "styled-heading"),
+            ScreenItem("How did humanity's earliest ancestors evolve into one of the", "styled-text"),
+            ScreenItem("0:08:26"),
+            ScreenItem("0:08:26", "styled-text"),
+            ScreenItem("1:56:39"),
+            ScreenItem("UP NEXT"),
+            ScreenItem("Play", "play-button"),
+        )
+        assertEquals("Out of the Cradle", ScreenText.guess(screen, "Curiosity Stream")?.title)
+        val t = ScreenText.times(screen)
+        assertEquals(506_000L, t.positionMs)
+        assertEquals(6_999_000L, t.durationMs)
+    }
 }
