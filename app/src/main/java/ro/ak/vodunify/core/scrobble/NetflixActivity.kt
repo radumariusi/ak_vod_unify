@@ -54,6 +54,10 @@ object NetflixActivity {
     private val AFTER_MS = TimeUnit.MINUTES.toMillis(15)
     private val BEFORE_MS = TimeUnit.HOURS.toMillis(4)
     private val AMBIGUOUS_MS = TimeUnit.MINUTES.toMillis(2)
+
+    /** Pornirea redării față de ora Netflix: ±90 s; alt titlu la mai puțin de 30 s în plus → nu ghicim. */
+    private const val START_TOLERANCE_MS = 90_000L
+    private const val START_AMBIGUOUS_MS = 30_000L
     private val NUMBERED = Regex("""(?i)^(episode|episodul|episod|ep\.?)\s*(\d{1,3})$""")
 
     fun isNetflix(pkg: String) = pkg in PACKAGES
@@ -82,8 +86,32 @@ object NetflixActivity {
         if (!event.estimated && event.positionMs >= 30_000L && recentWithBookmark.isNotEmpty()) {
             matchByBookmark(event, recentWithBookmark)?.let { return it }
         }
+        matchByStart(event, timed, claims)?.let { return it }
         return matchByTime(event, timed, claims)
             ?: matchByBookmark(event, items.filter { it.watchedAt == null && !isClaimedByEarlierSession(it, event, claims) })
+    }
+
+    /**
+     * Netflix notează ora la care ai PORNIT titlul (TV 28.11: Grinch 09:52:08 ↔ redare pornită 09:52:10,
+     * Lupin 09:53:38 ↔ 09:53:40). Pornirea redării = ora evenimentului − minutul din player. Așa se
+     * despart și titluri pornite la un minut unul după altul, unde potrivirea după ora pauzei e ambiguă.
+     */
+    private fun matchByStart(
+        event: ScrobbleEvent,
+        items: List<NetflixViewedItem>,
+        claims: Map<String, NetflixClaim>,
+    ): NetflixViewedItem? {
+        if (event.estimated || event.positionMs <= 0) return null
+        val start = event.at - event.positionMs
+        val candidates = items
+            .filter { it.title.isNotBlank() && compatibleDuration(event, it) && !isClaimedByEarlierSession(it, event, claims) }
+            .map { it to abs(it.watchedAt!! - start) }
+            .filter { (_, diff) -> diff <= START_TOLERANCE_MS }
+            .sortedBy { it.second }
+        val best = candidates.firstOrNull() ?: return null
+        val rival = candidates.drop(1).firstOrNull { it.first.key() != best.first.key() }
+        if (rival != null && rival.second - best.second < START_AMBIGUOUS_MS) return null
+        return best.first
     }
 
     private fun isClaimedByEarlierSession(item: NetflixViewedItem, event: ScrobbleEvent, claims: Map<String, NetflixClaim>): Boolean {
