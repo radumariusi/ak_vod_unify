@@ -52,6 +52,9 @@ class MediaListenerService : NotificationListenerService() {
 
         /** Titlul citit de pe ecran pentru această redare (dacă aplicația nu-l dă). */
         var screenGuess: ScreenGuess? = null
+
+        /** De unde am luat titlul de pe ecran (pentru rândul „SESIUNE” din jurnal). */
+        var titleMethod: String? = null
         var startedAt: Long = SystemClock.elapsedRealtime()
         var everPlayed = false
 
@@ -383,12 +386,14 @@ class MediaListenerService : NotificationListenerService() {
             // Pornit din plăcuța Google TV (ex. Apple TV din „Continuă vizionarea”): titlul plăcuței.
             val card = ScreenState.launcherCard(pkg, LAUNCHER_CARD_MAX_AGE_MS) ?: return
             t.screenGuess = card.guess
+            t.titleMethod = "plăcuța din Google TV"
             ScreenState.setLauncherCard(null) // o singură dată: episodul următor nu mai e cel de pe plăcuță
             DiagLog.add("${t.tag}: titlu luat de pe plăcuța din Google TV: ${card.guess.title} · ${card.guess.subtitle ?: "-"}")
             dispatch(t.tracker.onMetadata(merged(t), now, correction = hasTextTitle(t)))
             return
         }
         t.screenGuess = pick.guess
+        t.titleMethod = if (pick === latest) "ecranul playerului" else "pagina titlului (înainte de redare)"
         DiagLog.add("${t.tag}: titlu luat de pe ${if (pick === latest) "ecranul playerului" else "pagina titlului"}: ${pick.guess?.title} · ${pick.guess?.subtitle ?: "-"}")
         dispatch(t.tracker.onMetadata(merged(t), now, correction = hasTextTitle(t)))
     }
@@ -428,6 +433,7 @@ class MediaListenerService : NotificationListenerService() {
                 val newCode = ScreenPlayback.episodeCode(guess.subtitle)
                 if (oldCode == null || oldCode != newCode) t.screenTimeResolver.reset()
                 t.screenGuess = guess
+                t.titleMethod = "ecranul playerului"
                 DiagLog.add("${t.tag}: titlu de pe ecran: ${guess.title} · ${guess.subtitle ?: "-"}")
                 val isCorrection = (previous != null || hadNativeTitle) && (oldCode == null || oldCode == newCode)
                 dispatch(t.tracker.onMetadata(merged(t), now, correction = isCorrection))
@@ -540,8 +546,30 @@ class MediaListenerService : NotificationListenerService() {
                 "${o.appLabel}: TRIMIT ${o.reason.wire} · $title · minut ${StatusActivity.clock(o.positionMs)}${if (o.estimated) " (estimat)" else ""}" +
                     " / ${o.media.durationMs?.let(StatusActivity::clock) ?: "?"}",
             )
+            logSession(o, title)
             forwarder.send(o)
         }
+    }
+
+    /** Ultimul rând „SESIUNE” scris pentru fiecare vizionare (îl repetăm doar când se schimbă ceva). */
+    private val sessionLines = LinkedHashMap<String, String>()
+
+    /** Un rând clar pe vizionare: aplicația, titlul, de unde l-am luat și de unde e minutul. */
+    private fun logSession(o: Outgoing, title: String) {
+        val t = tracked.values.firstOrNull { it.tracker.playId == o.playId && it.tracker.packageName == o.packageName }
+        val source = when {
+            t == null && screenOnly.containsKey(o.packageName) -> "doar ecranul (aplicația nu are sesiune media)"
+            o.media.fields["title_source"] == "notification" -> "notificarea playerului"
+            o.media.fields["title_source"] == "screen" -> t?.titleMethod ?: "ecran"
+            o.media.hasTitle -> "metadatele playerului"
+            else -> "fără titlu → Unify îl caută (pornire din Unify / activitate / durată)"
+        }
+        val minute = if (o.estimated) "numărat de noi (estimat)" else "de la player"
+        val line = "SESIUNE ${o.appLabel}: titlu „$title” · sursa titlului: $source · minut: $minute · cititor: ${ScreenState.readerModeLabel}"
+        if (sessionLines[o.playId] == line) return
+        sessionLines[o.playId] = line
+        while (sessionLines.size > 30) sessionLines.remove(sessionLines.keys.first())
+        DiagLog.add(line)
     }
 
     /**

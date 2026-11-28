@@ -49,6 +49,7 @@ class ScrobbleRepository @Inject constructor(
     private val trackingDao: TrackingDao,
     private val serviceTitles: ServiceTitleResolver,
     private val json: Json,
+    private val launchHints: LaunchHints,
 ) {
     private val prefs = context.getSharedPreferences(SCROBBLE_PREFS, Context.MODE_PRIVATE)
     private val mutex = Mutex()
@@ -214,6 +215,8 @@ class ScrobbleRepository @Inject constructor(
             else -> matcher.match(guesses, reportedDuration)
         }
         if (match == null && event.playId.isNotEmpty()) match = byPlay[event.playId]
+        // Playerul nu dă niciun titlu: ce a pornit Unify, doar dacă durata redării îl confirmă.
+        if (match == null && guesses.isEmpty()) match = launchHints.confirm(event)
         if (match == null) {
             // Nu aruncăm nimic: păstrăm vizionarea și o completăm când aflăm titlul (alt eveniment
             // al aceleiași vizionări) sau la o reîncercare în prim-plan.
