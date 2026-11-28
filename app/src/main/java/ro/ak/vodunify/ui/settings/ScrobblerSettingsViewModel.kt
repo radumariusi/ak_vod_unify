@@ -37,9 +37,35 @@ class ScrobblerSettingsViewModel @Inject constructor(
     private val _installed = MutableStateFlow(repository.isScrobblerInstalled())
     val installed: StateFlow<Boolean> = _installed.asStateFlow()
 
+    /** Un singur rând de stare: „totul e pregătit” sau exact ce lipsește. null = necunoscut. */
+    private val _readiness = MutableStateFlow<List<String>?>(null)
+    val readiness: StateFlow<List<String>?> = _readiness.asStateFlow()
+
     fun refresh() {
         _installed.value = repository.isScrobblerInstalled()
         puller.pullInForegroundAsync()
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { _readiness.value = readReadiness() }
+    }
+
+    private fun readReadiness(): List<String>? {
+        for (auth in listOf("ro.ak.vodscrobbler.diag", "ro.ak.vodscrobbler.debug.diag")) {
+            val row = runCatching {
+                context.contentResolver.query(android.net.Uri.parse("content://$auth/readiness"), null, null, null, null)?.use { c ->
+                    if (!c.moveToFirst() || c.columnCount < 6) null else (0 until 6).map { c.getString(it).orEmpty() }
+                }
+            }.getOrNull() ?: continue
+            val listener = row[0]; val accessibility = row[1]; val connected = row[2]; val engines = row[3]; val spoken = row[4]
+            val problems = mutableListOf<String>()
+            if (listener != "1") problems += "❌ AK Scrobbler nu are acces la notificări: deschide AK Scrobbler și dă-i accesul."
+            if (accessibility != "1") problems += "❌ Accesibilitatea AK Scrobbler e oprită: deschide AK Scrobbler și pornește-o."
+            else if (connected != "1") problems += "❌ Accesibilitatea AK Scrobbler nu e conectată: repornește TV-ul."
+            if (engines != "?" && spoken != "1") {
+                problems += "⚠ Vocea Google (sinteza vocală) e activă, deci Apple TV nu-și arată titlul. TV-ul nu vorbește. " +
+                    "Dezactiveaz-o o singură dată prin ADB: pm disable-user --user 0 com.google.android.tts"
+            }
+            return problems.ifEmpty { listOf("✅ Totul e pregătit: titlurile se citesc din orice aplicație, fără voce și fără chenar.") }
+        }
+        return null
     }
 
     fun retryIdentification() {

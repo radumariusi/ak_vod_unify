@@ -88,6 +88,20 @@ class ScrobbleDiagProvider : ContentProvider() {
                 }
                 MatrixCursor(arrayOf("ok")).apply { addRow(arrayOf(if (pkg != null && ScreenState.serviceConnected) "1" else "0")) }
             }
+            "readiness" -> {
+                // Ce vede Unify în Setări → AK Scrobbler: dacă totul e pregătit, fără jurnale.
+                val engines = ScreenState.ttsEngines
+                MatrixCursor(arrayOf("listener", "accessibility", "connected", "tts_engines", "spoken_allowed", "reader_mode")).apply {
+                    addRow(arrayOf(
+                        if (Access.isListenerEnabled(ctx)) "1" else "0",
+                        if (Access.isScreenReaderEnabled(ctx)) "1" else "0",
+                        if (ScreenState.serviceConnected) "1" else "0",
+                        engines?.joinToString(",") ?: "?",
+                        if (ScreenState.spokenModeAllowed) "1" else "0",
+                        ScreenState.readerModeLabel,
+                    ))
+                }
+            }
             else -> buildReportCursor(ctx)
         }
     }
@@ -106,6 +120,7 @@ class ScrobbleDiagProvider : ContentProvider() {
             appendLine("Overlay (bulină): ${Access.canDrawOverlays(ctx)}")
             appendLine("Battery whitelist: ${Access.isIgnoringBatteryOptimizations(ctx)}")
             appendLine("Foreground pkg: ${ScreenState.foregroundPackage ?: "-"}")
+            appendLine("Mod cititor: ${ScreenState.readerModeLabel} · vorbitor permis=${ScreenState.spokenModeAllowed} · motoare voce=${ScreenState.ttsEngines?.joinToString()?.ifBlank { "niciunul" } ?: "?"}")
             appendLine("SkipScreen pkgs: ${ScreenState.skipScreenForPackages.joinToString().ifBlank { "-" }}")
             appendLine("Pending queue: ${Forwarder.get(ctx).pendingCount()}")
             appendLine()

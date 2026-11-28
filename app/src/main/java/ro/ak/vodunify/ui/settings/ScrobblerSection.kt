@@ -45,6 +45,7 @@ fun ScrobblerSection(viewModel: ScrobblerSettingsViewModel = hiltViewModel()) {
     val unresolved by viewModel.unresolved.collectAsStateWithLifecycle()
     val netflix by viewModel.netflix.collectAsStateWithLifecycle()
     val retryStatus by viewModel.retryStatus.collectAsStateWithLifecycle()
+    val readiness by viewModel.readiness.collectAsStateWithLifecycle()
     val context = LocalContext.current
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
 
@@ -67,6 +68,16 @@ fun ScrobblerSection(viewModel: ScrobblerSettingsViewModel = hiltViewModel()) {
                 if (installed) "✅ AK Scrobbler e instalat" else "❌ AK Scrobbler nu e instalat: ia ak-scrobbler-….apk din același release",
                 color = if (installed) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
             )
+            if (installed) {
+                readiness?.forEach { line ->
+                    Text(
+                        line,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (line.startsWith("✅")) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
+                        modifier = Modifier.readable(),
+                    )
+                }
+            }
             OnOffDropdown("Primește vizionările", enabled, viewModel::setEnabled, on = "Da", off = "Oprit")
             val actions = LocalCatalogActions.current
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

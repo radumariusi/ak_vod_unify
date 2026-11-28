@@ -32,6 +32,11 @@ object ScreenState {
     @Volatile var readerArmedFor: String? = null
     @Volatile var readerArmedUntil: Long = 0L
 
+    /** Motoarele de voce active găsite (null = necunoscut) și dacă modul vorbitor fără chenar e permis. */
+    @Volatile var ttsEngines: List<String>? = null
+    @Volatile var spokenModeAllowed: Boolean = false
+    @Volatile var readerModeLabel: String = "-"
+
     /** Serviciul de accesibilitate aplică imediat armarea (pe firul principal). */
     @Volatile var onReaderArm: (() -> Unit)? = null
 

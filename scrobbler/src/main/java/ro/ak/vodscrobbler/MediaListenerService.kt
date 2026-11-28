@@ -375,7 +375,6 @@ class MediaListenerService : NotificationListenerService() {
      */
     private fun onPlaybackStarted(t: Tracked, now: Long) {
         if (!needsScreenShow(t) || t.screenGuess != null) return
-        scheduleWatchNext(t, System.currentTimeMillis(), 0)
         val pkg = t.tracker.packageName
         val latest = ScreenState.latest(pkg)?.takeIf { it.guess != null && now - it.at < 15_000 && (!it.times.isEmpty || it.guess.subtitle != null) }
         val details = ScreenState.lastDetails(pkg)?.takeIf { now - it.at < DETAILS_MAX_AGE_MS }
@@ -392,38 +391,6 @@ class MediaListenerService : NotificationListenerService() {
         t.screenGuess = pick.guess
         DiagLog.add("${t.tag}: titlu luat de pe ${if (pick === latest) "ecranul playerului" else "pagina titlului"}: ${pick.guess?.title} · ${pick.guess?.subtitle ?: "-"}")
         dispatch(t.tracker.onMetadata(merged(t), now, correction = hasTextTitle(t)))
-    }
-
-    /**
-     * Sesiune fără titlu: verificăm la un minut rândul „Continuă vizionarea” din Google TV (cât timp
-     * lipsește titlul, cel mult 3 ore). Folosim doar un rând actualizat după ce a pornit redarea.
-     */
-    private fun scheduleWatchNext(t: Tracked, startWall: Long, attempt: Int) {
-        if (attempt > WATCH_NEXT_MAX_TRIES) return
-        handler.postDelayed({
-            if (!tracked.values.contains(t) || t.screenGuess != null || hasTextTitle(t)) return@postDelayed
-            when (val r = WatchNextSource.query(this, t.tracker.packageName)) {
-                is WatchNextSource.Result.Error -> {
-                    if (attempt == 0) DiagLog.add("${t.tag}: „Continuă vizionarea” Google TV indisponibil (${r.message})")
-                    if (r.message.startsWith("SecurityException")) return@postDelayed
-                }
-                is WatchNextSource.Result.Rows -> {
-                    if (attempt == 0) {
-                        DiagLog.add("${t.tag}: „Continuă vizionarea” Google TV: ${r.rows.size} rânduri" +
-                            r.rows.take(3).joinToString("") { "\n  ${it.guess().title} · ${it.guess().subtitle ?: "-"} · ultima vizionare ${java.util.Date(it.lastEngagementMs)}" })
-                    }
-                    val row = r.rows.firstOrNull { it.lastEngagementMs >= startWall - 60_000L }
-                    if (row != null) {
-                        t.screenGuess = row.guess()
-                        DiagLog.add("${t.tag}: titlu din „Continuă vizionarea” Google TV: ${row.guess().title} · ${row.guess().subtitle ?: "-"}")
-                        dispatch(t.tracker.onMetadata(merged(t), SystemClock.elapsedRealtime(), correction = hasTextTitle(t)))
-                        publishLive()
-                        return@postDelayed
-                    }
-                }
-            }
-            scheduleWatchNext(t, startWall, attempt + 1)
-        }, if (attempt == 0) 5_000L else 60_000L)
     }
 
     /** Ce s-a citit de pe ecran: titlul și minutul, pentru sesiunile aplicației respective. */
@@ -673,7 +640,6 @@ class MediaListenerService : NotificationListenerService() {
         private const val DETAILS_MAX_AGE_MS = 3 * 60_000L
         /** Plăcuța din Google TV: redarea pornește de obicei în câteva secunde de la apăsare. */
         private const val LAUNCHER_CARD_MAX_AGE_MS = 3 * 60_000L
-        private const val WATCH_NEXT_MAX_TRIES = 180
         private const val LOGCAT_DELAY_MS = 8_000L
 
         /** Câmpurile care conțin cu adevărat un titlu (nu doar coduri). */

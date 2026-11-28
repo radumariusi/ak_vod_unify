@@ -140,9 +140,11 @@ class ScreenReaderService : AccessibilityService() {
             }
         }
         val labels = launchableLabels()
-        val isAppIcon = items.isNotEmpty() && items.all { ScreenText.normalize(it.text) in labels }
-        val cardItems = items.filterNot { ScreenText.normalize(it.text) in labels || ScreenText.normalize(it.text) in CARD_NOISE }
-        val guess = ScreenText.guess(cardItems)
+        val isAppIcon = items.isNotEmpty() && items.all { isAppName(ScreenText.normalize(it.text), labels) }
+        val cardItems = items.filterNot { val n = ScreenText.normalize(it.text); isAppName(n, labels) || n in CARD_NOISE }
+        // O plăcuță de film/serial are cel puțin titlul + o descriere / un gen; „Open Settings”, „Home” nu.
+        val distinct = cardItems.map { ScreenText.normalize(it.text) }.distinct()
+        val guess = if (distinct.size >= 2) ScreenText.guess(cardItems) else null
         val now = SystemClock.elapsedRealtime()
         val clicked = type == AccessibilityEvent.TYPE_VIEW_CLICKED
         if (clicked) {
@@ -178,6 +180,10 @@ class ScreenReaderService : AccessibilityService() {
         }
     }
 
+    /** „Tubi TV” e tot aplicația „Tubi”: numele aplicației, cu sau fără „TV”/„+” la final. */
+    private fun isAppName(n: String, labels: Set<String>): Boolean =
+        n in labels || n.removeSuffix(" tv").removeSuffix("+").trim() in labels || "$n tv" in labels
+
     /** Numele aplicațiilor instalate (pictogramele din lansator nu sunt titluri). */
     private fun launchableLabels(): Set<String> = appLabels ?: runCatching {
         val pm = packageManager
@@ -190,7 +196,7 @@ class ScreenReaderService : AccessibilityService() {
     private fun onFrontChanged(front: String) {
         if (front == lastFront) return
         lastFront = front
-        if (front == packageName || IGNORED.any { front.startsWith(it) }) return
+        if (front == packageName || front == "android" || IGNORED.any { front.startsWith(it) }) return
         val now = SystemClock.elapsedRealtime()
         val pick = launcherClick?.takeIf { now - it.second < CARD_TO_APP_MS }
             ?: launcherFocus?.takeIf { now - it.second < CARD_TO_APP_MS }
@@ -218,6 +224,8 @@ class ScreenReaderService : AccessibilityService() {
             DiagLog.add("Motoare de voce active: ${engines?.joinToString().takeUnless { it.isNullOrEmpty() } ?: if (engines == null) "eroare" else "niciunul"} · mod vorbitor fără chenar ${if (ok) "permis" else "NU (TV-ul ar vorbi)"}")
         }
         spokenOk = ok
+        ScreenState.ttsEngines = engines
+        ScreenState.spokenModeAllowed = ok
         return ok
     }
 
@@ -252,7 +260,8 @@ class ScreenReaderService : AccessibilityService() {
         // Doar Apple TV/Nuvio/DebridStream (+ Apple TV pornit din Unify).
         // În rest: modul „vorbitor” fără explorare la atingere (fără chenar alb, TV-ul fără motor de voce
         // nu vorbește). Apple TV îl vede deja când pornește, oricum ar fi pornit (și din Google TV).
-        val full = READER_PREFIXES.any { front.startsWith(it) } || armed
+        // Armarea din Unify contează doar când modul vorbitor nu e permis (altfel Apple TV îl vede deja).
+        val full = READER_PREFIXES.any { front.startsWith(it) } || (armed && base == MODE_OFF)
         setReaderMode(if (full) MODE_FULL else base, if (armed) "$front (urmează Apple TV)" else front)
     }
 
@@ -275,6 +284,7 @@ class ScreenReaderService : AccessibilityService() {
                 }
             }
             readerMode = mode
+            ScreenState.readerModeLabel = when (mode) { MODE_FULL -> "complet"; MODE_SPOKEN -> "vorbitor, fără chenar"; else -> "oprit" }
             DiagLog.add("Mod cititor de ecran: ${when (mode) { MODE_FULL -> "pornit (complet)"; MODE_SPOKEN -> "vorbitor, fără chenar"; else -> "oprit" }} · $why")
             if (mode != MODE_OFF) muteAccessibilityVoice()
         }
@@ -423,6 +433,8 @@ class ScreenReaderService : AccessibilityService() {
         val CARD_NOISE = setOf(
             "apple tv", "apple tv+", "continue watching", "continua vizionarea", "for you", "pentru tine",
             "watch next", "up next", "new episode", "episod nou", "top picks for you", "recomandate",
+            "sponsored", "sponsorizat", "buy or rent now", "sign up", "free with ads", "open settings", "all settings",
+            "add apps", "inputs", "home",
         ).map { ScreenText.normalize(it) }.toSet()
 
         const val SETTLE_MS = 800L
