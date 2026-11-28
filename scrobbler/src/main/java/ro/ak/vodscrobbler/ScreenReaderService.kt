@@ -344,6 +344,9 @@ class ScreenReaderService : AccessibilityService() {
             isAd = ScreenText.isAdScreen(items),
         )
         ScreenState.publish(snap)
+        if (guess == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && OCR_PREFIXES.any { pkg.startsWith(it) }) {
+            runCatching { maybeOcr(pkg) }.onFailure { ocrBusy = false; DiagLog.add("OCR: eroare ${it.javaClass.simpleName}: ${it.message}") }
+        }
 
         // Jurnal: doar când se schimbă ce înțelegem de pe ecran (nu la fiecare secundă).
         val summary = "titlu=${guess?.title ?: "-"} · episod=${guess?.subtitle ?: "-"} · buton redare=${if (snap.hasPlayButton) "da" else "nu"}" +
@@ -355,6 +358,97 @@ class ScreenReaderService : AccessibilityService() {
             val tree = "noduri=$nodeCount ferestre=${roots.size} tipuri=" + classes.entries.sortedByDescending { it.value }.take(6).joinToString { "${it.key}×${it.value}" }
             DiagLog.add("Ecran $app: $summary · $t\n  $tree\n  texte (${items.size}): $sample")
         }
+    }
+
+    private var ocrBusy = false
+    private var lastOcrAt = 0L
+    private var lastOcrLogged: String? = null
+    private val recognizer by lazy {
+        com.google.mlkit.vision.text.TextRecognition.getClient(com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS)
+    }
+
+    /**
+     * Apple TV fără texte prin accesibilitate: o captură de ecran + recunoaștere de text locală
+     * (ML Kit, fără internet). Cel mult o dată la [OCR_GAP_MS] și doar cât redarea n-are titlu.
+     * Dacă fereastra e securizată (DRM), captura iese neagră: scriem asta în jurnal.
+     */
+    @android.annotation.TargetApi(Build.VERSION_CODES.R)
+    private fun maybeOcr(pkg: String) {
+        val now = SystemClock.elapsedRealtime()
+        if (ocrBusy || now - lastOcrAt < OCR_GAP_MS) return
+        val live = ScrobblerState.live.firstOrNull { it.packageName == pkg }
+        if (live?.media?.fields?.get("title") != null) return
+        ocrBusy = true
+        lastOcrAt = now
+        takeScreenshot(android.view.Display.DEFAULT_DISPLAY, mainExecutor, object : AccessibilityService.TakeScreenshotCallback {
+            override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
+                val bmp = runCatching {
+                    val hw = result.hardwareBuffer
+                    try {
+                        android.graphics.Bitmap.wrapHardwareBuffer(hw, result.colorSpace)?.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                    } finally {
+                        hw.close()
+                    }
+                }.getOrNull()
+                if (bmp == null) {
+                    ocrBusy = false
+                    logOcr("OCR ${appLabel(pkg)}: captura n-a putut fi citită")
+                    return
+                }
+                if (isBlack(bmp)) {
+                    bmp.recycle()
+                    ocrBusy = false
+                    logOcr("OCR ${appLabel(pkg)}: captură neagră (fereastră securizată), nu se poate citi")
+                    return
+                }
+                recognizer.process(com.google.mlkit.vision.common.InputImage.fromBitmap(bmp, 0))
+                    .addOnSuccessListener { text -> onOcrText(pkg, text) }
+                    .addOnFailureListener { logOcr("OCR ${appLabel(pkg)}: eroare ${it.javaClass.simpleName}") }
+                    .addOnCompleteListener {
+                        ocrBusy = false
+                        bmp.recycle()
+                    }
+            }
+
+            override fun onFailure(errorCode: Int) {
+                ocrBusy = false
+                logOcr("OCR ${appLabel(pkg)}: captura a eșuat (cod $errorCode)")
+            }
+        })
+    }
+
+    private fun onOcrText(pkg: String, text: com.google.mlkit.vision.text.Text) {
+        // Rândurile de sus în jos, ca pe ecran.
+        val lines = text.textBlocks.flatMap { it.lines }
+            .sortedWith(compareBy({ it.boundingBox?.top ?: 0 }, { it.boundingBox?.left ?: 0 }))
+            .map { ScreenItem(it.text.trim()) }
+            .filter { it.text.isNotEmpty() }
+        val app = appLabel(pkg)
+        val guess = ScreenText.guess(lines, app)
+        val times = ScreenText.times(lines, emptyList())
+        logOcr("OCR $app: titlu=${guess?.title ?: "-"} · episod=${guess?.subtitle ?: "-"} · ${lines.size} rânduri: " +
+            lines.take(12).joinToString(" | ") { it.text.take(50) })
+        if (guess == null && times.isEmpty) return
+        ScreenState.publish(
+            ScreenSnapshot(pkg, SystemClock.elapsedRealtime(), guess, times, ScreenText.hasPlayButton(lines), lines.size, isAd = ScreenText.isAdScreen(lines)),
+        )
+    }
+
+    private fun logOcr(line: String) {
+        if (line == lastOcrLogged) return
+        lastOcrLogged = line
+        DiagLog.add(line)
+    }
+
+    /** Aproape toți pixelii negri (eșantion 24×24): fereastră protejată. */
+    private fun isBlack(bmp: android.graphics.Bitmap): Boolean {
+        val n = 24
+        for (i in 0 until n) for (j in 0 until n) {
+            val c = bmp.getPixel((bmp.width - 1) * i / (n - 1), (bmp.height - 1) * j / (n - 1))
+            val lum = (android.graphics.Color.red(c) * 3 + android.graphics.Color.green(c) * 6 + android.graphics.Color.blue(c)) / 10
+            if (lum > 24) return false
+        }
+        return true
     }
 
     private fun collect(node: AccessibilityNodeInfo, items: MutableList<ScreenItem>, ranges: MutableList<ScreenRange>, depth: Int) {
@@ -424,6 +518,10 @@ class ScreenReaderService : AccessibilityService() {
             "apple tv", "apple tv+", "continue watching", "continua vizionarea", "for you", "pentru tine",
             "watch next", "up next", "new episode", "episod nou", "top picks for you", "recomandate",
         ).map { ScreenText.normalize(it) }.toSet()
+
+        /** Aplicațiile pentru care facem OCR când nu dau niciun text. */
+        val OCR_PREFIXES = listOf("com.apple.atve.")
+        const val OCR_GAP_MS = 15_000L
 
         const val SETTLE_MS = 800L
         const val POLL_MS = 5_000L

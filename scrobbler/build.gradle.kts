@@ -82,5 +82,7 @@ dependencies {
     implementation(project(":importer"))
     implementation(libs.androidx.work.runtime)
     implementation(libs.kotlinx.coroutines.android)
+    // OCR local (fără internet) pentru Apple TV, când nu-și expune textele prin accesibilitate.
+    implementation("com.google.mlkit:text-recognition:16.0.1")
     testImplementation(libs.junit)
 }
