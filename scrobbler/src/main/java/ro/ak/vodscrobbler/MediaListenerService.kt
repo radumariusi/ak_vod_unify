@@ -378,7 +378,16 @@ class MediaListenerService : NotificationListenerService() {
         val pkg = t.tracker.packageName
         val latest = ScreenState.latest(pkg)?.takeIf { it.guess != null && now - it.at < 15_000 && (!it.times.isEmpty || it.guess.subtitle != null) }
         val details = ScreenState.lastDetails(pkg)?.takeIf { now - it.at < DETAILS_MAX_AGE_MS }
-        val pick = latest ?: details ?: return
+        val pick = latest ?: details
+        if (pick == null) {
+            // Pornit din plăcuța Google TV (ex. Apple TV din „Continuă vizionarea”): titlul plăcuței.
+            val card = ScreenState.launcherCard(pkg, LAUNCHER_CARD_MAX_AGE_MS) ?: return
+            t.screenGuess = card.guess
+            ScreenState.setLauncherCard(null) // o singură dată: episodul următor nu mai e cel de pe plăcuță
+            DiagLog.add("${t.tag}: titlu luat de pe plăcuța din Google TV: ${card.guess.title} · ${card.guess.subtitle ?: "-"}")
+            dispatch(t.tracker.onMetadata(merged(t), now, correction = hasTextTitle(t)))
+            return
+        }
         t.screenGuess = pick.guess
         DiagLog.add("${t.tag}: titlu luat de pe ${if (pick === latest) "ecranul playerului" else "pagina titlului"}: ${pick.guess?.title} · ${pick.guess?.subtitle ?: "-"}")
         dispatch(t.tracker.onMetadata(merged(t), now, correction = hasTextTitle(t)))
@@ -629,6 +638,8 @@ class MediaListenerService : NotificationListenerService() {
 
         /** Pagina titlului (cu „Redă”) contează doar dacă redarea a pornit la scurt timp după. */
         private const val DETAILS_MAX_AGE_MS = 3 * 60_000L
+        /** Plăcuța din Google TV: redarea pornește de obicei în câteva secunde de la apăsare. */
+        private const val LAUNCHER_CARD_MAX_AGE_MS = 3 * 60_000L
         private const val LOGCAT_DELAY_MS = 8_000L
 
         /** Câmpurile care conțin cu adevărat un titlu (nu doar coduri). */

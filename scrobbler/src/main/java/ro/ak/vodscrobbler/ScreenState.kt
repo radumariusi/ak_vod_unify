@@ -80,6 +80,19 @@ object ScreenState {
 
     fun latest(pkg: String): ScreenSnapshot? = latest[pkg]
 
+    /**
+     * Titlul de pe plăcuța din Google TV pe care s-a apăsat chiar înainte să se deschidă aplicația
+     * (Apple TV pornit din „Continuă vizionarea” / recomandări nu-și arată titlul altfel).
+     */
+    data class LauncherCard(val packageName: String, val guess: ScreenGuess, val at: Long)
+
+    @Volatile private var launcherCard: LauncherCard? = null
+
+    fun setLauncherCard(card: LauncherCard?) { launcherCard = card }
+
+    fun launcherCard(pkg: String, maxAgeMs: Long): LauncherCard? =
+        launcherCard?.takeIf { it.packageName == pkg && android.os.SystemClock.elapsedRealtime() - it.at < maxAgeMs }
+
     fun lastDetails(pkg: String): ScreenSnapshot? = lastDetails[pkg]
 
     /** Aplicațiile care au redat vreodată ceva: pe acestea le citim și înainte de redare. */
