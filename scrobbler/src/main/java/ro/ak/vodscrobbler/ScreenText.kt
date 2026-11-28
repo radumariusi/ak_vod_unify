@@ -173,7 +173,8 @@ object ScreenText {
             n.startsWith("resume ") || n.startsWith("continua ")
 
     private val MERIDIEM = Regex("""(?i)^(am|pm|a\.m\.|p\.m\.)$""")
-    private val WITH_MERIDIEM = Regex("""(?i)^(\d{1,2}):(\d{2})\s*(am|pm|a\.m\.|p\.m\.)$""")
+    // Xumo, ghidul TV: „3:51p” / „4:00p” = ora din zi, nu minutul filmului.
+    private val WITH_MERIDIEM = Regex("""(?i)^(\d{1,2}):(\d{2})\s*(am|pm|a\.m\.|p\.m\.|a|p)$""")
     private val ENDS_AT = Regex(
         """(?i)(ends at|ends|finishes at|se termin[aă] la|termin[aă] la|sf[aâ]r[sș]it la|final la)\s*(\d{1,2}):(\d{2})\s*(am|pm|a\.m\.|p\.m\.)?""",
     )
@@ -183,7 +184,7 @@ object ScreenText {
 
     private fun dayMinute(h: Int, m: Int, meridiem: String?): Int? {
         if (m > 59) return null
-        val mer = meridiem?.lowercase()?.replace(".", "")
+        val mer = meridiem?.lowercase()?.replace(".", "")?.let { if (it == "a" || it == "p") it + "m" else it }
         return when (mer) {
             "am" -> if (h in 1..12) (h % 12) * 60 + m else null
             "pm" -> if (h in 1..12) (h % 12 + 12) * 60 + m else null
