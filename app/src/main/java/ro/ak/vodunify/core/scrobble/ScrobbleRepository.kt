@@ -197,16 +197,18 @@ class ScrobbleRepository @Inject constructor(
         val guesses = TitleParser.guesses(event.fields, event.app)
         // Peacock trimite la episoade doar numele episodului („Growing Pains”), fără serial: căutăm
         // serialul după numele episodului (doar seriale de pe Peacock US), nu un film cu același nume.
+        // Fără limită de durată: unele episoade au peste 70 min (Yellowstone S1E1 „Daybreak”, 92 min,
+        // luat ca filmul „Daybreak (2000)” la 28.11). Întâi episodul; doar dacă nu e găsit, film.
         val peacockEpisodeName = event.pkg.startsWith("com.peacocktv.") &&
-            reportedDuration != null && reportedDuration < PEACOCK_EPISODE_MAX_MS &&
             guesses.isNotEmpty() && guesses.all { it is TitleGuess.Movie }
         var match = when {
             !matcher.isConfigured || guesses.isEmpty() -> null
-            peacockEpisodeName -> matcher.episodeOnly(
-                (guesses.first() as TitleGuess.Movie).title, reportedDuration, PEACOCK_PROVIDERS, "US",
-                airDate = MatchRules.metadataDate(event.fields["date"]),
-            )
-                .also { ro.ak.vodunify.core.diagnostics.AppDiagLog.add("Peacock episod fără serial „${(guesses.first() as TitleGuess.Movie).title}” → ${it?.media?.title ?: "negăsit"}") }
+            peacockEpisodeName -> {
+                val name = (guesses.first() as TitleGuess.Movie).title
+                matcher.episodeOnly(name, reportedDuration, PEACOCK_PROVIDERS, "US", airDate = MatchRules.metadataDate(event.fields["date"]))
+                    .also { ro.ak.vodunify.core.diagnostics.AppDiagLog.add("Peacock episod fără serial „$name” → ${it?.media?.title ?: "negăsit"}") }
+                    ?: matcher.match(guesses, reportedDuration)
+            }
             else -> matcher.match(guesses, reportedDuration)
         }
         if (match == null && event.playId.isNotEmpty()) match = byPlay[event.playId]
@@ -560,6 +562,4 @@ data class AppProof(
     }
 }
 
-/** Episoadele Peacock au sub 70 de minute; filmele (mai lungi) se caută normal, ca filme. */
-private const val PEACOCK_EPISODE_MAX_MS = 70 * 60_000L
 private val PEACOCK_PROVIDERS = setOf(386, 387)
