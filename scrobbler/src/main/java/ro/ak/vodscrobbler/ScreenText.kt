@@ -55,6 +55,7 @@ object ScreenText {
         "more episodes", "alte episoade", "speed", "viteza", "playback speed", "viteza de redare",
         "report a problem", "raporteaza o problema", "settings", "setari", "watch credits", "vezi genericul",
         "rewind", "fast forward", "forward", "seek", "menu", "meniu", "search", "cauta", "home", "acasa",
+        "currently watching", "now playing", "resume playback", "up next", "start watching", "subtitles on", "subtitles off", "player settings",
         "live", "more", "mai mult", "info", "details", "detalii", "restart", "start over", "de la inceput",
         "like", "dislike", "my list", "lista mea", "add to list", "adauga in lista", "share", "trailer",
         "previous", "next", "anterior", "urmator", "volume", "mute", "cc", "hd", "4k", "uhd", "dolby vision",
@@ -105,6 +106,8 @@ object ScreenText {
         val byIdTitle = clean.firstOrNull { titleLike(it) && idEndsWith(it, "title") }
             ?: clean.firstOrNull { titleLike(it) && !idHas(it, "selected") }
             ?: clean.firstOrNull(titleLike)
+            // CuriosityStream: „CURRENTLY WATCHING” #styled-text, apoi titlul #styled-heading.
+            ?: clean.firstOrNull { idEndsWith(it, "heading") && !EPISODE.containsMatchIn(it.text) }
         val byIdEpisode = clean.firstOrNull { (idHas(it, "subtitle") || idHas(it, "episode")) && it != byIdTitle }
         if (byIdTitle != null) return ScreenGuess(byIdTitle.text, byIdEpisode?.text ?: clean.firstOrNull { EPISODE.containsMatchIn(it.text) && it != byIdTitle }?.text)
 
@@ -234,6 +237,9 @@ object ScreenText {
         }
         val clock = found.firstOrNull { it.isClock }?.dayMinute
         var plain = found.filter { !it.isClock && !it.negative }
+        // Același timp scris de două ori (CuriosityStream: „0:08:26” și „0:08:26” #styled-text, apoi
+        // durata „1:56:39”): o singură dată, altfel durata nu mai e luată.
+        if (plain.size >= 3) plain = plain.distinctBy { it.ms }
         found.firstOrNull { !it.isClock && it.negative }?.let { remaining = it.ms }
 
         // Cât a rămas după „Ends at” (rezoluție de un minut).
