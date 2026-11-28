@@ -170,4 +170,25 @@ class ScreenTextTest {
     fun appleTvYearCommaTitleBecomesTitleWithYear() {
         assertEquals("Way of the Warrior Kid (2026)", ScreenText.guess(items("2026, Way of the Warrior Kid", "Playback Controls"), "Apple TV")?.title)
     }
+
+    @Test
+    fun appleTvDetailsPageUsesRatedLineNotStaleShelfText() {
+        val page = items(
+            "Silo",
+            ", In 1984, Maximo Gallardo’s dream comes true when he gets t",
+            "Oct 8, 2021",
+            "36 minutes and 7 seconds",
+            "Acapulco, Comedy, Romance, Rated TV-14, Play First Episode",
+            "Add to Watchlist",
+            "More Info",
+            "EPISODE 1, Pilot, When he’s hired at Acapulco’s hottest reso",
+        )
+        assertEquals("Acapulco", ScreenText.guess(page, "Apple TV")?.title)
+        assertTrue(ScreenText.hasPlayButton(page))
+    }
+
+    @Test
+    fun continueShelfIsNotAPlayButton() {
+        assertFalse(ScreenText.hasPlayButton(items("Presumed Innocent, Continue, Playback Progress: 3%, 46 minutes remaining")))
+    }
 }

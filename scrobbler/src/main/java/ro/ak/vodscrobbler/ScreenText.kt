@@ -108,6 +108,12 @@ object ScreenText {
         val byIdEpisode = clean.firstOrNull { (idHas(it, "subtitle") || idHas(it, "episode")) && it != byIdTitle }
         if (byIdTitle != null) return ScreenGuess(byIdTitle.text, byIdEpisode?.text ?: clean.firstOrNull { EPISODE.containsMatchIn(it.text) && it != byIdTitle }?.text)
 
+        // Apple TV, pagina de detalii: „Acapulco, Comedy, Romance, Rated TV-14, Play First Episode”.
+        // E rândul titlului real; primul text de pe pagină poate fi rămas de pe raftul răsfoit („Silo”).
+        clean.firstNotNullOfOrNull { RATED_LINE.matchEntire(it.text)?.groupValues?.get(1)?.trim() }
+            ?.takeIf { it.count(Char::isLetter) >= 2 }
+            ?.let { return ScreenGuess(it, null) }
+
         // 2) Linie de episod („S1:E3 …”): serialul e textul de dinainte (sau de după).
         val epIndex = clean.indexOfFirst { EPISODE.containsMatchIn(it.text) }
         if (epIndex >= 0) {
@@ -141,6 +147,8 @@ object ScreenText {
 
     private val IMAGE_LABEL = Regex("""(?i)^(?:picture|image|img|icon|logo)\s+of\b|\bheader logo\b|\bnavigation img\b""")
 
+    private val RATED_LINE = Regex("""^(.{1,100}?),(?:\s[^,]{1,30},)*?\sRated\s[^,]{1,15}(?:,.*)?$""")
+
     private val YEAR_FIRST = Regex("""^((?:19|20)\d{2}),\s+(\S.{1,100})$""")
 
     private val SEASON_ONLY = Regex("""(?i)^(S|T|season|sezonul|sezon)\s*\d{1,2}$""")
@@ -153,10 +161,13 @@ object ScreenText {
 
     /** Ecranul are un buton de pornire (pagina de detalii a unui titlu, nu un meniu oarecare). */
     fun hasPlayButton(items: List<ScreenItem>): Boolean = items.any { item ->
-        val n = normalize(item.text)
+        // Apple TV pune butonul în același text cu titlul: „Acapulco, …, Rated TV-14, Play First Episode”.
+        item.text.split(", ").any { isPlayWord(normalize(it)) }
+    }
+
+    private fun isPlayWord(n: String): Boolean =
         n in PLAY_WORDS || n.startsWith("play ") || n.startsWith("reda ") || n.startsWith("redare ") ||
             n.startsWith("resume ") || n.startsWith("continua ")
-    }
 
     private val MERIDIEM = Regex("""(?i)^(am|pm|a\.m\.|p\.m\.)$""")
     private val WITH_MERIDIEM = Regex("""(?i)^(\d{1,2}):(\d{2})\s*(am|pm|a\.m\.|p\.m\.)$""")

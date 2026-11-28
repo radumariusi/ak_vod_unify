@@ -64,6 +64,7 @@ data class ChooserState(
 @HiltViewModel
 class WatchChooserViewModel @Inject constructor(
     private val resolver: TargetResolver,
+    private val launchHints: ro.ak.vodunify.core.scrobble.LaunchHints,
     private val prefs: PlaybackPreferences,
     private val resumeLookup: ResumeLookup,
     private val publisher: PublishRepository,
@@ -290,6 +291,7 @@ class WatchChooserViewModel @Inject constructor(
     private fun start(target: ResolvedLaunch) {
         val s = _state.value ?: return
         if (resolver.launch(target)) {
+            launchHints.record(target.installed.packageName, mediaRef(s.request), s.request.runtimeMinutes, target.precision)
             val pos = s.resume.positionMs?.takeIf { s.resume.hasPosition }
             if (pos != null) say("În ${target.installed.app.displayName}, reia de la ${formatPosition(pos)}")
             _state.value = null
