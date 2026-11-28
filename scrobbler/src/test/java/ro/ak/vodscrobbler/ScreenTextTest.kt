@@ -209,4 +209,19 @@ class ScreenTextTest {
         assertEquals(506_000L, t.positionMs)
         assertEquals(6_999_000L, t.durationMs)
     }
+
+    @Test
+    fun xumoLiveGuideClockIsNotAPlayerMinute() {
+        val guide = listOf(
+            ScreenItem("Live guide", "live_guide_title"),
+            ScreenItem("3:51p", "live_guide_header_time"),
+            ScreenItem("Sat 3:30p"),
+            ScreenItem("4:00p"),
+            ScreenItem("4:30p"),
+            ScreenItem("Recommended", "live_guide_genre_title"),
+        )
+        val t = ScreenText.times(guide)
+        assertNull(t.positionMs)
+        assertNull(t.durationMs)
+    }
 }
